@@ -1,0 +1,5 @@
+export const draftStorageKey=userId=>'studio-os-content-drafts-v1:'+userId;
+export function validateDraft(value){return value&&typeof value==='object'&&typeof value.id==='string'&&typeof value.name==='string'&&['title','body','coverNote','materialId','templateId','taskId','updatedAt'].every(k=>typeof value[k]==='string');}
+export function readDrafts(storage,userId){const raw=storage.getItem(draftStorageKey(userId));if(raw===null)return [];const value=JSON.parse(raw);if(!Array.isArray(value)||!value.every(validateDraft))throw new Error('已有草稿格式异常，未覆盖原内容。');return value;}
+export function saveDraft(storage,userId,draft){if(!validateDraft(draft))throw new Error('草稿数据不完整。');const rows=readDrafts(storage,userId);const index=rows.findIndex(d=>d.id===draft.id);if(index>=0)rows[index]=draft;else rows.unshift(draft);storage.setItem(draftStorageKey(userId),JSON.stringify(rows));return rows;}
+export function draftMarkdown(draft){return `# ${draft.title||draft.name}\n\n${draft.body}\n\n## 封面说明\n\n${draft.coverNote||'未填写'}\n`;}

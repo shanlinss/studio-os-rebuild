@@ -7,14 +7,14 @@ const staticFiles = new Map([
   ['/', ['index.html', 'text/html; charset=utf-8']],
   ['/index.html', ['index.html', 'text/html; charset=utf-8']],
   ['/styles.css', ['styles.css', 'text/css; charset=utf-8']],
-  ...['bootstrap.mjs', 'navigation.mjs', 'cloud-view.mjs', 'cloud-api.mjs', 'daily-layout.mjs'].map(name => ['/'+name, [name, 'text/javascript; charset=utf-8']]),
+  ...['bootstrap.mjs', 'navigation.mjs', 'cloud-view.mjs', 'cloud-api.mjs', 'daily-layout.mjs', 'cloud-contract.mjs', 'business-model.mjs', 'business-view.mjs', 'resource-model.mjs', 'resource-view.mjs', 'management-model.mjs', 'management-view.mjs', 'creation-model.mjs', 'planning-view.mjs', 'write-contract.mjs', 'mutation-gateway.mjs', 'record-editors.mjs'].map(name => ['/'+name, [name, 'text/javascript; charset=utf-8']]),
 ]);
-const fixedRoutes = new Set(['/api/live','/api/health','/api/session','/api/navigation','/api/materials','/api/lab/experiments','/api/tasks','/api/workbench/todos','/api/workbench/profile','/api/workbench/completed']);
+const fixedRoutes = new Set(['/api/live','/api/health','/api/session','/api/navigation','/api/materials','/api/lab/experiments','/api/tasks','/api/workbench/todos','/api/workbench/profile','/api/workbench/completed','/api/products','/api/shooting/requests','/api/templates','/api/titles/catalog','/api/toolbox','/api/knowledge','/api/admin/members','/api/admin/business-accounts','/api/admin/stores','/api/admin/accounts','/api/finance','/api/competitors','/api/samples/catalog','/api/attendance/periods']);
 const uuid = '[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}';
-const detailRoute = new RegExp(`^/api/(materials|lab/experiments|tasks)/${uuid}$`);
+const detailRoute = new RegExp(`^/api/(materials|lab/experiments|tasks|products|shooting/requests|templates|titles)/${uuid}$`);
 const defaultRoot = fileURLToPath(new URL('../dist/', import.meta.url));
 
-export function createPreviewServer({ root = defaultRoot, upstreamPort = 13102 } = {}) {
+export function createPreviewServer({ root = defaultRoot, upstreamPort = 13102, forwardSession = true } = {}) {
   const server = http.createServer(async (req, res) => {
     const finish = (status, data, type='application/json; charset=utf-8') => {
       if (res.destroyed || res.headersSent) return;
@@ -22,7 +22,8 @@ export function createPreviewServer({ root = defaultRoot, upstreamPort = 13102 }
       res.end(typeof data==='string'||Buffer.isBuffer(data)?data:JSON.stringify(data));
     };
     const address=server.address();
-    if (!address || typeof address==='string' || req.headers.host !== `[::1]:${address.port}`) { finish(403,{message:'Local preview host required'});return; }
+    const expectedHost=address&&typeof address!=='string'&&address.address==='::1'?`[::1]:${address.port}`:address&&typeof address!=='string'&&address.address==='127.0.0.1'?`127.0.0.1:${address.port}`:null;
+    if (!expectedHost || req.headers.host !== expectedHost) { finish(403,{message:'Local preview host required'});return; }
     if(req.method!=='GET'){finish(405,{message:'This preview is read-only'});req.resume();return;}
     if(!req.url?.startsWith('/')||req.url.startsWith('//')){finish(400,{message:'Invalid path'});return;}
     let url;
@@ -31,10 +32,10 @@ export function createPreviewServer({ root = defaultRoot, upstreamPort = 13102 }
       const expected='http://'+req.headers.host;
       if ((req.headers.origin && req.headers.origin!==expected) || (req.headers['sec-fetch-site'] && !['same-origin','none'].includes(req.headers['sec-fetch-site']))) {finish(403,{message:'Same-origin request required'});return;}
       if(!fixedRoutes.has(url.pathname)&&!detailRoute.test(url.pathname)){finish(404,{message:'Read route unavailable'});return;}
-      const allowedQuery=url.pathname==='/api/workbench/completed'?['date','source','member']:[];
+      const allowedQuery=url.pathname==='/api/workbench/completed'?['date','source','member']:url.pathname==='/api/titles/catalog'?['q','page']:url.pathname==='/api/samples/catalog'?['q','active','offset']:url.pathname==='/api/attendance/periods'?['view','memberId','from','to','offset']:[];
       if([...url.searchParams.keys()].some(k=>!allowedQuery.includes(k))){finish(400,{message:'Unexpected query'});return;}
       const cookies=(req.headers.cookie||'').split(';').map(s=>s.trim()).filter(s=>s.startsWith('studio_session='));
-      const cookie=cookies.length===1&&/^studio_session=[a-f0-9]{64}$/.test(cookies[0])?cookies[0]:undefined;
+      const cookie=forwardSession&&cookies.length===1&&/^studio_session=[a-f0-9]{64}$/.test(cookies[0])?cookies[0]:undefined;
       const remote=http.request({hostname:'::1',port:upstreamPort,path:url.pathname+url.search,method:'GET',headers:{Accept:'application/json',...(cookie?{Cookie:cookie}:{})}},up=>{
         const chunks=[];let size=0;
         up.on('data',chunk=>{size+=chunk.length;if(size>12*1024*1024){up.destroy();finish(502,{message:'Read response too large'});}else chunks.push(chunk);});

@@ -1,24 +1,30 @@
+import {createRecordEditors} from './record-editors.mjs';
 import {groups,specs} from './navigation.mjs';
 import {dailyLayout} from './daily-layout.mjs';
+import {businessPages,createBusinessViews} from './business-view.mjs';
+import {resourcePages,createResourceViews} from './resource-view.mjs';
+import {managementPages,createManagementViews} from './management-view.mjs';
+import {planningPages,createPlanningViews} from './planning-view.mjs';
 import {createCloudApi,chinaDate,validDate,taskProgress,metricValue,ApiError} from './cloud-api.mjs';
 const $=s=>document.querySelector(s),h=v=>String(v??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
-const api=createCloudApi(),names=Object.fromEntries(groups.flatMap(g=>g[1]));
+const writable=document.querySelector('meta[name="studio-data-mode"]')?.content==='cloud-connected';
+const api=createCloudApi(globalThis.fetch,{allowWrites:writable}),names=Object.fromEntries(groups.flatMap(g=>g[1]));
 let user=null,profile=null,nav=[],page='daily',controller,detailController,selectedDate=chinaDate();
 const sourceOrigin='http://[::1]:13102/';
 const state={materials:[],experiments:[],tasks:[],todos:[]};
 const centerIds=['workspace','business','resources','knowledge','people','finance','settings'];
-const sharedGroupIds=new Set(['daily','history','materials','tests','conclusions']);
+const sharedGroupIds=new Set(['daily','history','materials','tests','conclusions',...businessPages,...resourcePages,...managementPages,...planningPages]);
 const lookupIds=new Set();
 $('.sidebar').classList.add('sitemap-sidebar');
 $('.nav-label').textContent='STUDIO OS';
-$('.prototype').innerHTML='<i></i> 云端数据 · 只读预览';
+$('.prototype').innerHTML=writable?'<i></i> 已连接 · 可保存资料':'<i></i> 云端数据 · 只读预览';
 $('.profile').innerHTML='<span class="avatar">我</span><span id="cloud-identity">核对登录中…</span>';
 $('#main').innerHTML='<p class="muted">正在核对云端登录状态…</p>';
 for(const dialog of document.querySelectorAll('dialog'))dialog.remove();
 document.body.insertAdjacentHTML('beforeend','<dialog id="cloud-detail" class="drawer wide-drawer" aria-label="云端记录详情"><div id="cloud-detail-content"></div></dialog>');
 const status = (title,desc,action='重试') => `<section class="work-panel planning-panel"><h2>${h(title)}</h2><p>${h(desc)}</p><div class="action-row"><button class="primary" id="cloud-retry">${h(action)}</button><a class="secondary" href="${sourceOrigin}#workspace" target="_blank" rel="noopener noreferrer">打开原工作台 ↗</a></div></section>`;
 function errorView(error){for(const key of Object.keys(state))state[key]=[];if(error.status===401){user=null;$('#cloud-identity').textContent='登录待恢复';$('nav[aria-label="主要模块"]').innerHTML='';}$('#main').innerHTML=status(error.status===401?'请恢复云端登录':'资料暂时无法读取',error.message);$('#cloud-retry').onclick=()=>init();}
-function heading(title,desc){return `<div class="eyebrow">STUDIO OS <span>云端只读预览</span></div><div class="heading module-heading"><div><h1>${h(title)}</h1><p>${h(desc)}</p></div><button class="secondary" id="cloud-refresh">刷新数据</button></div>`;}
+function heading(title,desc){return `<div class="eyebrow">STUDIO OS <span>${writable?'已连接工作空间':'云端只读预览'}</span></div><div class="heading module-heading"><div><h1>${h(title)}</h1><p>${h(desc)}</p></div><button class="secondary" id="cloud-refresh">刷新数据</button></div>`;}
 const localTime=value=>{const d=new Date(value);return value&&Number.isFinite(d.getTime())?new Intl.DateTimeFormat('zh-CN',{timeZone:'Asia/Shanghai',dateStyle:'short',timeStyle:'short'}).format(d)+'（北京时间）':'时间未提供';};
 const empty=(text,desc)=>`<div class="empty"><h3>${h(text)}</h3><p>${h(desc)}</p></div>`;
 const text=(value,fallback='未填写')=>h(typeof value==='string'&&value?value:fallback);
@@ -40,7 +46,7 @@ async function init(){
     if(run.signal.aborted)return;
     user=activeUser;nav=activeNav;profile=activeProfile;
     $('#cloud-identity').innerHTML=`${h(user.username)}<small>${user.role==='admin'?'管理员':'员工'} · 云端会话</small>`;
-    navigation();await route();
+    navigation();lookupIds.add('profile');await route();
   }catch(e){if(e.name!=='AbortError'&&!run.signal.aborted)errorView(e);}
 }
 async function route(){
@@ -51,7 +57,11 @@ async function route(){
   $('.topbar strong').textContent=names[page];document.title=names[page]+' · Studio OS 云端';
   $('#main').innerHTML=heading(names[page],'正在读取云端资料…');
   try{
-    if(page==='materials'){state.materials=await api.materials(signal);if(signal.aborted)return;materialsPage();}
+    if(planningPages.has(page)){await planning.render(page,signal,user);}
+    else if(managementPages.has(page)){await management.render(page,signal,user);}
+    else if(resourcePages.has(page)){await resources.render(page,signal,user,profile);}
+    else if(businessPages.has(page)){await business.render(page,signal,user);}
+    else if(page==='materials'){state.materials=await api.materials(signal);if(signal.aborted)return;materialsPage();}
     else if(page==='tests'||page==='conclusions'){state.experiments=await api.experiments(signal);if(signal.aborted)return;page==='tests'?experimentsPage():conclusionsPage();}
     else if(page==='daily'){
       [state.tasks,state.todos]=await Promise.all([api.tasks(profile,user,signal),api.todos(signal)]);if(signal.aborted)return;dailyPage();
@@ -60,6 +70,7 @@ async function route(){
     }else{
       $('#main').innerHTML=heading(names[page],'已保留整体规划，本轮尚未接入这一页。')+`<section class="work-panel planning-panel"><span class="stage-label">规划范围</span><h2>${h(names[page])}</h2><p>${h(specs[page]?.[0]||'后续按确认的业务规则接入已有功能。')}</p><p class="muted">${h(specs[page]?.[1]||'当前预览只开放读取，原工作台保持运行。')}</p></section>`;
     }
+    if(writable&&page==='materials'){$('.module-toolbar').insertAdjacentHTML('beforeend','<button class="primary" data-edit-material="">＋ 收集素材</button>');$('.module-foot').textContent='名称、来源和观察直接保存到原素材档案。';}
     if($('#cloud-refresh'))$('#cloud-refresh').onclick=()=>init();
   }catch(e){if(e.name!=='AbortError')errorView(e);}
 }
@@ -124,6 +135,21 @@ function historyPage(rows){
 }
 function conclusionsPage(){const rows=state.experiments.filter(t=>typeof t.finding==='string'&&t.finding.trim());$('#main').innerHTML=heading('测试结论','直接引用云端实验结论，保留所属轮次与观察条件。')+`<section class="work-panel module-panel">${rows.map(t=>`<article class="conclusion-card"><div><button class="table-title" data-live-test="${h(t.id)}">${h(t.title)}</button><span class="type-tag">${h(t.phase)}</span></div><p class="preserve-text">${h(t.finding)}</p><p class="muted">${text(t.recommendation,'未填写下一步建议')}</p></article>`).join('')||empty('暂无可见的实验结论','这里只展示当前身份可读取的结论。')}</section>`;}
 function detailHeader(title){return `<div class="dialog-header"><h2>${h(title)}</h2><button class="icon-button" id="cloud-close-detail" aria-label="关闭云端详情">×</button></div>`;}
+async function showPanel(title,loader){
+  detailController?.abort();detailController=new AbortController();const signal=detailController.signal;
+  const dialog=$('#cloud-detail'),body=$('#cloud-detail-content');body.innerHTML=detailHeader(title)+'<p class="muted">正在读取资料…</p>';if(!dialog.open)dialog.showModal();
+  $('#cloud-close-detail').onclick=()=>{detailController.abort();dialog.close();};
+  try{const html=await loader(signal);if(!signal.aborted)body.innerHTML=html;}
+  catch(e){if(e.name==='AbortError')return;body.innerHTML=detailHeader('详情读取失败')+`<p class="preserve-text">${h(e.message)}</p>`;$('#cloud-close-detail').onclick=()=>dialog.close();if(e.status===401){dialog.close();errorView(e);}}
+}
+let notificationTimer;
+function notify(message){const el=$('#toast');el.textContent=message;el.classList.add('visible');clearTimeout(notificationTimer);notificationTimer=setTimeout(()=>el.classList.remove('visible'),2600);}
+const planning=createPlanningViews({api,h,heading,notify});
+const management=createManagementViews({api,h,heading,showPanel,source,localTime});
+const resources=createResourceViews({api,h,heading,showPanel,source,localTime,notify});
+const business=createBusinessViews({api,h,heading,showPanel,source,localTime,writable});
+const editors=writable?createRecordEditors({api,h,notify,onSaved:async result=>{await route();if(result?.id&&result.kind!=='product')await openDetail(result.kind,result.id);}}):null;
+document.addEventListener('click',async e=>{if(!editors)return;const button=e.target.closest('[data-edit-material],[data-edit-product],[data-register-publication],[data-register-snapshot]');if(!button)return;try{if(button.hasAttribute('data-edit-material'))await editors.material(button.dataset.editMaterial||undefined);else if(button.hasAttribute('data-edit-product'))await editors.product(button.dataset.editProduct||undefined);else if(button.hasAttribute('data-register-snapshot'))await editors.snapshot(button.dataset.taskId,button.dataset.registerSnapshot);else await editors.publication(button.dataset.registerPublication);}catch(error){notify(error.message);}});
 async function openDetail(kind,id){
   detailController?.abort();detailController=new AbortController();const signal=detailController.signal;
   const dialog=$('#cloud-detail'),body=$('#cloud-detail-content');body.innerHTML=detailHeader('读取详情中…');if(!dialog.open)dialog.showModal();
@@ -132,8 +158,8 @@ async function openDetail(kind,id){
     let html='';
     if(kind==='material'){const m=await api.material(id,signal);html=detailHeader(m.title)+`<div class="detail-meta"><span class="type-tag">${h(m.kind)}</span><span>版本 ${h(m.version)}</span><span>${h(m.assetCount)} 个附件</span></div><div class="tag-list">${m.tags.map(t=>`<span>${h(t)}</span>`).join('')}</div><div class="detail-content"><h3>来源</h3>${source(m.sourceUrl)}<h3>观察与用法</h3><p class="preserve-text">${text(m.note,'暂无说明')}</p><h3>原始分类</h3><p class="muted">内容形式：${text(m.sourceMetadata.mediaType)} · 分类：${text(m.sourceMetadata.category)} · 状态：${text(m.sourceMetadata.status)}</p><h3>附件信息</h3>${(m.assets||[]).map(a=>`<p class="muted">${h(a.name)} · ${h(a.mime)} · ${h(a.size)} 字节</p>`).join('')||'<p class="muted">暂无附件</p>'}</div>`;}
     if(kind==='test'){const t=await api.experiment(id,signal);html=detailHeader(t.title)+`<div class="detail-meta"><span class="type-tag">${h(t.phase)}</span><span>${t.rounds.length} 轮 · 版本 ${h(t.version)}</span></div><div class="detail-content"><h3>测试假设</h3><p class="preserve-text">${text(t.hypothesis)}</p><h3>实验方向</h3><p class="preserve-text">${text(t.direction)}</p><h3>引用素材</h3>${t.materials.map(m=>`<button class="linked-record" data-live-material="${h(m.id)}"><b>${h(m.title)}</b><span>查看 →</span></button>`).join('')||'<p class="muted">没有引用素材</p>'}${t.rounds.map(r=>`<h3>第 ${h(r.roundNo)} 轮 · ${h(r.title)}</h3><p class="preserve-text">${text(r.testVariable,'未填写测试变量')}</p>${r.tasks.map(a=>`<button class="linked-record" data-live-task="${h(a.id)}"><b>${h(a.title)}</b><span>${h(taskProgress(a))} →</span></button>`).join('')||'<p class="muted">尚无执行事项</p>'}`).join('')}<h3>结论与下一步</h3><p class="preserve-text">${text(t.finding,'尚未填写结论')}</p><p class="muted">${text(t.recommendation,'尚未填写建议')}</p></div>`;}
-    if(kind==='task'){const t=await api.task(id,signal);html=detailHeader(t.title)+`<div class="detail-meta"><span>${h(taskProgress(t))}</span><span>${text(t.assignee,'未提供负责人')}</span></div><div class="detail-content"><h3>工作要求</h3><p class="preserve-text">${text(t.requirements||t.instructions,'未填写')}</p><h3>完成情况</h3>${t.completion?`<p class="preserve-text">${text(t.completion.feedback,'未填写反馈')}</p>${source(t.completion.evidenceUrl)}`:'<p class="muted">暂无单独完成记录。</p>'}<h3>发布与观察记录</h3>${(t.publications||[]).map(p=>`<article class="observation">${source(p.url)}<p>${h(localTime(p.publishedAt))}</p>${(p.snapshots||[]).map(s=>`<p class="muted">采集：${h(localTime(s.observedAt))}</p><div class="metric-list">${['views','likes','favorites','comments','productClicks','addToCart','conversions'].filter(k=>Object.hasOwn(s,k)).map(k=>`<span>${h(({views:'阅读',likes:'点赞',favorites:'收藏',comments:'评论',productClicks:'商品点击',addToCart:'加购',conversions:'成交'})[k])} <b>${h(metricValue(s[k]))}</b></span>`).join('')}</div>`).join('')}</article>`).join('')||'<p class="muted">暂无可见发布记录。</p>'}</div>`;}
-    if(signal.aborted)return;body.innerHTML=html;$('#cloud-close-detail').onclick=close;
+    if(kind==='task'){const t=await api.task(id,signal);html=detailHeader(t.title)+`<div class="detail-meta"><span>${h(taskProgress(t))}</span><span>${text(t.assignee,'未提供负责人')}</span></div><div class="detail-content"><h3>工作要求</h3><p class="preserve-text">${text(t.requirements||t.instructions,'未填写')}</p><h3>完成情况</h3>${t.completion?`<p class="preserve-text">${text(t.completion.feedback,'未填写反馈')}</p>${source(t.completion.evidenceUrl)}`:'<p class="muted">暂无单独完成记录。</p>'}<h3>发布与观察记录</h3>${writable&&t.kind==='publication'?`<button class="primary" data-register-publication="${h(t.id)}">＋ 登记发布</button>`:''}${(t.publications||[]).map(p=>`<article class="observation">${source(p.url)}<p>${h(localTime(p.publishedAt))}</p>${writable?`<button class="secondary" data-task-id="${h(t.id)}" data-register-snapshot="${h(p.id)}">回填观察数据</button>`:''}${(p.snapshots||[]).map(s=>`<p class="muted">采集：${h(localTime(s.observedAt))}</p><div class="metric-list">${['views','likes','favorites','comments','productClicks','addToCart','conversions'].filter(k=>Object.hasOwn(s,k)).map(k=>`<span>${h(({views:'阅读',likes:'点赞',favorites:'收藏',comments:'评论',productClicks:'商品点击',addToCart:'加购',conversions:'成交'})[k])} <b>${h(metricValue(s[k]))}</b></span>`).join('')}</div>`).join('')}</article>`).join('')||'<p class="muted">暂无可见发布记录。</p>'}</div>`;}
+    if(signal.aborted)return;body.innerHTML=html;if(writable&&kind==='material')body.querySelector('.detail-meta').insertAdjacentHTML('afterend',`<div class="action-row"><button class="secondary" data-edit-material="${h(id)}">编辑素材</button></div>`);$('#cloud-close-detail').onclick=close;
   }catch(e){if(e.name==='AbortError')return;body.innerHTML=detailHeader('详情读取失败')+`<p class="preserve-text">${h(e.message)}</p>`;$('#cloud-close-detail').onclick=close;if(e instanceof ApiError&&e.status===401){state.materials=[];state.experiments=[];state.tasks=[];state.todos=[];$('#main').innerHTML=status('云端登录已失效','请回到原工作台登录，再刷新预览。');$('#cloud-retry').onclick=init;}}
 }
 document.addEventListener('click',e=>{const m=e.target.closest('[data-live-material]'),t=e.target.closest('[data-live-test]'),task=e.target.closest('[data-live-task]'),todo=e.target.closest('[data-live-todo]');if(m)openDetail('material',m.dataset.liveMaterial);if(t)openDetail('test',t.dataset.liveTest);if(task)openDetail('task',task.dataset.liveTask);if(todo){const item=state.todos.find(t=>t.id===todo.dataset.liveTodo);if(!item)return;const dialog=$('#cloud-detail');$('#cloud-detail-content').innerHTML=detailHeader(item.title)+`<div class="detail-meta"><span>${h(item.status)}</span><span>${h(item.taskType)}</span><span>持续待办</span></div><p class="preserve-text">${text(item.notes,'暂无说明')}</p>`;$('#cloud-close-detail').onclick=()=>dialog.close();dialog.showModal();}});

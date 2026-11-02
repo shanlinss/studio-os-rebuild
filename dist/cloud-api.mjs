@@ -1,10 +1,11 @@
-// Read-only view adapter for the existing Studio OS HTTP API. No database or mutation client.
-export class ApiError extends Error {
-  constructor(status, message) { super(message); this.name='ApiError';this.status=status; }
-}
-export class ContractError extends Error {
-  constructor(message='这条资料暂时无法完整显示，请刷新后重试。'){super(message);this.name='ContractError';}
-}
+import {createMutationGateway} from './mutation-gateway.mjs';
+import {materialPayload,productPayload,publicationPayload,snapshotPayload} from './write-contract.mjs';
+import {financeRecord,pagedRows} from './management-model.mjs';
+import {namedList,templateRecord,titleCatalog,titleBatch,knowledgeList} from './resource-model.mjs';
+import {ApiError,ContractError,chinaDate,validDate} from './cloud-contract.mjs';
+export {ApiError,ContractError,chinaDate,validDate} from './cloud-contract.mjs';
+import {productRecord,shootingRecord,executionRows} from './business-model.mjs';
+// View adapter for existing HTTP APIs. Writes require an explicit connected build and authenticated token.
 const record = v => v!==null&&typeof v==='object'&&!Array.isArray(v);
 const string = v => typeof v==='string';
 const number = v => typeof v==='number'&&Number.isFinite(v);
@@ -12,8 +13,6 @@ function list(value){if(!Array.isArray(value))throw new ContractError();return v
 function identity(v){if(!record(v)||!string(v.id)||!string(v.username)||!['admin','employee'].includes(v.role))throw new ContractError();return {id:v.id,username:v.username,role:v.role};}
 function base(v){if(!record(v)||!string(v.id)||!string(v.title))throw new ContractError();return v;}
 function endpointId(id){if(!/^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/.test(id))throw new ContractError('记录标识格式无效。');return id;}
-export function chinaDate(value=new Date()){return new Intl.DateTimeFormat('en-CA',{timeZone:'Asia/Shanghai',year:'numeric',month:'2-digit',day:'2-digit'}).format(value);}
-export function validDate(value){const d=new Date(value+'T00:00:00Z');return /^\d{4}-\d{2}-\d{2}$/.test(value)&&!value.startsWith('0000')&&Number.isFinite(d.getTime())&&d.toISOString().slice(0,10)===value;}
 export function materialModel(raw){
   base(raw);if(!record(raw.metadata)||!number(raw.version)||(raw.metadata.tags!==undefined&&(!Array.isArray(raw.metadata.tags)||!raw.metadata.tags.every(string))))throw new ContractError();
   const meta=raw.metadata;
@@ -37,7 +36,8 @@ export function ownTasks(rows,profile,role){
 export function taskModel(raw){
   if(!record(raw)||!record(raw.task))throw new ContractError();base(raw.task);
   const publications=list(raw.publications),snapshots=list(raw.snapshots);
-  return {...raw.task,completion:raw.completion??null,publications:publications.map(p=>{if(!record(p)||!string(p.id))throw new ContractError();return {...p,snapshots:snapshots.filter(s=>{if(!record(s)||!string(s.publicationId))throw new ContractError();return s.publicationId===p.id;})};})};
+  if(raw.materials!==undefined&&(!Array.isArray(raw.materials)||raw.materials.some(m=>!record(m)||!string(m.id)||!string(m.title))))throw new ContractError();
+  return {...raw.task,materials:raw.materials?.map(m=>({...m}))??[],completion:raw.completion??null,publications:publications.map(p=>{if(!record(p)||!string(p.id))throw new ContractError();return {...p,snapshots:snapshots.filter(s=>{if(!record(s)||!string(s.publicationId))throw new ContractError();return s.publicationId===p.id;})};})};
 }
 export function metricValue(value){if(value===null||value===undefined)return '未记录';if(!number(value)||value<0)throw new ContractError();return String(value);}
 export function taskProgress(t){
@@ -47,23 +47,52 @@ export function taskProgress(t){
   const n=number(t.publishedCount)?t.publishedCount:null,filled=number(t.filledCount)?t.filledCount:null;
   return n===null?'执行进度未提供':`已发布 ${n}${number(t.targetCount)?' / '+t.targetCount:''} 篇${filled===null?'':' · '+filled+' 篇已回填'}`;
 }
-export function createCloudApi(fetcher=globalThis.fetch){
+export function createCloudApi(fetcher=globalThis.fetch,{allowWrites=false}={}){
+  const mutations=createMutationGateway(fetcher,{enabled:allowWrites});
   async function get(path,signal){
-    let r;try{r=await fetcher(path,{method:'GET',credentials:'same-origin',cache:'no-store',signal,headers:{Accept:'application/json'}});}catch(e){if(e.name==='AbortError')throw e;throw new ApiError(0,'云端连接中断，请检查 SSH 窗口是否仍然开启。');}
+    let r;try{r=await fetcher(path,{method:'GET',credentials:'same-origin',cache:'no-store',redirect:'error',signal,headers:{Accept:'application/json'}});}catch(e){if(e.name==='AbortError')throw e;throw new ApiError(0,'云端连接中断，请检查 SSH 窗口是否仍然开启。');}
+    if(r.status===401)mutations.clear();
     if(!r.ok)throw new ApiError(r.status,r.status===401?'登录已失效，请回原工作台登录后重试。':r.status===403?'当前账号没有读取这项资料的权限。':'云端读取失败，请重试。');
     try{return await r.json();}catch{throw new ContractError();}
   }
+  async function read(path,signal,adapt){const value=adapt(await get(path,signal));mutations.confirmRead(path);return value;}
   return {
-    async session(signal){const d=await get('/api/session',signal);return identity(d.user);},
+    async login(username,password){const d=await mutations.send('/api/login','POST',{username,password},{login:true});return identity(d.user);},
+    async createMaterial(value){return mutations.send('/api/materials','POST',materialPayload(value));},
+    async updateMaterial(id,value,version){return mutations.send('/api/materials/'+endpointId(id),'PATCH',materialPayload(value,version));},
+    async createProduct(value){return mutations.send('/api/products','POST',productPayload(value));},
+    async updateProduct(id,value,version){return mutations.send('/api/products/'+endpointId(id),'PATCH',productPayload(value,version));},
+    async publish(id,value){return mutations.send('/api/tasks/'+endpointId(id)+'/publications','POST',publicationPayload(value));},
+    async recordSnapshot(id,publicationId,value){return mutations.send('/api/tasks/'+endpointId(id)+'/publications/'+endpointId(publicationId)+'/snapshots','POST',snapshotPayload(value));},
+    async session(signal){const d=await get('/api/session',signal);const user=identity(d.user);mutations.acceptSession(d);return user;},
     async navigation(signal){const d=list(await get('/api/navigation',signal));if(!d.every(v=>record(v)&&string(v.id)&&string(v.title)))throw new ContractError();return d;},
     async profile(signal){const d=await get('/api/workbench/profile',signal);if(d.profile===null)return null;if(!record(d.profile)||!string(d.profile.id))throw new ContractError();return d.profile;},
-    async materials(signal){return list(await get('/api/materials',signal)).map(materialModel);},
-    async material(id,signal){return materialModel(await get('/api/materials/'+endpointId(id),signal));},
+    async materials(signal){return read('/api/materials',signal,v=>list(v).map(materialModel));},
+    async material(id,signal){return read('/api/materials/'+endpointId(id),signal,materialModel);},
     async experiments(signal){return list(await get('/api/lab/experiments',signal)).map(experimentModel);},
     async experiment(id,signal){return experimentModel(await get('/api/lab/experiments/'+endpointId(id),signal));},
     async tasks(profile,user,signal){if(!profile)return [];return ownTasks(await get('/api/tasks',signal),profile,user.role);},
-    async task(id,signal){return taskModel(await get('/api/tasks/'+endpointId(id),signal));},
+    async task(id,signal){return read('/api/tasks/'+endpointId(id),signal,taskModel);},
     async todos(signal){return list(await get('/api/workbench/todos',signal)).map(t=>{base(t);if(!string(t.status))throw new ContractError();return t;});},
+    async finance(signal){return financeRecord(await get('/api/finance',signal));},
+    async competitors(signal){return namedList(await get('/api/competitors',signal));},
+    async samples(params={},signal){const q=new URLSearchParams({offset:String(params.offset??0),q:params.q??'',active:'all'});return pagedRows(await get('/api/samples/catalog?'+q,signal));},
+    async attendance(params={},signal){const q=new URLSearchParams({view:params.view??'own',offset:String(params.offset??0)});for(const key of ['from','to']){if(params[key]){if(!validDate(params[key]))throw new ContractError('日期格式无效。');q.set(key,params[key]);}}if(params.from&&params.to&&params.from>params.to)throw new ContractError('开始日期不能晚于结束日期。');return pagedRows(await get('/api/attendance/periods?'+q,signal));},
+    async loginAccounts(signal){const rows=list(await get('/api/admin/accounts',signal));if(rows.some(r=>!record(r)||!string(r.id)||!string(r.username)||!['admin','employee'].includes(r.role)||typeof r.active!=='boolean'))throw new ContractError();return rows;},
+    async templates(signal){return list(await get('/api/templates',signal)).map(v=>templateRecord(v));},
+    async template(id,signal){return templateRecord(await get('/api/templates/'+endpointId(id),signal),true);},
+    async titleCatalog(params={},signal){const q=new URLSearchParams({page:String(params.page??1),q:params.q??''});return titleCatalog(await get('/api/titles/catalog?'+q,signal));},
+    async titleBatch(id,signal){return titleBatch(await get('/api/titles/'+endpointId(id),signal));},
+    async tools(signal){return namedList(await get('/api/toolbox',signal));},
+    async knowledge(signal){return knowledgeList(await get('/api/knowledge',signal));},
+    async members(signal){return namedList(await get('/api/admin/members',signal),'displayName');},
+    async businessAccounts(signal){return namedList(await get('/api/admin/business-accounts',signal));},
+    async stores(signal){return namedList(await get('/api/admin/stores',signal));},
+    async workTasks(signal){return executionRows(await get('/api/tasks',signal));},
+    async products(signal){return read('/api/products',signal,v=>list(v).map(p=>productRecord(p)));},
+    async product(id,signal){return read('/api/products/'+endpointId(id),signal,v=>productRecord(v,true));},
+    async shooting(signal){return list(await get('/api/shooting/requests',signal)).map(shootingRecord);},
+    async shootingDetail(id,signal){return shootingRecord(await get('/api/shooting/requests/'+endpointId(id),signal));},
     async completed(date,user,profile,signal){
       if(!validDate(date))throw new ContractError('请填写有效日期。');
       if(!profile)return [];

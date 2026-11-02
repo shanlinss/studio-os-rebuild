@@ -16,7 +16,7 @@ test('local preview allows only known GETs and never forwards a write or credent
   const session=await request(port,'/api/session',{headers:{Cookie:cookie}});assert.equal(session.status,200);assert.equal(JSON.parse(session.text).csrfToken,undefined);assert.equal(session.headers['set-cookie'],undefined);assert.equal(seen[0].cookie,cookie);
   const before=seen.length;
   for(const method of ['POST','PATCH','PUT','DELETE','OPTIONS'])assert.equal((await request(port,'/api/materials',{method,headers:{Cookie:cookie}})).status,405);
-  assert.equal((await request(port,'/api/admin/accounts',{headers:{Cookie:cookie}})).status,404);
+  assert.equal((await request(port,'/api/admin/credentials',{headers:{Cookie:cookie}})).status,404);
   assert.equal((await request(port,'/api/materials?target=http://example.invalid')).status,400);
   assert.equal((await request(port,'/api/materials',{headers:{Origin:'https://example.invalid'}})).status,403);
   assert.equal((await request(port,'/api/materials',{headers:{'Sec-Fetch-Site':'cross-site'}})).status,403);
