@@ -40,3 +40,7 @@ id、variant、observedAt（北京时间）、window、url、note、metrics（na
 ## 正式系统前的约束
 
 当前本地操作不代表团队权限已生效。服务器端必须验证登录、角色、记录范围和关联完整性。产品档案、样品档案与执行记录需在后续模块中共用，而非重复录入。原型备份导出不等于生产迁移方案。
+
+## 旧后端到位后的约束
+
+2026-11-02 用户提供旧完整代码包。已有独立 PostgreSQL 后端包含 accounts/materials/lab_experiments/plans/tasks/publications/data_snapshots 等对象及 33 条迁移。本文件仅描述原型内存模型，不用于另建一套平行数据库。后续以已有服务端对象为基础，通过页面适配器接入，差异见 legacy-reuse-review.md。

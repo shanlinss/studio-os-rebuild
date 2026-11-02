@@ -1,0 +1,10 @@
+{
+  "name": "studio-os-rebuild",
+  "private": true,
+  "version": "0.2.0",
+  "scripts": {
+    "dev:cloud": "node dev/read-only-preview.mjs",
+    "test": "node --test tests/*.test.mjs"
+  },
+  "engines": { "node": ">=22" }
+}
