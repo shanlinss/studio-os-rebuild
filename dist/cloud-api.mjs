@@ -1,5 +1,6 @@
 import {createMutationGateway} from './mutation-gateway.mjs';
-import {materialPayload,productPayload,publicationPayload,snapshotPayload} from './write-contract.mjs';
+import {materialPayload,productPayload,publicationPayload,snapshotPayload,todoPayload,experimentDraftPayload,dispatchPayload,reviewPayload,conclusionPayload} from './write-contract.mjs';
+import {todoModel} from './workbench-model.mjs';
 import {financeRecord,pagedRows} from './management-model.mjs';
 import {namedList,templateRecord,titleCatalog,titleBatch,knowledgeList} from './resource-model.mjs';
 import {ApiError,ContractError,chinaDate,validDate} from './cloud-contract.mjs';
@@ -24,7 +25,7 @@ export function experimentModel(raw){
   base(raw);if(!string(raw.status)||!number(raw.version)||!Array.isArray(raw.rounds))throw new ContractError();
   const refs=new Map();
   for(const round of raw.rounds){if(!record(round)||!string(round.id)||!Array.isArray(round.materials)||!Array.isArray(round.tasks))throw new ContractError();for(const m of round.materials){base(m);refs.set(m.id,{...m});}}
-  return {...raw,materials:[...refs.values()],phase:raw.status==='testing'?'测试中':raw.status==='concluded'?'已结束':'未知状态',finding:raw.finding??null,recommendation:raw.recommendation??null};
+  return {...raw,materials:[...refs.values()],phase:raw.status==='testing'?(raw.rounds.some(r=>r.tasks.length)?'测试中':'待安排'):raw.status==='concluded'?'已结束':'未知状态',finding:raw.finding??null,recommendation:raw.recommendation??null};
 }
 export function ownTasks(rows,profile,role){
   list(rows);if(!profile)return [];
@@ -50,13 +51,23 @@ export function taskProgress(t){
 export function createCloudApi(fetcher=globalThis.fetch,{allowWrites=false}={}){
   const mutations=createMutationGateway(fetcher,{enabled:allowWrites});
   async function get(path,signal){
-    let r;try{r=await fetcher(path,{method:'GET',credentials:'same-origin',cache:'no-store',redirect:'error',signal,headers:{Accept:'application/json'}});}catch(e){if(e.name==='AbortError')throw e;throw new ApiError(0,'云端连接中断，请检查 SSH 窗口是否仍然开启。');}
+    let r;try{r=await fetcher(path,{method:'GET',credentials:'same-origin',cache:'no-store',redirect:'error',signal,headers:{Accept:'application/json'}});}catch(e){if(e.name==='AbortError')throw e;throw new ApiError(0,allowWrites?'工作空间连接暂时中断，请稍后重新读取资料。':'云端连接中断，请检查 SSH 窗口是否仍然开启。');}
     if(r.status===401)mutations.clear();
     if(!r.ok)throw new ApiError(r.status,r.status===401?'登录已失效，请回原工作台登录后重试。':r.status===403?'当前账号没有读取这项资料的权限。':'云端读取失败，请重试。');
     try{return await r.json();}catch{throw new ContractError();}
   }
   async function read(path,signal,adapt){const value=adapt(await get(path,signal));mutations.confirmRead(path);return value;}
+  async function labCapability(){if(!allowWrites)throw new ApiError(405,'当前为只读预览，未发送保存请求。');const c=await get('/api/workbench/capabilities');if(!record(c)||c.materialLabDrafts!==1)throw new ContractError('实验草稿与执行安排兼容尚未接入。');}
   return {
+    async createExperiment(value){const payload=experimentDraftPayload(value);await labCapability();return mutations.send('/api/lab/experiments','POST',payload);},
+    async dispatchRound(id,round,value,version){const payload=dispatchPayload(value,version),path='/api/lab/experiments/'+endpointId(id)+'/rounds/'+endpointId(round)+'/assignments';await labCapability();return mutations.send(path,'POST',payload);},
+    async dispatchReceipt(id,round,key){const path='/api/lab/experiments/'+endpointId(id)+'/rounds/'+endpointId(round)+'/assignments';try{const value=await get(path+'/'+endpointId(key));if(!record(value)||!Array.isArray(value.taskIds)||value.taskIds.some(id=>typeof id!=='string')||!Number.isSafeInteger(value.version))throw new ContractError();mutations.confirmRead(path);return value;}catch(e){if(e.status===404){mutations.confirmRead(path);return null;}throw e;}},
+    async reviewRound(id,round,value,version){return mutations.send('/api/lab/experiments/'+endpointId(id)+'/rounds/'+endpointId(round)+'/reviews','POST',reviewPayload(value,version));},
+    async concludeExperiment(id,value,version){return mutations.send('/api/lab/experiments/'+endpointId(id)+'/conclusion','POST',conclusionPayload(value,version));},
+    async capabilities(signal){const value=await get('/api/workbench/capabilities',signal);if(!record(value)||value.personalTodoSchedule!==1)throw new ContractError('工作台日期兼容尚未接入。');return value;},
+    async createTodo(value){if(!allowWrites)throw new ApiError(405,'当前为只读预览，未发送保存请求。');const body=todoPayload(value);await this.capabilities();return mutations.send('/api/workbench/todos','POST',body);},
+    async updateTodo(id,value,version){if(!allowWrites)throw new ApiError(405,'当前为只读预览，未发送保存请求。');const path='/api/workbench/todos/'+endpointId(id),body=todoPayload(value,version);await this.capabilities();return mutations.send(path,'PATCH',body);},
+    async logout(){const result=await mutations.send('/api/logout','POST',{});mutations.clear();return result;},
     async login(username,password){const d=await mutations.send('/api/login','POST',{username,password},{login:true});return identity(d.user);},
     async createMaterial(value){return mutations.send('/api/materials','POST',materialPayload(value));},
     async updateMaterial(id,value,version){return mutations.send('/api/materials/'+endpointId(id),'PATCH',materialPayload(value,version));},
@@ -69,11 +80,11 @@ export function createCloudApi(fetcher=globalThis.fetch,{allowWrites=false}={}){
     async profile(signal){const d=await get('/api/workbench/profile',signal);if(d.profile===null)return null;if(!record(d.profile)||!string(d.profile.id))throw new ContractError();return d.profile;},
     async materials(signal){return read('/api/materials',signal,v=>list(v).map(materialModel));},
     async material(id,signal){return read('/api/materials/'+endpointId(id),signal,materialModel);},
-    async experiments(signal){return list(await get('/api/lab/experiments',signal)).map(experimentModel);},
-    async experiment(id,signal){return experimentModel(await get('/api/lab/experiments/'+endpointId(id),signal));},
+    async experiments(signal){return read('/api/lab/experiments',signal,v=>list(v).map(experimentModel));},
+    async experiment(id,signal){return read('/api/lab/experiments/'+endpointId(id),signal,experimentModel);},
     async tasks(profile,user,signal){if(!profile)return [];return ownTasks(await get('/api/tasks',signal),profile,user.role);},
     async task(id,signal){return read('/api/tasks/'+endpointId(id),signal,taskModel);},
-    async todos(signal){return list(await get('/api/workbench/todos',signal)).map(t=>{base(t);if(!string(t.status))throw new ContractError();return t;});},
+    async todos(signal){return read('/api/workbench/todos',signal,v=>list(v).map(todoModel));},
     async finance(signal){return financeRecord(await get('/api/finance',signal));},
     async competitors(signal){return namedList(await get('/api/competitors',signal));},
     async samples(params={},signal){const q=new URLSearchParams({offset:String(params.offset??0),q:params.q??'',active:'all'});return pagedRows(await get('/api/samples/catalog?'+q,signal));},

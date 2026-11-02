@@ -44,3 +44,9 @@ id、variant、observedAt（北京时间）、window、url、note、metrics（na
 ## 旧后端到位后的约束
 
 2026-11-02 用户提供旧完整代码包。已有独立 PostgreSQL 后端包含 accounts/materials/lab_experiments/plans/tasks/publications/data_snapshots 等对象及 33 条迁移。本文件仅描述原型内存模型，不用于另建一套平行数据库。后续以已有服务端对象为基础，通过页面适配器接入，差异见 legacy-reuse-review.md。
+
+## 原后端接入后的对象边界
+
+示例原型的数据形状仅用于早期体验。真实服务复用 `studio_os` 原表：业务执行使用 `tasks`，个人安排使用 `personal_todos`，二者在首页合并显示但不相互复制；实验和轮次使用 `lab_experiments` / `plans`，参考素材使用原 `plan_materials`；发布、观察和复盘直接沿用原表及标识。
+
+034 只在个人事项追加 `planned_on`、`due_at`、`completed_at`。035 的 `lab_dispatch_requests` 是重放回执，仅记录已创建的原任务标识，不生成第二套任务数据。原 33 个迁移文件的来源校验保持。详见 backend-compatibility.md。

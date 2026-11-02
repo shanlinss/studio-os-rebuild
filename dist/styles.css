@@ -11,3 +11,7 @@ body{min-width:1180px}main{min-width:958px}.module-panel{min-width:0}
 
 /* Desktop record editors share the approved workspace form treatment. */
 .save-error{color:#9d4d39;font-size:12px;line-height:1.8;white-space:pre-wrap}.save-error:empty{display:none}.editor .form-grid{display:grid;grid-template-columns:1fr 1fr;gap:16px}.editor .form-grid label{min-width:0}.editor [data-discard] .text-button{margin-left:12px}.editor textarea{resize:vertical}
+
+.assignment-picker{border:1px solid var(--line);border-radius:8px;padding:18px}.assignment-picker legend{font-size:12px;color:var(--muted)}.assignment-option{display:flex;align-items:center;justify-content:space-between;gap:24px;border-bottom:1px solid var(--line);padding:12px 0}.assignment-option>label:first-child{display:flex;align-items:center;gap:12px;flex:1;margin:0}.assignment-option input[type=checkbox]{width:16px;margin:0;accent-color:var(--green)}.assignment-option small{display:block;color:var(--muted)}.assignment-option>label:last-child{width:110px;margin:0}.login-panel{max-width:520px}.login-panel form{margin-top:24px}
+
+.linked-context{display:block;font-size:10px;color:var(--muted);margin-top:5px}.linked-record>span:first-child{flex:1;min-width:0;flex-shrink:1}

@@ -1,4 +1,5 @@
 import {ContractError,validDate} from './cloud-contract.mjs';
+import {todoTypes,todoStatuses} from './workbench-model.mjs';
 const fields=(v,allowed)=>{if(!v||typeof v!=='object'||Array.isArray(v)||Object.keys(v).some(k=>!allowed.includes(k)))throw new ContractError('保存字段暂不兼容，请保留编辑内容后核对。');return v;};
 const text=(v,max,required=false)=>{if(typeof v!=='string'||v.length>max||(required&&!v.trim()))throw new ContractError(required?'请填写必要信息。':'文字超过允许长度。');return required?v.trim():v;};
 export const expectedVersion=v=>{if(!Number.isSafeInteger(v)||v<1)throw new ContractError('缺少有效记录版本，请刷新详情。');return v;};
@@ -28,4 +29,36 @@ export function snapshotPayload(value){
  out.hasConversion=b.hasConversion??null;if(out.hasConversion!==null&&typeof out.hasConversion!=='boolean')throw new ContractError();
  if(out.conversions!==null&&out.hasConversion!==null&&out.hasConversion!==(out.conversions>0))throw new ContractError('成交状态与成交数量不一致。');
  if(metricKeys.every(k=>out[k]===null)&&out.hasConversion===null)throw new ContractError('至少填写一个观察指标或成交状态。');return out;
+}
+export function todoPayload(value,version){
+ const b=fields(value,['title','taskType','priority','status','notes','plannedOn','dueAt',...(version===undefined?['requestKey']:[])]);
+ if(!todoTypes.includes(b.taskType)||!todoStatuses.includes(b.status)||!['高','中','低'].includes(b.priority))throw new ContractError('请选择有效的事项类型、状态和优先级。');
+ if(!Object.hasOwn(b,'plannedOn')||!Object.hasOwn(b,'dueAt'))throw new ContractError('请保留计划日期与截止时间。');
+ const plannedOn=b.plannedOn===null||b.plannedOn===''?null:b.plannedOn;if(plannedOn!==null&&!validDate(plannedOn))throw new ContractError('计划日期无效。');
+ const dueAt=b.dueAt===null||b.dueAt===''?null:timestamp(b.dueAt);
+ if(plannedOn&&dueAt&&Date.parse(dueAt)<Date.parse(plannedOn+'T00:00:00+08:00'))throw new ContractError('截止时间不能早于计划日期。');
+ return {title:text(b.title,200,true),taskType:b.taskType,priority:b.priority,status:b.status,notes:text(b.notes??'',2000),plannedOn,dueAt,...(version===undefined?{requestKey:uuid(b.requestKey)}:{expectedVersion:expectedVersion(version)})};
+}
+export function experimentDraftPayload(value){
+ const b=fields(value,['title','requestKey','materialIds','lab']),lab=fields(b.lab,['hypothesis','direction','testVariable','executionConditions','plannedPublishOn']);
+ if(!Array.isArray(b.materialIds)||!b.materialIds.length||b.materialIds.length>100)throw new ContractError('请选择至少一条参考素材。');
+ const ids=b.materialIds.map(uuid);if(new Set(ids).size!==ids.length)throw new ContractError('参考素材不能重复。');
+ const date=lab.plannedPublishOn||null;if(date!==null&&!validDate(date))throw new ContractError('计划日期无效。');
+ return {title:text(b.title,200,true),requestKey:uuid(b.requestKey),materialIds:ids,lab:{hypothesis:text(lab.hypothesis??'',2000),direction:text(lab.direction??'',100),testVariable:text(lab.testVariable??'',200),executionConditions:text(lab.executionConditions??'',2000),plannedPublishOn:date}};
+}
+export function dispatchPayload(value,version){
+ const b=fields(value,['requestKey','assignments']);
+ if(!Array.isArray(b.assignments)||!b.assignments.length||b.assignments.length>100)throw new ContractError('请选择执行账号。');
+ const assignments=b.assignments.map(value=>{const a=fields(value,['memberId','accountId','targetCount']);if(!Number.isInteger(a.targetCount)||a.targetCount<1||a.targetCount>10000)throw new ContractError('计划数量须为 1 至 10000 的整数。');return {memberId:uuid(a.memberId),accountId:uuid(a.accountId),targetCount:a.targetCount};});
+ if(new Set(assignments.map(a=>a.accountId)).size!==assignments.length)throw new ContractError('同一账号不能重复安排。');
+ return {requestKey:uuid(b.requestKey),expectedVersion:expectedVersion(version),assignments};
+}
+export function reviewPayload(value,version){
+ const b=fields(value,['requestKey','decision','note']);if(!['表现好','有信号，继续验证','表现差','暂时无法判断'].includes(b.decision))throw new ContractError('请选择本轮观察判断。');
+ return {requestKey:uuid(b.requestKey),expectedVersion:expectedVersion(version),decision:b.decision,note:text(b.note,2000,true)};
+}
+export function conclusionPayload(value,version){
+ const b=fields(value,['verdict','finding','recommendation','tags']);if(!['reusable','conditional','rejected','unclear'].includes(b.verdict))throw new ContractError('请选择结论判断。');
+ if(!Array.isArray(b.tags)||b.tags.length>20)throw new ContractError('结论标签最多 20 个。');
+ return {expectedVersion:expectedVersion(version),verdict:b.verdict,finding:text(b.finding,2000,true),recommendation:text(b.recommendation??'',2000),tags:[...new Set(b.tags.map(t=>text(t,40,true)))]};
 }

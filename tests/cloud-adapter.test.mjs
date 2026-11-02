@@ -11,7 +11,7 @@ test('material metadata and version survive read adaptation; archive is not mapp
 test('shared material references across rounds are not double counted or converted to new records',()=>{
  const m={id:other,title:'Shared material'};
  const mapped=experimentModel({id,title:'Experiment',version:2,status:'testing',finding:null,rounds:[{id,materials:[m],tasks:[]},{id:other,materials:[m],tasks:[]}]});
- assert.equal(mapped.materials.length,1);assert.equal(mapped.rounds.length,2);assert.equal(mapped.finding,null);assert.equal(mapped.phase,'测试中');
+ assert.equal(mapped.materials.length,1);assert.equal(mapped.rounds.length,2);assert.equal(mapped.finding,null);assert.equal(mapped.phase,'待安排');assert.equal(mapped.status,'testing');
 });
 test('admin personal work never displays team tasks when member mapping is absent',()=>{
  const rows=[{id,title:'Own',memberId:id},{id:other,title:'Other',memberId:other}];

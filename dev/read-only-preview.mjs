@@ -7,7 +7,7 @@ const staticFiles = new Map([
   ['/', ['index.html', 'text/html; charset=utf-8']],
   ['/index.html', ['index.html', 'text/html; charset=utf-8']],
   ['/styles.css', ['styles.css', 'text/css; charset=utf-8']],
-  ...['bootstrap.mjs', 'navigation.mjs', 'cloud-view.mjs', 'cloud-api.mjs', 'daily-layout.mjs', 'cloud-contract.mjs', 'business-model.mjs', 'business-view.mjs', 'resource-model.mjs', 'resource-view.mjs', 'management-model.mjs', 'management-view.mjs', 'creation-model.mjs', 'planning-view.mjs', 'write-contract.mjs', 'mutation-gateway.mjs', 'record-editors.mjs'].map(name => ['/'+name, [name, 'text/javascript; charset=utf-8']]),
+  ...['bootstrap.mjs', 'navigation.mjs', 'cloud-view.mjs', 'cloud-api.mjs', 'daily-layout.mjs', 'cloud-contract.mjs', 'business-model.mjs', 'business-view.mjs', 'resource-model.mjs', 'resource-view.mjs', 'management-model.mjs', 'management-view.mjs', 'creation-model.mjs', 'planning-view.mjs', 'write-contract.mjs', 'mutation-gateway.mjs', 'record-editors.mjs', 'workbench-model.mjs', 'page-access.mjs'].map(name => ['/'+name, [name, 'text/javascript; charset=utf-8']]),
 ]);
 const fixedRoutes = new Set(['/api/live','/api/health','/api/session','/api/navigation','/api/materials','/api/lab/experiments','/api/tasks','/api/workbench/todos','/api/workbench/profile','/api/workbench/completed','/api/products','/api/shooting/requests','/api/templates','/api/titles/catalog','/api/toolbox','/api/knowledge','/api/admin/members','/api/admin/business-accounts','/api/admin/stores','/api/admin/accounts','/api/finance','/api/competitors','/api/samples/catalog','/api/attendance/periods']);
 const uuid = '[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}';

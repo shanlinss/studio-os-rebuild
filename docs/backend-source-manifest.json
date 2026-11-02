@@ -1,0 +1,330 @@
+{
+  "source": "xhs-vv1-local-studio-os-v1.zip / studio",
+  "purpose": "Reusable standalone API server and immutable existing SQL migrations; no legacy web UI or environment files copied",
+  "files": [
+    {
+      "path": "studio/server/access.ts",
+      "sha256": "0947201dd6dc0f4f5690a09c51460e652f23d26fb979278eddd88e6e6865ab88"
+    },
+    {
+      "path": "studio/server/account-create.ts",
+      "sha256": "105601ec4118c9cb5948e5996e0bc2ac892b767915ec9bfeef5501392e313ef6"
+    },
+    {
+      "path": "studio/server/announcements.ts",
+      "sha256": "b97359899ef29b1519af704f9447abfbe0f63cb2b2083a51dd2f37ba72654217"
+    },
+    {
+      "path": "studio/server/app.ts",
+      "sha256": "9125ff7d8c80a236b06c57a787632c14791fa257e08f2f798294d2c58751c197"
+    },
+    {
+      "path": "studio/server/attendance.ts",
+      "sha256": "30354d93288a4e675e4ceef98e38c0148bd3fbf54ef30925d03693def5a41c74"
+    },
+    {
+      "path": "studio/server/auth.ts",
+      "sha256": "4ac4832ed728c6ee22b481ae4e6867e122384a4d1d4533bc7fe47f14a3c2ca63"
+    },
+    {
+      "path": "studio/server/business-accounts.ts",
+      "sha256": "b5680bd4378ebd4560eabcfac1641a1f92419efaa2ba1d8fdcdc238d5a0c58e5"
+    },
+    {
+      "path": "studio/server/competitors.ts",
+      "sha256": "2f2269f2fa6d3ec337a517ac8669052cec0bd3e33cbfe17bda37ada6a78d2440"
+    },
+    {
+      "path": "studio/server/database.ts",
+      "sha256": "edd1b4a21d7a896a85cab658eb8a852bac45ec4602a8df6520323ea5ecfdfade"
+    },
+    {
+      "path": "studio/server/diagnostics.ts",
+      "sha256": "407cfdd15b47e6df698be151d29058c15cb6243afb55158cca7d238fcc60daac"
+    },
+    {
+      "path": "studio/server/doctor.ts",
+      "sha256": "755bbc76bb28dd8ef944323e6ccd97fd5e1f74964289675c99ac1c2ea8a009c6"
+    },
+    {
+      "path": "studio/server/finance.ts",
+      "sha256": "a865fde6577606c7120fab7bb5720b6687a9fddf3485fcdaa605ae5a0d249154"
+    },
+    {
+      "path": "studio/server/knowledge.ts",
+      "sha256": "62af92d35b2098d7e16bc087de92f9ae685c747cbf86ca4ef0a859c2b82bab74"
+    },
+    {
+      "path": "studio/server/lab-activity.ts",
+      "sha256": "8fed321c91fdf0f6d9f50d8c00355fdd9dd1f55b174fa4968a0b34542c6792c7"
+    },
+    {
+      "path": "studio/server/lab-input.ts",
+      "sha256": "89266cdaad09fbb7b509e9ed6d68d908fc0a78e3b0f8c8900222665f9a9c596d"
+    },
+    {
+      "path": "studio/server/lab.ts",
+      "sha256": "4bb1562c5c4ecd6b0c65e6994ffdb9d8b25895df371e3b963bcaf140b404adbe"
+    },
+    {
+      "path": "studio/server/main.ts",
+      "sha256": "993e14f9c39414f8fb0978c3087b980f41db31d5b3e7b277284150d28bdcd1db"
+    },
+    {
+      "path": "studio/server/material-source.ts",
+      "sha256": "0d15a7f78faf404439b105f58b3d704af26cb71f7007fb474e24bce7daee900c"
+    },
+    {
+      "path": "studio/server/materials.ts",
+      "sha256": "df76718b4d6bed70c7be6ce312d7071509b74c9de1e32a58a96e5335fb06fb3f"
+    },
+    {
+      "path": "studio/server/media.ts",
+      "sha256": "48a17af3e4469892a5a870e6fe7001dcf3c85c006faa8416d90bb146938b20d1"
+    },
+    {
+      "path": "studio/server/migrate.ts",
+      "sha256": "2d35940dc80d6025212e8a204e0d44fcb872d26bc2064249118275e1d338fcc0"
+    },
+    {
+      "path": "studio/server/migrations.ts",
+      "sha256": "7803cddbdfb03814296891f73d0b5bd8f19f261dc507a226492cab90dfce5b63"
+    },
+    {
+      "path": "studio/server/money.ts",
+      "sha256": "7b7b4a808306ff7de68a263132de2ceb98a8a7382a896e7da2158e2de88d97ed"
+    },
+    {
+      "path": "studio/server/navigation.ts",
+      "sha256": "ba75c12fdd820eb1966773d7c7c7f04802a9c179801b7753512e8ad7f3405304"
+    },
+    {
+      "path": "studio/server/operational-observations.ts",
+      "sha256": "fcd7506501206d82361f166df42778ed737b8459f56e7a66f9057d0fd176060d"
+    },
+    {
+      "path": "studio/server/password.ts",
+      "sha256": "c1cff2161e493960b4d559aa2c72ba3d6cd0fc61c9ef8abaf1d4b36667b2a37d"
+    },
+    {
+      "path": "studio/server/personal-todos.ts",
+      "sha256": "27c9180f5379301b3ac1d1ba5f6d3a07e50343d5bde3effdc5256c4118b06fa5"
+    },
+    {
+      "path": "studio/server/product-observations.ts",
+      "sha256": "f3d367b4cb79ebe90d91b499a9c5b11d126b3177a6932621171ef19780902a82"
+    },
+    {
+      "path": "studio/server/product-summary.ts",
+      "sha256": "01ce08d4072690e0aff86099a6d480ce18018af7a4a8bc7735e287bc627bcadf"
+    },
+    {
+      "path": "studio/server/product-template-tasks.ts",
+      "sha256": "4d191bc92724fa89cd861ac6055e207d31c754f43aacde6e350ec94e50affeb2"
+    },
+    {
+      "path": "studio/server/products.ts",
+      "sha256": "c587447762c15e2306c1f061fcc7e7f05fcbc1b8f1274ccdbeb2797de2578a3f"
+    },
+    {
+      "path": "studio/server/publication-assets.ts",
+      "sha256": "a3655051d03f0f7e6230fdb9b7f4ace47163845712556f9c3ce4e6edcb0b1e13"
+    },
+    {
+      "path": "studio/server/readiness.ts",
+      "sha256": "9fe92bd269ed90a6d30bc42cc69341932cd63d00f5702e21718a9c1833ff6599"
+    },
+    {
+      "path": "studio/server/registry.ts",
+      "sha256": "f0d8efa1fd425e16b0fcffe4227d4c1563ff3fbd5464744ebe55ea3a3f22b0ba"
+    },
+    {
+      "path": "studio/server/research.ts",
+      "sha256": "2aecb670d02958673ad74f1cebc7c2398cd232e56c53b437d86714cb0bc845dc"
+    },
+    {
+      "path": "studio/server/runtime.ts",
+      "sha256": "4a83757cc4cb0442e72dbab881deb0fea048a2a9b983eadf10dda5dd2136a926"
+    },
+    {
+      "path": "studio/server/samples.ts",
+      "sha256": "c005576c480bf62c164ce405d1e1fb6a55195f05ff681b343374b25a24e48b46"
+    },
+    {
+      "path": "studio/server/shooting.ts",
+      "sha256": "4ec9ce1e5eab5aeffb201c18ef802e0cdd346bb18e81148e8372735374cad070"
+    },
+    {
+      "path": "studio/server/snapshot-imports.ts",
+      "sha256": "10e2e052e91d7bd621b75a6e9ca6f5d8ad9f10f4d5d9de0fde27f89e82034c8d"
+    },
+    {
+      "path": "studio/server/staging-accounts.ts",
+      "sha256": "54ce7d1d92e6699b3243f88fd1bdc7ec4106be6cd3cf6307077087eac1337710"
+    },
+    {
+      "path": "studio/server/storage.ts",
+      "sha256": "8f4217547bd6d91ce73f01b16a6c48e94cc29b749c13f80315b2f6a8feb9f839"
+    },
+    {
+      "path": "studio/server/stores.ts",
+      "sha256": "88a3c9f1c29751ef7c51e20525c627454ee657aa130489300abea715c0540a79"
+    },
+    {
+      "path": "studio/server/templates.ts",
+      "sha256": "5b694b8f397f990186e52b155e8651461d595622ba7cf852085d790c3bb8baef"
+    },
+    {
+      "path": "studio/server/titles.ts",
+      "sha256": "8ac5db849c7126c2fe05eb25f9f0d563b5924e77da291ff9d680d17a605c29db"
+    },
+    {
+      "path": "studio/server/toolbox.ts",
+      "sha256": "b4bafc9b5979ad67781ca63697185dd8d81ca04cc81a4749142f848f3804d848"
+    },
+    {
+      "path": "studio/server/validation.ts",
+      "sha256": "856a051eff3297f0bb8ceb3c807eec10fa83c0893add4099da2f15a025513342"
+    },
+    {
+      "path": "studio/server/workbench.ts",
+      "sha256": "007db5dde2addf269d9e8b5606ebdb5568dfe497cb52e1fd9ca3bf5c4841d54a"
+    },
+    {
+      "path": "studio/server/workflow.ts",
+      "sha256": "96e29ef7d3cee5eff56f200ac8f4f1cde578a3f30450d8becf27dee143b1a29b"
+    },
+    {
+      "path": "studio/migrations/001_installation.sql",
+      "sha256": "b43e74bac8c5cfee72bdd9fe600d9fcb663d302f36f862f6614a7d3ca4b477e1"
+    },
+    {
+      "path": "studio/migrations/002_auth.sql",
+      "sha256": "ea64b44fc0aa5af578d9de2263b8c5f1dd7f6b6da1be84de7e5cd95e398ae869"
+    },
+    {
+      "path": "studio/migrations/003_stores.sql",
+      "sha256": "49416403cccbbea4c0e775542d07b6579dd419d422907069ec099bcd3392c6c7"
+    },
+    {
+      "path": "studio/migrations/004_members.sql",
+      "sha256": "295098d51c8e507717c86870d546cdce4754ee5688c3912b1e3a4ec335a7f022"
+    },
+    {
+      "path": "studio/migrations/005_business_accounts.sql",
+      "sha256": "fd88c8c92493c1c3e81247b4589e6cd0a416245182e74af4edfba1709cf0ec18"
+    },
+    {
+      "path": "studio/migrations/006_workflow.sql",
+      "sha256": "a45cf82e9d846e7d4931cf25b5185daa9a43d40fdfb5e9b53e285075d15b699a"
+    },
+    {
+      "path": "studio/migrations/007_material_inbox.sql",
+      "sha256": "7f652ee64d839a7ec220d1d897830cdf6a52ffcf4735e9e549c5524f4172d386"
+    },
+    {
+      "path": "studio/migrations/008_material_lab.sql",
+      "sha256": "d6ceaf038bfe227ce2f648f2bac8d530f50309661caefa2cc86aeb34ea05adb3"
+    },
+    {
+      "path": "studio/migrations/009_material_downloads.sql",
+      "sha256": "91ab1749428cafdc7dbe368aa0876d02f41c32053b40d8783afd4ea55729225a"
+    },
+    {
+      "path": "studio/migrations/010_publication_assets.sql",
+      "sha256": "70c75357e822d584a3ab88d9b40918df1a27ef8a54b5ef576c87a21797f6debe"
+    },
+    {
+      "path": "studio/migrations/011_snapshot_imports.sql",
+      "sha256": "fedc0afd5bbfd2fe3b6b8bf68fcc47201c64780a5561a190b752879b5319c089"
+    },
+    {
+      "path": "studio/migrations/012_product_testing.sql",
+      "sha256": "a52b9c9218fa0f192598f6b3033ac986f247045add4dd333e0a63a32aa76a5b7"
+    },
+    {
+      "path": "studio/migrations/013_product_plan_edit.sql",
+      "sha256": "81a6a464e6e5b00ba532730fe91e202fa1d0924c75b9844367c534300d1c37df"
+    },
+    {
+      "path": "studio/migrations/014_toolbox.sql",
+      "sha256": "e10304321f5318a298918b61269acb0f47e88638b3a8e6999b32eced0b8c2f81"
+    },
+    {
+      "path": "studio/migrations/015_knowledge.sql",
+      "sha256": "3f367ccd247d0519493d9aa5779ac8efb53f82e837f8c745aacec1067809cab0"
+    },
+    {
+      "path": "studio/migrations/016_note_templates.sql",
+      "sha256": "edd9d50ef404be667bf4d47496c80114737707c5c27d35a3f441d52090136b19"
+    },
+    {
+      "path": "studio/migrations/017_competitor_observation.sql",
+      "sha256": "7cf68ffc6342a1d4e97c1fc3e9bb42fd7cc035fea8a03a81ee537200782b2189"
+    },
+    {
+      "path": "studio/migrations/018_competitor_price_labels.sql",
+      "sha256": "e25cbfd2f4c41a7a99f178a3e49be8e090d89078c616ef6cebcbe54fe2e7c7e9"
+    },
+    {
+      "path": "studio/migrations/019_expense_ledger.sql",
+      "sha256": "10d3710bf809f0ca159bf412085dbd5e361a2eaf4602e8b2c980a19ab402ee36"
+    },
+    {
+      "path": "studio/migrations/020_business_account_details.sql",
+      "sha256": "07e79f6e815aba2a4f0367d52efa74cb4868a45dc164fec6a4f6abe672a3cefd"
+    },
+    {
+      "path": "studio/migrations/021_material_folder_order.sql",
+      "sha256": "a3a0980b627a03de9d7ce1e497c73a59a3568ee5ebdbf79eac44c4cd1139d8e9"
+    },
+    {
+      "path": "studio/migrations/022_product_observations.sql",
+      "sha256": "9372d6b12b19bb3c0aa9201f43ca6286f344bc3da1a6fffa115f7ae8b3f6fdb8"
+    },
+    {
+      "path": "studio/migrations/023_shared_shooting.sql",
+      "sha256": "5f8ae46fd08339b58c63ec73572a042de2059a9f99a12ae44865f1d2ba86fdfa"
+    },
+    {
+      "path": "studio/migrations/024_lab_product_identity.sql",
+      "sha256": "c4226402682dcc8c76e811b395b8e28ad37a62e643f4473bb278699541adceb6"
+    },
+    {
+      "path": "studio/migrations/025_workbench_announcements.sql",
+      "sha256": "e5c261b42c16a5688cacfa01a61700c5450fd872f069e68da3b59cb46a5a2765"
+    },
+    {
+      "path": "studio/migrations/026_title_library.sql",
+      "sha256": "65313882eee95c8b847eb670639d8108cbfa2db5801b4d5ea12c5b13589fe19d"
+    },
+    {
+      "path": "studio/migrations/027_personal_todos.sql",
+      "sha256": "501594dd526553b481b31a40dfa1424b3889292f840219d4ccee0299c411f56b"
+    },
+    {
+      "path": "studio/migrations/028_material_research.sql",
+      "sha256": "7ecfd6bec7f393eeaeed857a06771fae1e6b034ffb3c21e594a8f3196168a6dd"
+    },
+    {
+      "path": "studio/migrations/029_operational_observations.sql",
+      "sha256": "4206a122374e0013e82826fc5c5a83b7cd4dbfa75f9b07eaa8bf53816569ee83"
+    },
+    {
+      "path": "studio/migrations/030_member_basic_profile.sql",
+      "sha256": "e2d3a2b4b2b0f45cc06c01e837380be3cad2dd040cbb1d8e3d02d1c350ebe0db"
+    },
+    {
+      "path": "studio/migrations/031_active_attendance.sql",
+      "sha256": "e7f3a0cf93608a2084006c4868bc5774d93f3857e575b428237738e4a8bc9d9a"
+    },
+    {
+      "path": "studio/migrations/032_attendance_optional_task.sql",
+      "sha256": "d2408ace5dfd399f939b825b33a0e96595dbbdaab5455ad977cc7f205d599fc6"
+    },
+    {
+      "path": "studio/migrations/033_shooting_samples.sql",
+      "sha256": "ca9f684d5bba1fcdfb91593fe526527ac920ae565a4a9ffec23a08fd5e2ab502"
+    }
+  ]
+}
