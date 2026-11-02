@@ -32,6 +32,7 @@
 ## 文档
 
 - [需求与确认状态](docs/requirements.md)
+- [产品与设计基线](docs/design-baseline.md)
 - [页面清单及开发顺序](docs/roadmap.md)
 - [业务数据与关联](docs/data-model.md)
 - [验证记录及限制](docs/verification.md)

@@ -7,7 +7,7 @@ const staticFiles = new Map([
   ['/', ['index.html', 'text/html; charset=utf-8']],
   ['/index.html', ['index.html', 'text/html; charset=utf-8']],
   ['/styles.css', ['styles.css', 'text/css; charset=utf-8']],
-  ...['bootstrap.mjs', 'navigation.mjs', 'cloud-view.mjs', 'cloud-api.mjs'].map(name => ['/'+name, [name, 'text/javascript; charset=utf-8']]),
+  ...['bootstrap.mjs', 'navigation.mjs', 'cloud-view.mjs', 'cloud-api.mjs', 'daily-layout.mjs'].map(name => ['/'+name, [name, 'text/javascript; charset=utf-8']]),
 ]);
 const fixedRoutes = new Set(['/api/live','/api/health','/api/session','/api/navigation','/api/materials','/api/lab/experiments','/api/tasks','/api/workbench/todos','/api/workbench/profile','/api/workbench/completed']);
 const uuid = '[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}';

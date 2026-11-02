@@ -47,7 +47,6 @@
   // Build seven-center navigation from the accepted sitemap. Unbuilt pages explicitly show planning state.
   $('nav[aria-label="主要模块"]').innerHTML = groups.map((g,i)=>`<details class="nav-group" ${i===0||i===1?'open':''}><summary>${h(g[0])}${i===5?'<small>管理员</small>':''}</summary>${g[1].map(([id,name])=>`<a href="#${id}" data-page="${id}" class="nav-item" ${id==='daily'?'aria-current="page"':''}>${h(name)}${specs[id]?'<small>规划</small>':''}</a>`).join('')}</details>`).join('');
   $('.nav-label').textContent='STUDIO OS';
-  $('.sidebar-note').remove();
   $('.sidebar').classList.add('sitemap-sidebar');
   $('#main').insertAdjacentHTML('beforeend','<section id="page-history" hidden></section><section id="page-conclusions" hidden></section><section id="page-planned" hidden></section>');
   document.body.insertAdjacentHTML('beforeend', '<dialog id="material-editor" class="editor" aria-label="素材编辑"></dialog><dialog id="material-detail" class="drawer" aria-label="素材详情"></dialog><dialog id="test-editor" class="editor wide-editor" aria-label="实验编辑"></dialog><dialog id="test-detail" class="drawer wide-drawer" aria-label="实验详情"></dialog><dialog id="observation-editor" class="editor wide-editor" aria-label="添加观察记录"></dialog><dialog id="schedule-editor" class="editor" aria-label="安排执行事项"></dialog>');

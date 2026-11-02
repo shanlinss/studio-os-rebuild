@@ -1,4 +1,5 @@
 import {groups,specs} from './navigation.mjs';
+import {dailyLayout} from './daily-layout.mjs';
 import {createCloudApi,chinaDate,validDate,taskProgress,metricValue,ApiError} from './cloud-api.mjs';
 const $=s=>document.querySelector(s),h=v=>String(v??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const api=createCloudApi(),names=Object.fromEntries(groups.flatMap(g=>g[1]));
@@ -8,7 +9,7 @@ const state={materials:[],experiments:[],tasks:[],todos:[]};
 const centerIds=['workspace','business','resources','knowledge','people','finance','settings'];
 const sharedGroupIds=new Set(['daily','history','materials','tests','conclusions']);
 const lookupIds=new Set();
-$('.sidebar-note')?.remove();$('.sidebar').classList.add('sitemap-sidebar');
+$('.sidebar').classList.add('sitemap-sidebar');
 $('.nav-label').textContent='STUDIO OS';
 $('.prototype').innerHTML='<i></i> 云端数据 · 只读预览';
 $('.profile').innerHTML='<span class="avatar">我</span><span id="cloud-identity">核对登录中…</span>';
@@ -59,7 +60,7 @@ async function route(){
     }else{
       $('#main').innerHTML=heading(names[page],'已保留整体规划，本轮尚未接入这一页。')+`<section class="work-panel planning-panel"><span class="stage-label">规划范围</span><h2>${h(names[page])}</h2><p>${h(specs[page]?.[0]||'后续按确认的业务规则接入已有功能。')}</p><p class="muted">${h(specs[page]?.[1]||'当前预览只开放读取，原工作台保持运行。')}</p></section>`;
     }
-    $('#cloud-refresh').onclick=()=>init();
+    if($('#cloud-refresh'))$('#cloud-refresh').onclick=()=>init();
   }catch(e){if(e.name!=='AbortError')errorView(e);}
 }
 function materialsPage(){
@@ -77,9 +78,46 @@ function experimentsPage(){
 }
 function profileNote(){return profile?'':`<div class="planning-rule">当前登录账号尚未关联成员档案，因此“我的工作”不展示团队其他成员的任务。个人待办仍可单独查看。</div>`;}
 function dailyPage(){
-  $('#main').innerHTML=heading('今日工作','读取本人业务事项和个人待办，继续沿用云端身份与任务归属。')+profileNote()+`<div class="date-row"><label>工作日期 <input type="date" id="cloud-date" value="${h(selectedDate)}"></label><span class="muted">北京时间 · 未排期事项单独展示</span></div><section class="work-panel module-panel"><div class="panel-head"><h2>我的业务事项</h2></div><div id="cloud-own-tasks"></div><div class="module-foot">发布、回填和拍摄进度取自原记录；本页不直接将数量达标标记为完成。</div></section><section class="work-panel module-panel" style="margin-top:24px"><div class="panel-head"><h2>我的个人待办 <span class="muted">${state.todos.length} 件</span></h2></div>${state.todos.map(t=>`<article class="history-record"><span><b>${h(t.title)}</b><small>${text(t.notes,'暂无说明')}</small></span><span>${h(t.status)}<br>持续待办</span></article>`).join('')||empty('还没有个人待办','这里读取的是当前登录账号的原有待办。')}</section>`;
-  const filter=()=>{const rows=state.tasks.filter(t=>!t.plannedPublishOn||t.plannedPublishOn===selectedDate);$('#cloud-own-tasks').innerHTML=rows.map(t=>`<button class="history-record" data-live-task="${h(t.id)}"><span><b>${h(t.title)}</b><small>${text(t.requirements||t.instructions,'暂无说明')}</small></span><span>${h(t.plannedPublishOn||'未排期')}<br>${h(taskProgress(t))}</span></button>`).join('')||empty('这一天没有我的业务事项','未将团队任务当作本人事项展示。');};$('#cloud-date').onchange=e=>{if(validDate(e.target.value)){selectedDate=e.target.value;filter();}};filter();
+  $('#main').innerHTML=dailyLayout;
+  // Read-only availability differs; the approved page composition is shared.
+  $('#add-task').disabled=true;$('#add-task').title='云端只读预览，新增功能接入后开放';
+  $('#add-review').disabled=true;$('#add-review').title='云端只读预览，复盘安排接入后开放';
+  $('.preview-note').textContent='当前显示云端已有记录，只读预览。新增与完成操作接入后开放。';
+  $('.date-hint').textContent='只展示我的事项';
+  let selectedStatus='all';
+  const taskRows=()=>state.tasks.filter(t=>!t.plannedPublishOn||t.plannedPublishOn===selectedDate).map(t=>{
+    const ongoing=t.kind==='shooting'?['拍摄中','待验收','待补拍'].includes(t.shootingStatus):Number(t.publishedCount)>0||Number(t.filledCount)>0;
+    return {key:'task:'+t.id,id:t.id,title:t.title,type:t.kind==='shooting'?'素材拍摄':t.sourceType==='material'?'素材测试':t.sourceType==='product'?'测品任务':'内容制作',status:t.completedAt?'done':ongoing?'doing':'todo',dateLabel:t.plannedPublishOn||'未排期',context:t.productName||t.accountName||'业务事项',kind:'task'};
+  });
+  const todoRows=()=>state.todos.filter(t=>t.status!=='取消').map(t=>({key:'todo:'+t.id,id:t.id,title:t.title,type:t.taskType||'其他事项',status:t.status==='已完成'?'done':t.status==='进行中'?'doing':'todo',dateLabel:'持续待办',context:'个人事项',kind:'todo'}));
+  const allRows=()=>[...taskRows(),...todoRows()];
+  const renderList=()=>{
+    const rows=allRows(),done=rows.filter(r=>r.status==='done').length;
+    const percentage=rows.length?Math.round(done/rows.length*100):0;
+    $('#work-date').value=selectedDate;
+    $('#date-display').textContent=new Intl.DateTimeFormat('zh-CN',{month:'long',day:'numeric',weekday:'long',timeZone:'Asia/Shanghai'}).format(new Date(selectedDate+'T12:00:00+08:00'));
+    $('#total-count').textContent=rows.length+' 件';
+    $('#progress-caption').textContent=rows.length?`已完成 ${done} 件，还有 ${rows.length-done} 件待推进`:'今天的清单还是空的，先看看接下来的安排';
+    $('#progress-ring').style.setProperty('--progress',percentage+'%');$('#progress-number').textContent=percentage+'%';
+    document.querySelectorAll('[data-filter]').forEach(button=>{const active=button.dataset.filter===selectedStatus;button.classList.toggle('selected',active);button.setAttribute('aria-pressed',String(active));button.querySelector('span').textContent=button.dataset.filter==='all'?rows.length:rows.filter(r=>r.status===button.dataset.filter).length;});
+    const query=$('#search').value.trim().toLowerCase(),type=$('#type-filter').value;
+    const visible=rows.filter(r=>(selectedStatus==='all'||r.status===selectedStatus)&&(type==='all'||r.type===type)&&r.title.toLowerCase().includes(query)).sort((a,b)=>(a.status==='done')-(b.status==='done'));
+    const labels={todo:'待处理',doing:'进行中',done:'已完成'};
+    $('#task-list').innerHTML=visible.map(r=>`<article class="task ${r.status}"><button class="check" disabled aria-label="${h(r.title)}：${labels[r.status]}（只读）" title="当前仅查看，不能修改云端状态">${r.status==='done'?'✓':''}</button><button class="task-body" ${r.kind==='task'?'data-live-task':'data-live-todo'}="${h(r.id)}" aria-label="查看事项：${h(r.title)}"><span class="task-title">${h(r.title)}</span><span class="task-meta"><span class="type-tag" data-type="${h(r.type)}">${h(r.type)}</span><span>${h(r.dateLabel)}</span><i class="meta-dot"></i><span>${h(r.context)}</span></span></button><span class="state-tag ${r.status}">${labels[r.status]}</span><span class="task-arrow" aria-hidden="true">›</span></article>`).join('')||empty('这一天暂无符合条件的事项','可以切换日期或调整筛选条件。');
+    $('.list-foot').innerHTML='<span class="tiny-dot"></span> 未排期事项与持续待办一并列出 <span>每一步，都是积累。</span>';
+  };
+  const updateTypes=()=>{const previous=$('#type-filter').value;const values=[...new Set(allRows().map(r=>r.type))];$('#type-filter').innerHTML='<option value="all">所有类型</option>'+values.map(v=>`<option>${h(v)}</option>`).join('');$('#type-filter').value=values.includes(previous)?previous:'all';};
+  const moveDate=delta=>{const d=new Date(selectedDate+'T12:00:00Z');d.setUTCDate(d.getUTCDate()+delta);selectedDate=d.toISOString().slice(0,10);updateTypes();renderList();};
+  $('#prev-date').onclick=()=>moveDate(-1);$('#next-date').onclick=()=>moveDate(1);
+  $('#work-date').onchange=e=>{if(validDate(e.target.value)){selectedDate=e.target.value;updateTypes();renderList();}};
+  $('#today').onclick=()=>{selectedDate=chinaDate();updateTypes();renderList();};
+  document.querySelectorAll('[data-filter]').forEach(button=>button.onclick=()=>{selectedStatus=button.dataset.filter;renderList();});
+  $('#search').oninput=renderList;$('#type-filter').onchange=renderList;
+  $('#about').onclick=()=>{const dialog=$('#cloud-detail');$('#cloud-detail-content').innerHTML=detailHeader('本轮体验范围')+'<p class="preserve-text">保持已确认的首页设计，使用云端已有数据。目前可查看、筛选和打开详情；新增、完成、修改和安排复盘尚未接入。</p>'+profileNote();$('#cloud-close-detail').onclick=()=>dialog.close();dialog.showModal();};
+  if(!profile)$('.preview-note').textContent='当前账号尚未关联成员档案，暂不展示本人业务事项。个人待办仍会列出。当前为云端只读预览。';
+  updateTypes();renderList();
 }
+
 function historyPage(rows){
   $('#main').innerHTML=heading('我的执行记录','按实际完成或发布时间回看本人产出。')+profileNote()+`<section class="work-panel module-panel"><div class="module-toolbar"><label>完成日期<input type="date" id="cloud-history-date" value="${h(selectedDate)}"></label><span class="muted">${rows.length} 条产出</span></div>${rows.map(r=>`<button class="history-record" data-live-task="${h(r.taskId)}"><span><b>${h(r.title)}</b><small>${text(r.feedback,'暂无反馈')}</small></span><span>${h(r.occurredAt?new Intl.DateTimeFormat('zh-CN',{timeZone:'Asia/Shanghai',dateStyle:'short',timeStyle:'short'}).format(new Date(r.occurredAt)):'时间未提供')}<br>${h(r.kind)}</span></button>`).join('')||empty('这一天暂无本人执行记录','资料来自云端完成事实，不使用示例任务代替。')}</section>`;
   $('#cloud-history-date').onchange=e=>{if(validDate(e.target.value)){selectedDate=e.target.value;route();}};
@@ -98,7 +136,7 @@ async function openDetail(kind,id){
     if(signal.aborted)return;body.innerHTML=html;$('#cloud-close-detail').onclick=close;
   }catch(e){if(e.name==='AbortError')return;body.innerHTML=detailHeader('详情读取失败')+`<p class="preserve-text">${h(e.message)}</p>`;$('#cloud-close-detail').onclick=close;if(e instanceof ApiError&&e.status===401){state.materials=[];state.experiments=[];state.tasks=[];state.todos=[];$('#main').innerHTML=status('云端登录已失效','请回到原工作台登录，再刷新预览。');$('#cloud-retry').onclick=init;}}
 }
-document.addEventListener('click',e=>{const m=e.target.closest('[data-live-material]'),t=e.target.closest('[data-live-test]'),task=e.target.closest('[data-live-task]');if(m)openDetail('material',m.dataset.liveMaterial);if(t)openDetail('test',t.dataset.liveTest);if(task)openDetail('task',task.dataset.liveTask);});
+document.addEventListener('click',e=>{const m=e.target.closest('[data-live-material]'),t=e.target.closest('[data-live-test]'),task=e.target.closest('[data-live-task]'),todo=e.target.closest('[data-live-todo]');if(m)openDetail('material',m.dataset.liveMaterial);if(t)openDetail('test',t.dataset.liveTest);if(task)openDetail('task',task.dataset.liveTask);if(todo){const item=state.todos.find(t=>t.id===todo.dataset.liveTodo);if(!item)return;const dialog=$('#cloud-detail');$('#cloud-detail-content').innerHTML=detailHeader(item.title)+`<div class="detail-meta"><span>${h(item.status)}</span><span>${h(item.taskType)}</span><span>持续待办</span></div><p class="preserve-text">${text(item.notes,'暂无说明')}</p>`;$('#cloud-close-detail').onclick=()=>dialog.close();dialog.showModal();}});
 $('#cloud-detail').addEventListener('cancel',()=>detailController?.abort());
 window.addEventListener('hashchange',()=>user&&route());
 await init();

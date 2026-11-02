@@ -1,9 +1,11 @@
 import { groups, specs } from './navigation.mjs';
+import { dailyLayout } from './daily-layout.mjs';
 const mode = document.querySelector('meta[name="studio-data-mode"]')?.content;
 if (mode === 'cloud-readonly') {
   await import('./cloud-view.mjs');
 } else {
   window.StudioNavigation = { groups, specs };
+  document.querySelector('#page-daily').innerHTML = dailyLayout;
   const load = src => new Promise((resolve, reject) => {
     const script = document.createElement('script');
     script.src = src;
