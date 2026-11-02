@@ -50,3 +50,10 @@ id、variant、observedAt（北京时间）、window、url、note、metrics（na
 示例原型的数据形状仅用于早期体验。真实服务复用 `studio_os` 原表：业务执行使用 `tasks`，个人安排使用 `personal_todos`，二者在首页合并显示但不相互复制；实验和轮次使用 `lab_experiments` / `plans`，参考素材使用原 `plan_materials`；发布、观察和复盘直接沿用原表及标识。
 
 034 只在个人事项追加 `planned_on`、`due_at`、`completed_at`。035 的 `lab_dispatch_requests` 是重放回执，仅记录已创建的原任务标识，不生成第二套任务数据。原 33 个迁移文件的来源校验保持。详见 backend-compatibility.md。
+
+### 2026-11-02 用户补充：内容与知识沉淀
+
+- 草稿只保留本机保存，不开发多人同步。
+- 知识库只做分类、查找与飞书文档导航；正文在飞书维护。
+- 仅管理员维护导航的分类、名称、说明、标签与链接，操作放在当前页面，不单独设编辑板块。
+- 复用现有知识条目与管理员权限；已有正文保留原数据，不新增正文编辑器或协作草稿存储。

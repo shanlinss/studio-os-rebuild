@@ -1,6 +1,7 @@
+import {renderKnowledgeNavigation} from './knowledge-navigation.mjs';
 import {maskContact} from './resource-model.mjs';
 export const resourcePages=new Set(['templates','titles','tools','knowledge','learning','members','accounts','shops','profile']);
-export function createResourceViews({api,h,heading,showPanel,source,localTime,notify}){
+export function createResourceViews({api,h,heading,showPanel,source,localTime,notify,writable=false}){
  const $=s=>document.querySelector(s);
  const blank=(title,desc)=>`<div class="empty"><h3>${h(title)}</h3><p>${h(desc)}</p></div>`;
  const head=title=>`<div class="dialog-header"><h2>${h(title)}</h2><button class="icon-button" data-resource-close aria-label="关闭资料详情">×</button></div>`;
@@ -48,7 +49,7 @@ export function createResourceViews({api,h,heading,showPanel,source,localTime,no
   if(page==='templates'){const rows=await api.templates(signal);if(!signal.aborted)templates(rows);}
   if(page==='titles')await titles(signal);
   if(page==='tools'){const rows=await api.tools(signal);if(!signal.aborted)tools(rows);}
-  if(page==='knowledge'||page==='learning'){const rows=await api.knowledge(signal);if(!signal.aborted)knowledge(rows,page);}
+  if(page==='knowledge'||page==='learning'){const rows=await api.knowledge(signal);if(!signal.aborted){if(page==='knowledge')renderKnowledgeNavigation({rows,user,signal,api,h,heading,notify,writable});else knowledge(rows,page);}}
   if(page==='members'){const rows=await api.members(signal);if(!signal.aborted)members(rows);}
   if(page==='accounts'){const rows=await api.businessAccounts(signal);if(!signal.aborted)accounts(rows);}
   if(page==='shops'){const rows=await api.stores(signal);if(!signal.aborted)shops(rows);}

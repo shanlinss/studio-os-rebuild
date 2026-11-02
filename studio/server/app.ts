@@ -894,6 +894,14 @@ export async function createStudioApp(
     knowledgeSources(@Req() r: AuthRequest) {
       return knowledge.sources(r.identity!);
     }
+    @Post('knowledge/navigation')
+    knowledgeNavigationCreate(@Req() r: AuthRequest, @Body() b: unknown) {
+      return knowledge.navigation(r.identity!, b);
+    }
+    @Patch('knowledge/:id/navigation')
+    knowledgeNavigationEdit(@Req() r: AuthRequest, @Param('id') id: string, @Body() b: unknown) {
+      return knowledge.navigation(r.identity!, b, id);
+    }
     @Post('knowledge')
     knowledgeCreate(@Req() r: AuthRequest, @Body() b: unknown) {
       return knowledge.save(r.identity!, b);
@@ -1862,6 +1870,12 @@ export async function createStudioApp(
           requireContributor(req.identity);
         else requireAdministrator(req.identity);
         if (req.method !== 'GET') auth.csrf(req);
+        return true;
+      }
+      if ((req.method === 'POST' && req.path === '/api/knowledge/navigation') ||
+          (req.method === 'PATCH' && /^\/api\/knowledge\/[^/]+\/navigation$/.test(req.path))) {
+        requireAdministrator(req.identity);
+        auth.csrf(req);
         return true;
       }
       if (

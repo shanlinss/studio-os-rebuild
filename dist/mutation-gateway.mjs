@@ -1,10 +1,11 @@
+import {readMedia} from './media-contract.mjs';
 import {ApiError} from './cloud-contract.mjs';
 // Used only by explicit connected builds. Read-only previews never request a mutation token.
 export function createMutationGateway(fetcher,{enabled=false}={}){
  let token=null;const pending=new Set(),uncertain=new Set();
  const acceptSession=data=>{token=enabled&&/^[a-f0-9]{64}$/.test(data?.csrfToken)?data.csrfToken:null;if(token)uncertain.delete('/api/login');};
  const confirmRead=path=>{for(const p of uncertain)if(p===path||p.startsWith(path+'/'))uncertain.delete(p);};
- async function send(path,method,body,{login=false}={}){
+ async function send(path,method,body,{login=false,binary=false,headers={},responseType='json'}={}){
   if(!enabled)throw new ApiError(405,'当前为只读预览，未发送保存请求。');
   if(!login&&!token)throw new ApiError(401,'请先登录，再保存修改。');
   if(pending.has(path))throw new ApiError(409,'这项操作正在保存，请稍候。');
@@ -12,11 +13,11 @@ export function createMutationGateway(fetcher,{enabled=false}={}){
   pending.add(path);
   try{
    let response;
-   try{response=await fetcher(path,{method,credentials:'same-origin',cache:'no-store',redirect:'error',signal:AbortSignal.timeout(15000),headers:{Accept:'application/json','Content-Type':'application/json',...(!login?{'x-csrf-token':token}:{})},body:JSON.stringify(body)});}
+   try{response=await fetcher(path,{method,credentials:'same-origin',cache:'no-store',redirect:'error',signal:AbortSignal.timeout(binary||responseType==='media'?60000:15000),headers:{Accept:responseType==='media'?'image/png,image/jpeg,image/gif,image/webp,video/mp4':'application/json',...(!binary?{'Content-Type':'application/json'}:{}),...headers,...(!login?{'x-csrf-token':token}:{})},body:binary?body:JSON.stringify(body)});}
    catch{uncertain.add(path);const error=new ApiError(0,'保存结果未确认，请先刷新列表核对，避免重复提交。');error.uncertain=true;throw error;}
    if(response.status>=500){uncertain.add(path);const error=new ApiError(response.status,'服务暂未确认保存结果，请先核对原记录，避免重复提交。');error.uncertain=true;throw error;}
-   if(!response.ok){if(response.status===401)token=null;throw new ApiError(response.status,response.status===409?'记录已变化，请刷新详情后重新编辑。':response.status===401?'登录已失效，请重新登录。':response.status===403?'当前账号无权进行这项操作。':'保存未完成，请核对填写内容。');}
-   let data;try{data=await response.json();}catch{uncertain.add(path);const e=new ApiError(0,'保存响应不完整，请先核对原记录。');e.uncertain=true;throw e;}
+   if(!response.ok){if(response.status===401)token=null;throw new ApiError(response.status,response.status===409?'记录已变化，请刷新详情后重新编辑。':response.status===401?'登录已失效，请重新登录。':response.status===403?'当前账号无权进行这项操作。':response.status===413?'文件或内容超过本次限制，请精简后再提交。':'保存未完成，请核对填写内容。');}
+   let data;try{if(responseType==='media'){const blob=await readMedia(response),receipt=response.headers.get('X-Studio-Download-Receipt');if(!receipt||!/^[a-f0-9-]{36}$/.test(receipt))throw Error();data={blob,receipt};}else data=await response.json();}catch{uncertain.add(path);const e=new ApiError(0,'保存响应不完整，请先核对原记录。');e.uncertain=true;throw e;}
    if(login)acceptSession(data);return data;
   }finally{pending.delete(path);}
  }

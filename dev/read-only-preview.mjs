@@ -7,18 +7,20 @@ const staticFiles = new Map([
   ['/', ['index.html', 'text/html; charset=utf-8']],
   ['/index.html', ['index.html', 'text/html; charset=utf-8']],
   ['/styles.css', ['styles.css', 'text/css; charset=utf-8']],
-  ...['bootstrap.mjs', 'navigation.mjs', 'cloud-view.mjs', 'cloud-api.mjs', 'daily-layout.mjs', 'cloud-contract.mjs', 'business-model.mjs', 'business-view.mjs', 'resource-model.mjs', 'resource-view.mjs', 'management-model.mjs', 'management-view.mjs', 'creation-model.mjs', 'planning-view.mjs', 'write-contract.mjs', 'mutation-gateway.mjs', 'record-editors.mjs', 'workbench-model.mjs', 'page-access.mjs'].map(name => ['/'+name, [name, 'text/javascript; charset=utf-8']]),
+  ...['bootstrap.mjs', 'navigation.mjs', 'cloud-view.mjs', 'cloud-api.mjs', 'daily-layout.mjs', 'cloud-contract.mjs', 'business-model.mjs', 'business-view.mjs', 'resource-model.mjs', 'resource-view.mjs', 'knowledge-navigation.mjs', 'management-model.mjs', 'management-view.mjs', 'creation-model.mjs', 'planning-view.mjs', 'write-contract.mjs', 'mutation-gateway.mjs', 'record-editors.mjs', 'workbench-model.mjs', 'page-access.mjs', 'attachments.mjs', 'media-contract.mjs', 'shooting-contract.mjs', 'shooting-editors.mjs'].map(name => ['/'+name, [name, 'text/javascript; charset=utf-8']]),
 ]);
-const fixedRoutes = new Set(['/api/live','/api/health','/api/session','/api/navigation','/api/materials','/api/lab/experiments','/api/tasks','/api/workbench/todos','/api/workbench/profile','/api/workbench/completed','/api/products','/api/shooting/requests','/api/templates','/api/titles/catalog','/api/toolbox','/api/knowledge','/api/admin/members','/api/admin/business-accounts','/api/admin/stores','/api/admin/accounts','/api/finance','/api/competitors','/api/samples/catalog','/api/attendance/periods']);
+const fixedRoutes = new Set(['/api/live','/api/health','/api/session','/api/navigation','/api/materials','/api/lab/experiments','/api/tasks','/api/workbench/todos','/api/workbench/profile','/api/workbench/completed','/api/products','/api/shooting/requests','/api/shooting/assignees','/api/templates','/api/titles/catalog','/api/toolbox','/api/knowledge','/api/admin/members','/api/admin/business-accounts','/api/admin/stores','/api/admin/accounts','/api/finance','/api/competitors','/api/samples/catalog','/api/attendance/periods']);
 const uuid = '[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}';
 const detailRoute = new RegExp(`^/api/(materials|lab/experiments|tasks|products|shooting/requests|templates|titles)/${uuid}$`);
+const mediaRoute=new RegExp(`^/api/(?:materials/${uuid}/assets/${uuid}|shooting/requests/${uuid}/assets/${uuid}|tasks/${uuid}/publications/${uuid}/assets/${uuid})$`);
+const mediaTypes=new Set(['image/png','image/jpeg','image/gif','image/webp','video/mp4']);
 const defaultRoot = fileURLToPath(new URL('../dist/', import.meta.url));
 
 export function createPreviewServer({ root = defaultRoot, upstreamPort = 13102, forwardSession = true } = {}) {
   const server = http.createServer(async (req, res) => {
     const finish = (status, data, type='application/json; charset=utf-8') => {
       if (res.destroyed || res.headersSent) return;
-      res.writeHead(status, { 'Content-Type': type, 'Cache-Control':'no-store', 'X-Content-Type-Options':'nosniff', 'Referrer-Policy':'no-referrer', 'Content-Security-Policy':"default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; connect-src 'self'; img-src 'self' data:; frame-ancestors 'none'; base-uri 'none'; form-action 'none'" });
+      res.writeHead(status, { 'Content-Type': type, 'Cache-Control':'no-store', 'X-Content-Type-Options':'nosniff', 'Referrer-Policy':'no-referrer', 'Content-Security-Policy':"default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; connect-src 'self'; img-src 'self' data: blob:; media-src 'self' blob:; frame-ancestors 'none'; base-uri 'none'; form-action 'none'" });
       res.end(typeof data==='string'||Buffer.isBuffer(data)?data:JSON.stringify(data));
     };
     const address=server.address();
@@ -31,17 +33,18 @@ export function createPreviewServer({ root = defaultRoot, upstreamPort = 13102, 
     if(url.pathname.startsWith('/api/')){
       const expected='http://'+req.headers.host;
       if ((req.headers.origin && req.headers.origin!==expected) || (req.headers['sec-fetch-site'] && !['same-origin','none'].includes(req.headers['sec-fetch-site']))) {finish(403,{message:'Same-origin request required'});return;}
-      if(!fixedRoutes.has(url.pathname)&&!detailRoute.test(url.pathname)){finish(404,{message:'Read route unavailable'});return;}
+      if(!fixedRoutes.has(url.pathname)&&!detailRoute.test(url.pathname)&&!mediaRoute.test(url.pathname)){finish(404,{message:'Read route unavailable'});return;}
       const allowedQuery=url.pathname==='/api/workbench/completed'?['date','source','member']:url.pathname==='/api/titles/catalog'?['q','page']:url.pathname==='/api/samples/catalog'?['q','active','offset']:url.pathname==='/api/attendance/periods'?['view','memberId','from','to','offset']:[];
       if([...url.searchParams.keys()].some(k=>!allowedQuery.includes(k))){finish(400,{message:'Unexpected query'});return;}
       const cookies=(req.headers.cookie||'').split(';').map(s=>s.trim()).filter(s=>s.startsWith('studio_session='));
       const cookie=forwardSession&&cookies.length===1&&/^studio_session=[a-f0-9]{64}$/.test(cookies[0])?cookies[0]:undefined;
-      const remote=http.request({hostname:'::1',port:upstreamPort,path:url.pathname+url.search,method:'GET',headers:{Accept:'application/json',...(cookie?{Cookie:cookie}:{})}},up=>{
+      const remote=http.request({hostname:'::1',port:upstreamPort,path:url.pathname+url.search,method:'GET',headers:{Accept:mediaRoute.test(url.pathname)?'image/png,image/jpeg,image/gif,image/webp,video/mp4':'application/json',...(cookie?{Cookie:cookie}:{})}},up=>{
         const chunks=[];let size=0;
         up.on('data',chunk=>{size+=chunk.length;if(size>12*1024*1024){up.destroy();finish(502,{message:'Read response too large'});}else chunks.push(chunk);});
         up.on('end',()=>{
           if (res.writableEnded)return;
           if((up.statusCode||500)>=300&&(up.statusCode||500)<400){finish(502,{message:'Upstream redirect refused'});return;}
+          if(mediaRoute.test(url.pathname)&&up.statusCode===200){const mime=(up.headers['content-type']||'').split(';')[0];if(!mediaTypes.has(mime)||size>8388608){finish(502,{message:'Unexpected private media response'});return;}finish(200,Buffer.concat(chunks),mime);return;}
           if(!(up.headers['content-type']||'').includes('application/json')){finish(502,{message:'Unexpected response type'});return;}
           try{
             let data=JSON.parse(Buffer.concat(chunks).toString('utf8'));

@@ -24,6 +24,29 @@ function articleBody(value: unknown) {
 }
 export class Knowledge {
   constructor(private readonly db: StudioDatabase) {}
+  async navigation(identity: Identity, value: unknown, id?: string) {
+    requireAdministrator(identity);
+    if (id) uuid(id);
+    const b = objectInput(value, ['title', 'category', 'summary', 'tags', 'sourceUrl', ...(id ? ['expectedVersion'] : [])]);
+    const title = shortText(b.title, 200), category = optional(b.category, 100), summary = optional(b.summary, 2000);
+    const sourceUrl = webLink(b.sourceUrl), url = new URL(sourceUrl);
+    if (url.protocol !== 'https:' || url.username || url.password || url.port || !(url.hostname === 'feishu.cn' || url.hostname.endsWith('.feishu.cn')))
+      throw new BadRequestException('请填写 HTTPS 飞书文档链接');
+    if (!Array.isArray(b.tags) || b.tags.length > 30) throw new BadRequestException();
+    const tags = [...new Set(b.tags.map((tag) => shortText(tag, 40)))];
+    if (!id) return this.save(identity, { title, category, summary, tags, sourceUrl, entryType: 'knowledge', kind: 'link' });
+    const expected = version(b.expectedVersion);
+    return this.db.client.begin(async (tx) => {
+      const [before] = await tx`SELECT * FROM studio_os.knowledge_assets WHERE id=${id} AND entry_type='knowledge' FOR UPDATE`;
+      if (!before) throw new NotFoundException();
+      if (before.version !== expected) throw new ConflictException();
+      if (before.kind === 'conclusion') throw new BadRequestException('请保留原结论引用，另建飞书文档导航');
+      // Navigation updates preserve legacy bodies, source relations and cover assets.
+      const [row] = await tx`UPDATE studio_os.knowledge_assets SET title=${title},category=${category},summary=${summary},tags=${JSON.stringify(tags)}::jsonb,source_url=${sourceUrl},version=version+1,updated_at=now() WHERE id=${id} RETURNING id,version`;
+      await tx`INSERT INTO studio_os.knowledge_events(asset_id,actor_id,action,before_value,after_value) VALUES(${id},${identity.id},'updated',${JSON.stringify(before)}::jsonb,${JSON.stringify({title,category,summary,tags,sourceUrl})}::jsonb)`;
+      return row;
+    });
+  }
   list(identity: Identity) {
     requireContributor(identity);
     return this.db

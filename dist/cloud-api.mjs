@@ -1,8 +1,11 @@
+import {assetPath,mediaUpload,readMedia} from './media-contract.mjs';
+import {shootingPayload,shootingAction,shootingProgress,shootingArchive} from './shooting-contract.mjs';
+import {expectedVersion} from './write-contract.mjs';
 import {createMutationGateway} from './mutation-gateway.mjs';
 import {materialPayload,productPayload,publicationPayload,snapshotPayload,todoPayload,experimentDraftPayload,dispatchPayload,reviewPayload,conclusionPayload} from './write-contract.mjs';
 import {todoModel} from './workbench-model.mjs';
 import {financeRecord,pagedRows} from './management-model.mjs';
-import {namedList,templateRecord,titleCatalog,titleBatch,knowledgeList} from './resource-model.mjs';
+import {namedList,templateRecord,titleCatalog,titleBatch,knowledgeList,knowledgeNavigationPayload} from './resource-model.mjs';
 import {ApiError,ContractError,chinaDate,validDate} from './cloud-contract.mjs';
 export {ApiError,ContractError,chinaDate,validDate} from './cloud-contract.mjs';
 import {productRecord,shootingRecord,executionRows} from './business-model.mjs';
@@ -59,6 +62,18 @@ export function createCloudApi(fetcher=globalThis.fetch,{allowWrites=false}={}){
   async function read(path,signal,adapt){const value=adapt(await get(path,signal));mutations.confirmRead(path);return value;}
   async function labCapability(){if(!allowWrites)throw new ApiError(405,'当前为只读预览，未发送保存请求。');const c=await get('/api/workbench/capabilities');if(!record(c)||c.materialLabDrafts!==1)throw new ContractError('实验草稿与执行安排兼容尚未接入。');}
   return {
+    async asset(kind,owner,asset,context={},signal){let r;try{r=await fetcher(assetPath(kind,owner,asset,context),{method:'GET',credentials:'same-origin',cache:'no-store',redirect:'error',signal});}catch(e){if(e.name==='AbortError')throw e;throw new ApiError(0,'附件读取中断，请重试。');}if(!r.ok){if(r.status===401)mutations.clear();throw new ApiError(r.status,r.status===401?'登录已失效，请重新登录。':r.status===403?'当前账号无权读取这个附件。':'附件暂不可读取，请刷新资料核对。');}return readMedia(r);},
+    async uploadMaterial(id,file){const f=mediaUpload(file);return mutations.send('/api/materials/'+endpointId(id)+'/assets','POST',f.file,{binary:true,headers:{'Content-Type':f.mime,'x-file-name':encodeURIComponent(f.name),'x-asset-kind':'screenshot'}});},
+    async downloadMaterial(id,asset){return mutations.send(assetPath('material',id,asset)+'/downloads','POST',{}, {responseType:'media'});},
+    async confirmMaterialDownload(id,asset,receipt){return mutations.send(assetPath('material',id,asset)+'/downloads/'+endpointId(receipt),'POST',{});},
+    async uploadPublication(task,publication,file){const f=mediaUpload(file);return mutations.send('/api/tasks/'+endpointId(task)+'/publications/'+endpointId(publication)+'/assets','POST',f.file,{binary:true,headers:{'Content-Type':f.mime,'x-file-name':encodeURIComponent(f.name)}});},
+    async shootingAssignees(signal){return namedList(await get('/api/shooting/assignees',signal),'displayName');},
+    async createShooting(value){return mutations.send('/api/shooting/requests','POST',shootingPayload(value));},
+    async updateShooting(id,value,version){return mutations.send('/api/shooting/requests/'+endpointId(id),'PATCH',shootingPayload(value,version));},
+    async shootingState(id,value,version){return mutations.send('/api/shooting/requests/'+endpointId(id)+'/state','POST',shootingAction(value,version));},
+    async shootingItem(id,item,completed,version,key){return mutations.send('/api/shooting/requests/'+endpointId(id)+'/items/'+endpointId(item),'PATCH',shootingProgress(key,completed,version));},
+    async archiveShooting(id,archived,version,key){return mutations.send('/api/shooting/requests/'+endpointId(id)+'/archive','POST',shootingArchive(key,archived,version));},
+    async uploadShooting(id,file,version,key,{itemId,note=''}={}){const f=mediaUpload(file,{imagesOnly:!!itemId}),v=expectedVersion(version);endpointId(key);if(typeof note!=='string'||note.length>1000)throw new ContractError('附件说明最多 1000 字。');return mutations.send('/api/shooting/requests/'+endpointId(id)+(itemId?'/items/'+endpointId(itemId):'')+'/assets','POST',f.file,{binary:true,headers:{'Content-Type':f.mime,'x-file-name':encodeURIComponent(f.name),'x-expected-version':String(v),'x-request-key':key,'x-file-note':encodeURIComponent(note)}});},
     async createExperiment(value){const payload=experimentDraftPayload(value);await labCapability();return mutations.send('/api/lab/experiments','POST',payload);},
     async dispatchRound(id,round,value,version){const payload=dispatchPayload(value,version),path='/api/lab/experiments/'+endpointId(id)+'/rounds/'+endpointId(round)+'/assignments';await labCapability();return mutations.send(path,'POST',payload);},
     async dispatchReceipt(id,round,key){const path='/api/lab/experiments/'+endpointId(id)+'/rounds/'+endpointId(round)+'/assignments';try{const value=await get(path+'/'+endpointId(key));if(!record(value)||!Array.isArray(value.taskIds)||value.taskIds.some(id=>typeof id!=='string')||!Number.isSafeInteger(value.version))throw new ContractError();mutations.confirmRead(path);return value;}catch(e){if(e.status===404){mutations.confirmRead(path);return null;}throw e;}},
@@ -95,15 +110,17 @@ export function createCloudApi(fetcher=globalThis.fetch,{allowWrites=false}={}){
     async titleCatalog(params={},signal){const q=new URLSearchParams({page:String(params.page??1),q:params.q??''});return titleCatalog(await get('/api/titles/catalog?'+q,signal));},
     async titleBatch(id,signal){return titleBatch(await get('/api/titles/'+endpointId(id),signal));},
     async tools(signal){return namedList(await get('/api/toolbox',signal));},
-    async knowledge(signal){return knowledgeList(await get('/api/knowledge',signal));},
+    async knowledge(signal){return read('/api/knowledge',signal,knowledgeList);},
+    async createKnowledgeNavigation(value){return mutations.send('/api/knowledge/navigation','POST',knowledgeNavigationPayload(value));},
+    async updateKnowledgeNavigation(id,value,version){return mutations.send('/api/knowledge/'+endpointId(id)+'/navigation','PATCH',knowledgeNavigationPayload(value,version));},
     async members(signal){return namedList(await get('/api/admin/members',signal),'displayName');},
     async businessAccounts(signal){return namedList(await get('/api/admin/business-accounts',signal));},
     async stores(signal){return namedList(await get('/api/admin/stores',signal));},
     async workTasks(signal){return executionRows(await get('/api/tasks',signal));},
     async products(signal){return read('/api/products',signal,v=>list(v).map(p=>productRecord(p)));},
     async product(id,signal){return read('/api/products/'+endpointId(id),signal,v=>productRecord(v,true));},
-    async shooting(signal){return list(await get('/api/shooting/requests',signal)).map(shootingRecord);},
-    async shootingDetail(id,signal){return shootingRecord(await get('/api/shooting/requests/'+endpointId(id),signal));},
+    async shooting(signal){return read('/api/shooting/requests',signal,v=>list(v).map(shootingRecord));},
+    async shootingDetail(id,signal){return read('/api/shooting/requests/'+endpointId(id),signal,shootingRecord);},
     async completed(date,user,profile,signal){
       if(!validDate(date))throw new ContractError('请填写有效日期。');
       if(!profile)return [];

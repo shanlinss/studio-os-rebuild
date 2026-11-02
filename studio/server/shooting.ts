@@ -400,6 +400,8 @@ export class Shooting {
         b.feedback === undefined ? undefined : optional(b.feedback),
       nas = b.nasPath === undefined ? undefined : optional(b.nasPath),
       action = String(b.action);
+    if(action === 'reshoot' && !feedback?.trim())
+      throw new BadRequestException('请填写需要补拍的原因');
     return this.mutate(
       identity,
       id,
@@ -428,6 +430,17 @@ export class Shooting {
                     ? '待拍摄'
                     : null;
         if (!next) throw new ConflictException();
+        if(action === 'deliver' || action === 'approve') {
+          const path = action === 'deliver' && nas !== undefined ? nas : r.nas_path;
+          const [delivery] = await tx`SELECT EXISTS(SELECT 1 FROM studio_os.shooting_assets WHERE request_id=${id} AND kind='delivery' AND NOT removed) AS available`;
+          if(!path.trim() && !delivery.available)
+            throw new ConflictException('请先上传交付文件或填写交付路径');
+        }
+        if(action === 'approve') {
+          const [items] = await tx`SELECT count(*)::int AS total,count(*) FILTER(WHERE NOT completed)::int AS remaining FROM studio_os.shooting_items WHERE request_id=${id} AND NOT archived`;
+          if(!items.total || items.remaining)
+            throw new ConflictException('仍有未完成的拍摄项，请先核对清单或要求补拍');
+        }
         await tx`UPDATE studio_os.shooting_requests SET status=${next},feedback=${action === 'reshoot' && feedback !== undefined ? feedback : r.feedback},nas_path=${action === 'deliver' && nas !== undefined ? nas : r.nas_path},last_completed_at=CASE WHEN ${action === 'approve'} THEN now() ELSE last_completed_at END WHERE id=${id}`;
         return { id };
       },
