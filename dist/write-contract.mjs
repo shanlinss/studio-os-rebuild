@@ -62,3 +62,32 @@ export function conclusionPayload(value,version){
  if(!Array.isArray(b.tags)||b.tags.length>20)throw new ContractError('结论标签最多 20 个。');
  return {expectedVersion:expectedVersion(version),verdict:b.verdict,finding:text(b.finding,2000,true),recommendation:text(b.recommendation??'',2000),tags:[...new Set(b.tags.map(t=>text(t,40,true)))]};
 }
+
+export function nextRoundPayload(value,version){
+ const b=fields(value,['title','requestKey','materialIds','lab']),lab=fields(b.lab,['adjustment','testVariable','executionConditions','plannedPublishOn']);
+ const base=experimentDraftPayload({title:b.title,requestKey:b.requestKey,materialIds:b.materialIds,lab:{testVariable:lab.testVariable,executionConditions:lab.executionConditions,plannedPublishOn:lab.plannedPublishOn}});
+ return {...base,expectedVersion:expectedVersion(version),assignments:[],lab:{...base.lab,adjustment:text(lab.adjustment,2000,true)}};
+}
+export function directoryPayload(kind,value,version){
+ const keys={member:['displayName','jobTitle','startDate','employmentStatus'],account:['name','profileUrl','responsibleMemberId','boundPhone','actualPhone','remark'],store:['name']}[kind];if(!keys)throw new ContractError();
+ const b=fields(value,[...keys,...(version===undefined?[]:['active'])]);if(keys.some(k=>!Object.hasOwn(b,k)))throw new ContractError('请保留完整基础资料。');let out;
+ if(kind==='member'){if(b.startDate!==null&&!validDate(b.startDate))throw new ContractError('入职日期无效。');out={displayName:text(b.displayName,100,true),jobTitle:text(b.jobTitle,100),startDate:b.startDate,employmentStatus:text(b.employmentStatus,40)};}
+ else if(kind==='account')out={name:text(b.name,100,true),profileUrl:https(b.profileUrl),responsibleMemberId:uuid(b.responsibleMemberId),boundPhone:text(b.boundPhone,100),actualPhone:text(b.actualPhone,100),remark:text(b.remark,2000)};
+ else out={name:text(b.name,100,true)};
+ if(version!==undefined){if(typeof b.active!=='boolean')throw new ContractError();out.active=b.active;out.expectedVersion=expectedVersion(version);}return out;
+}
+const day=v=>{if(!validDate(v))throw new ContractError('日期无效。');return v;};
+export function decimalAmount(v){
+ if(typeof v!=='string'||!/^\d{1,8}(?:\.\d{1,2})?$/.test(v))throw new ContractError('金额最多保留两位小数。');const [whole,fraction='']=v.split('.'),cents=BigInt(whole)*100n+BigInt(fraction.padEnd(2,'0'));if(cents<=0n||cents>2147483647n)throw new ContractError('金额超出允许范围。');return v;
+}
+export function expensePayload(value,version){
+ const b=fields(value,['expenseDate','description','amount','paymentMode','payerId','storeId','categoryId','note',...(version===undefined?['requestKey']:[])]);
+ if(!['company','advance'].includes(b.paymentMode)||(b.paymentMode==='company'&&b.payerId!==null)||(b.paymentMode==='advance'&&!b.payerId))throw new ContractError('个人垫付须指定垫付人，公司支付不指定垫付人。');
+ return {expenseDate:day(b.expenseDate),description:text(b.description,2000,true),amount:decimalAmount(b.amount),paymentMode:b.paymentMode,payerId:b.payerId===null?null:uuid(b.payerId),storeId:b.storeId===null?null:uuid(b.storeId),categoryId:b.categoryId===null?null:uuid(b.categoryId),note:text(b.note,2000),...(version===undefined?{requestKey:uuid(b.requestKey)}:{expectedVersion:expectedVersion(version)})};
+}
+export function settlementPayload(value){
+ const b=fields(value,['payerId','startDate','endDate','items','note','requestKey']);day(b.startDate);day(b.endDate);if(b.startDate>b.endDate||!Array.isArray(b.items)||!b.items.length||b.items.length>500)throw new ContractError('请选择同一垫付人的有效支出明细和日期区间。');
+ const items=b.items.map(i=>{fields(i,['expenseId','expectedVersion']);return {expenseId:uuid(i.expenseId),expectedVersion:expectedVersion(i.expectedVersion)};});if(new Set(items.map(i=>i.expenseId)).size!==items.length)throw new ContractError('结算支出不能重复。');
+ return {payerId:uuid(b.payerId),startDate:b.startDate,endDate:b.endDate,items,note:text(b.note,2000),requestKey:uuid(b.requestKey)};
+}
+export function paymentPayload(value,version){const b=fields(value,['settlementId','amount','paidDate','note','requestKey']);return {settlementId:uuid(b.settlementId),amount:decimalAmount(b.amount),paidDate:day(b.paidDate),note:text(b.note,2000),requestKey:uuid(b.requestKey),expectedVersion:expectedVersion(version)};}

@@ -99,3 +99,78 @@ test('knowledge navigation reuses original records, preserves legacy bodies, and
  const events=await db.client`SELECT action,after_value FROM studio_os.knowledge_events WHERE asset_id=${legacy.id} ORDER BY created_at`;assert.equal(events.length,2);assert.equal(events[1].action,'updated');assert.equal(events[1].after_value.title,'旧规范入口');
  assert.ok((await clients[1].knowledge()).some(k=>k.id===created.id));
 });
+let sampleId,loanId;
+test('original sample registration and stock remain admin-only; borrowing keeps shooting link and durable replay',async()=>{
+ const admin=clients[0],worker=clients[1],registration={requestKey:randomUUID(),name:'隔离样品',warehouseLocation:'仓库 A-01',productId:null,keeperMemberId:members[0],notes:'原样品档案'};
+ await assert.rejects(worker.sampleWrite('register',undefined,registration),e=>e.status===403);
+ const created=await admin.sampleWrite('register',undefined,registration);sampleId=created.id;
+ let row=(await admin.sampleCatalog()).rows.find(s=>s.id===sampleId);assert.equal(row.available_quantity,0);
+ await assert.rejects(worker.sampleWrite('stock',sampleId,{requestKey:randomUUID(),quantity:3,note:''},row.version),e=>e.status===403);
+ await admin.sampleWrite('stock',sampleId,{requestKey:randomUUID(),quantity:3,note:'实际入库'},row.version);
+ const value={requestKey:randomUUID(),quantity:2,location:'拍摄台',shootingRequestId:shoot.id,note:'本次拍摄借用'};
+ const [a,b]=await Promise.all([json(sessions[1],'/samples/catalog/'+sampleId+'/borrow','POST',value),json(sessions[1],'/samples/catalog/'+sampleId+'/borrow','POST',value)]);assert.equal(a.id,b.id);loanId=a.id;
+ assert.equal((await admin.sampleCatalog()).rows.find(s=>s.id===sampleId).available_quantity,1);
+ const loan=(await worker.sampleLoans()).rows.find(l=>l.id===loanId);assert.equal(loan.shooting_request_id,shoot.id);assert.ok(loan.shooting_title);assert.equal(loan.owner_id,sessions[1].user.id);assert.equal(loan.quantity,2);
+ assert.deepEqual(await worker.sampleReceipt(value.requestKey,'borrow',sampleId),a);
+ await assert.rejects(worker.sampleWrite('borrow',sampleId,{...value,quantity:1}),e=>e.status===409);
+ await assert.rejects(clients[3].sampleWrite('borrow',sampleId,{...value,requestKey:randomUUID(),quantity:1}),e=>e.status===409);
+ await assert.rejects(worker.sampleLoans({team:true}),e=>e.status===403);
+});
+test('partial returns and location changes preserve loan identity; other members and admin cannot return on behalf',async()=>{
+ const worker=clients[1];let loan=(await worker.sampleLoans()).rows.find(l=>l.id===loanId);
+ for(const other of [clients[0],clients[2]])await assert.rejects(other.sampleWrite('return',loanId,{requestKey:randomUUID(),quantity:1,note:''},loan.version),e=>e.status===404);
+ await worker.sampleWrite('return',loanId,{requestKey:randomUUID(),quantity:1,note:'已交回一件'},loan.version);
+ loan=(await worker.sampleLoans()).rows.find(l=>l.id===loanId);assert.equal(loan.returned_quantity,1);assert.equal(loan.version,2);
+ await assert.rejects(worker.sampleWrite('relocate',loanId,{requestKey:randomUUID(),location:'整理台',note:''},1),e=>e.status===409);
+ await worker.sampleWrite('relocate',loanId,{requestKey:randomUUID(),location:'整理台',note:'剩余一件'},loan.version);
+ loan=(await worker.sampleLoans()).rows.find(l=>l.id===loanId);assert.equal(loan.location,'整理台');assert.equal(loan.id,loanId);
+ await assert.rejects(worker.sampleWrite('return',loanId,{requestKey:randomUUID(),quantity:2,note:''},loan.version),e=>e.status===409);
+ assert.equal((await clients[0].sampleCatalog()).rows.find(s=>s.id===sampleId).available_quantity,2);
+ const value={requestKey:randomUUID(),quantity:1,note:'全部交回'};await worker.sampleWrite('return',loanId,value,loan.version);await worker.sampleWrite('return',loanId,value,loan.version);
+ assert.equal((await clients[0].sampleCatalog()).rows.find(s=>s.id===sampleId).available_quantity,3);
+ assert.ok(!(await worker.sampleLoans()).rows.some(l=>l.id===loanId));assert.ok((await worker.sampleLoans({status:'returned'})).rows.some(l=>l.id===loanId));
+});
+test('concurrent borrow cannot overdraw stock, while paged own loans remain scoped and complete across pages',async()=>{
+ const admin=clients[0];let row=(await admin.sampleCatalog()).rows.find(s=>s.id===sampleId);
+ const value=()=>({requestKey:randomUUID(),quantity:2,location:'拍摄区',shootingRequestId:null,note:''});
+ const responses=await Promise.all([request(sessions[1],'/samples/catalog/'+sampleId+'/borrow','POST',value()),request(sessions[2],'/samples/catalog/'+sampleId+'/borrow','POST',value())]);assert.deepEqual(responses.map(r=>r.status).sort(),[201,409]);
+ assert.equal((await admin.sampleCatalog()).rows.find(s=>s.id===sampleId).available_quantity,1);
+ row=(await admin.sampleCatalog()).rows.find(s=>s.id===sampleId);await admin.sampleWrite('stock',sampleId,{requestKey:randomUUID(),quantity:55,note:''},row.version);
+ for(let i=0;i<51;i++)await clients[1].sampleWrite('borrow',sampleId,{requestKey:randomUUID(),quantity:1,location:'分页验证',shootingRequestId:null,note:''});
+ const first=await clients[1].sampleLoans({status:'all'}),second=await clients[1].sampleLoans({status:'all',offset:50});assert.equal(first.rows.length,50);assert.ok(second.rows.length>0);assert.equal(new Set([...first.rows,...second.rows].map(l=>l.id)).size,first.total);assert.ok([...first.rows,...second.rows].every(l=>l.owner_id===sessions[1].user.id));
+});
+test('follow-up experimental rounds stay under one experiment and can be dispatched later without copying history',async()=>{
+ const api=clients[0],draft=await api.createExperiment({title:'连续轮次验证',requestKey:randomUUID(),materialIds:[material.id],lab:{hypothesis:'一次只改一个变量',direction:'封面',testVariable:'首轮变量',executionConditions:'同一产品',plannedPublishOn:null}});
+ let root=await api.experiment(draft.experimentId);const first=root.rounds[0].id,key=randomUUID(),value={requestKey:key,title:'第二轮',materialIds:[material.id],lab:{adjustment:'根据首轮结果调整标题',testVariable:'只改标题',executionConditions:'保持同一产品',plannedPublishOn:'2026-11-04'}};
+ const round=await api.nextRound(root.id,value,root.version);await api.nextRound(root.id,value,root.version);
+ root=await api.experiment(root.id);assert.equal(root.rounds.length,2);assert.equal(root.rounds[0].id,first);assert.equal(root.rounds[1].id,round.id);assert.equal(root.rounds[1].tasks.length,0);assert.equal(root.rounds[1].requestKey,key);assert.equal(root.rounds[1].adjustment,value.lab.adjustment);
+ await assert.rejects(clients[1].nextRound(root.id,{...value,requestKey:randomUUID()},root.version),e=>e.status===403);
+ const product=await api.createProduct({name:'关联实验产品',storeId:null,notes:'产品资料',stages:['内容测试']});await api.experimentProduct(root.id,product.id,root.version);root=await api.experiment(root.id);assert.equal(root.linkedProductId,product.id);
+ await api.experimentPriority(root.id,true,root.version);root=await api.experiment(root.id);assert.equal(root.priority,true);
+ const account=(await api.businessAccounts()).find(a=>a.responsibleMemberId===members[1]);await api.dispatchRound(root.id,round.id,{requestKey:randomUUID(),assignments:[{accountId:account.id,memberId:members[1],targetCount:1}]},root.version);
+ root=await api.experiment(root.id);assert.equal(root.rounds[0].tasks.length,0);assert.equal(root.rounds[1].tasks.length,1);assert.equal(root.materials.length,1);
+});
+test('team and basic directory edits preserve login identity and versioned facts while employee writes stay forbidden',async()=>{
+ const api=clients[0];const member=await api.saveDirectory('member',undefined,{displayName:'新成员档案',jobTitle:'运营',startDate:'2026-11-02',employmentStatus:'在职'});assert.ok(member.id);
+ let row=(await api.members()).find(m=>m.id===members[2]);const linked=row.loginAccountId;
+ const update={displayName:row.displayName,jobTitle:'内容运营',startDate:'2026-11-01',employmentStatus:'在职',active:true};await api.saveDirectory('member',row.id,update,row.version);row=(await api.members()).find(m=>m.id===row.id);assert.equal(row.loginAccountId,linked);assert.equal(row.jobTitle,'内容运营');
+ await assert.rejects(api.saveDirectory('member',row.id,update,1),e=>e.status===409);await assert.rejects(clients[1].saveDirectory('member',undefined,{displayName:'越权',jobTitle:'',startDate:null,employmentStatus:''}),e=>e.status===403);
+ const store=await api.saveDirectory('store',undefined,{name:'基础店铺'});await api.saveDirectory('store',store.id,{name:'基础店铺更新',active:false},1);assert.equal((await api.stores()).find(s=>s.id===store.id).active,false);
+ const account=await api.saveDirectory('account',undefined,{name:'基础运营账号',profileUrl:'https://example.com/local-account',responsibleMemberId:members[2],boundPhone:'测试绑定号',actualPhone:'测试实际号',remark:'保留备注'});
+ await api.saveDirectory('account',account.id,{name:'基础运营账号更新',profileUrl:'https://example.com/local-account',responsibleMemberId:members[2],boundPhone:'测试绑定号',actualPhone:'测试实际号',remark:'保留备注',active:true},1);
+ const saved=(await api.businessAccounts()).find(a=>a.id===account.id);assert.equal(saved.remark,'保留备注');assert.equal(saved.actualPhone,'测试实际号');
+});
+test('expense, settlement and recorded reimbursement stay one exact-cent ledger with version and replay protection',async()=>{
+ const api=clients[0],category=await api.createExpenseCategory('隔离支出分类'),key=randomUUID();
+ const value={expenseDate:'2026-11-02',description:'隔离拍摄支出',amount:'12.34',paymentMode:'advance',payerId:members[1],storeId:null,categoryId:category.id,note:'实际垫付',requestKey:key};
+ const expense=await api.saveExpense(undefined,value);await api.saveExpense(undefined,value);
+ let data=await api.finance(),record=data.records.find(r=>r.id===expense.id);assert.equal(String(record.amountCents),'1234');assert.equal(record.requestKey,key);assert.equal(data.records.filter(r=>r.requestKey===key).length,1);
+ await assert.rejects(clients[1].saveExpense(undefined,{...value,requestKey:randomUUID()}),e=>e.status===403);
+ const statementKey=randomUUID(),items=[{expenseId:record.id,expectedVersion:record.version}],statementValue={payerId:members[1],startDate:'2026-11-01',endDate:'2026-11-30',items,note:'确认选中支出',requestKey:statementKey};
+ const settlement=await api.createSettlement(statementValue);await api.createSettlement(statementValue);data=await api.finance();let statement=data.settlements.find(s=>s.id===settlement.id);assert.equal(statement.totalCents,'1234');assert.equal(statement.remainingCents,'1234');assert.equal(statement.requestKey,statementKey);assert.equal(data.records.find(r=>r.id===expense.id).settlementId,settlement.id);
+ const {requestKey,...editValue}=value;await assert.rejects(api.saveExpense(expense.id,editValue,data.records.find(r=>r.id===expense.id).version),e=>e.status===409);
+ const paymentKey=randomUUID(),payment={settlementId:settlement.id,amount:'2.34',paidDate:'2026-11-02',note:'已发生部分报销',requestKey:paymentKey};await api.recordPayment(payment,statement.version);await api.recordPayment(payment,statement.version);
+ data=await api.finance();statement=data.settlements.find(s=>s.id===settlement.id);assert.equal(statement.paidCents,'234');assert.equal(statement.remainingCents,'1000');assert.equal(data.payments.filter(p=>p.requestKey===paymentKey).length,1);
+ await assert.rejects(api.recordPayment({...payment,amount:'10.01',requestKey:randomUUID()},statement.version),e=>e.status===409);
+ await api.recordPayment({...payment,amount:'10.00',requestKey:randomUUID()},statement.version);data=await api.finance();assert.equal(data.settlements.find(s=>s.id===settlement.id).remainingCents,'0');
+});

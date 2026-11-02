@@ -150,7 +150,7 @@ export class MaterialLab {
     return new Workflow(this.db).createPlan(identity, body, {
       experimentId: id,
       expectedVersion: version(expectedVersion),
-    });
+    }, undefined, { allowUnassigned: true });
   }
   async linkProduct(identity: Identity, id: string, value: unknown) {
     requireAdministrator(identity);

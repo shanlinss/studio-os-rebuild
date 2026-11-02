@@ -1,8 +1,9 @@
+import {sampleState,samplePage,samplePayload,sampleOperationPath} from './sample-contract.mjs';
 import {assetPath,mediaUpload,readMedia} from './media-contract.mjs';
 import {shootingPayload,shootingAction,shootingProgress,shootingArchive} from './shooting-contract.mjs';
 import {expectedVersion} from './write-contract.mjs';
 import {createMutationGateway} from './mutation-gateway.mjs';
-import {materialPayload,productPayload,publicationPayload,snapshotPayload,todoPayload,experimentDraftPayload,dispatchPayload,reviewPayload,conclusionPayload} from './write-contract.mjs';
+import {materialPayload,productPayload,publicationPayload,snapshotPayload,todoPayload,experimentDraftPayload,dispatchPayload,reviewPayload,conclusionPayload,nextRoundPayload,directoryPayload,expensePayload,settlementPayload,paymentPayload} from './write-contract.mjs';
 import {todoModel} from './workbench-model.mjs';
 import {financeRecord,pagedRows} from './management-model.mjs';
 import {namedList,templateRecord,titleCatalog,titleBatch,knowledgeList,knowledgeNavigationPayload} from './resource-model.mjs';
@@ -74,6 +75,14 @@ export function createCloudApi(fetcher=globalThis.fetch,{allowWrites=false}={}){
     async shootingItem(id,item,completed,version,key){return mutations.send('/api/shooting/requests/'+endpointId(id)+'/items/'+endpointId(item),'PATCH',shootingProgress(key,completed,version));},
     async archiveShooting(id,archived,version,key){return mutations.send('/api/shooting/requests/'+endpointId(id)+'/archive','POST',shootingArchive(key,archived,version));},
     async uploadShooting(id,file,version,key,{itemId,note=''}={}){const f=mediaUpload(file,{imagesOnly:!!itemId}),v=expectedVersion(version);endpointId(key);if(typeof note!=='string'||note.length>1000)throw new ContractError('附件说明最多 1000 字。');return mutations.send('/api/shooting/requests/'+endpointId(id)+(itemId?'/items/'+endpointId(itemId):'')+'/assets','POST',f.file,{binary:true,headers:{'Content-Type':f.mime,'x-file-name':encodeURIComponent(f.name),'x-expected-version':String(v),'x-request-key':key,'x-file-note':encodeURIComponent(note)}});},
+    async nextRound(id,value,version){return mutations.send('/api/lab/experiments/'+endpointId(id)+'/rounds','POST',nextRoundPayload(value,version));},
+    async experimentProduct(id,product,version){return mutations.send('/api/lab/experiments/'+endpointId(id)+'/product','PATCH',{linkedProductId:product===null?null:endpointId(product),expectedVersion:expectedVersion(version)});},
+    async experimentPriority(id,priority,version){if(typeof priority!=='boolean')throw new ContractError();return mutations.send('/api/lab/experiments/'+endpointId(id)+'/priority','PATCH',{priority,expectedVersion:expectedVersion(version)});},
+    async saveDirectory(kind,id,value,version){const route={member:'members',account:'business-accounts',store:'stores'}[kind];if(!route)throw new ContractError();return mutations.send('/api/admin/'+route+(id?'/'+endpointId(id):''),id?'PATCH':'POST',directoryPayload(kind,value,version));},
+    async saveExpense(id,value,version){return mutations.send('/api/finance/expenses'+(id?'/'+endpointId(id):''),id?'PATCH':'POST',expensePayload(value,version));},
+    async createSettlement(value){return mutations.send('/api/finance/settlements','POST',settlementPayload(value));},
+    async recordPayment(value,version){return mutations.send('/api/finance/payments','POST',paymentPayload(value,version));},
+    async createExpenseCategory(name){if(typeof name!=='string'||!name.trim()||name.length>100)throw new ContractError('分类名称最多 100 字。');return mutations.send('/api/finance/categories','POST',{name:name.trim()});},
     async createExperiment(value){const payload=experimentDraftPayload(value);await labCapability();return mutations.send('/api/lab/experiments','POST',payload);},
     async dispatchRound(id,round,value,version){const payload=dispatchPayload(value,version),path='/api/lab/experiments/'+endpointId(id)+'/rounds/'+endpointId(round)+'/assignments';await labCapability();return mutations.send(path,'POST',payload);},
     async dispatchReceipt(id,round,key){const path='/api/lab/experiments/'+endpointId(id)+'/rounds/'+endpointId(round)+'/assignments';try{const value=await get(path+'/'+endpointId(key));if(!record(value)||!Array.isArray(value.taskIds)||value.taskIds.some(id=>typeof id!=='string')||!Number.isSafeInteger(value.version))throw new ContractError();mutations.confirmRead(path);return value;}catch(e){if(e.status===404){mutations.confirmRead(path);return null;}throw e;}},
@@ -100,8 +109,13 @@ export function createCloudApi(fetcher=globalThis.fetch,{allowWrites=false}={}){
     async tasks(profile,user,signal){if(!profile)return [];return ownTasks(await get('/api/tasks',signal),profile,user.role);},
     async task(id,signal){return read('/api/tasks/'+endpointId(id),signal,taskModel);},
     async todos(signal){return read('/api/workbench/todos',signal,v=>list(v).map(todoModel));},
-    async finance(signal){return financeRecord(await get('/api/finance',signal));},
+    async finance(signal){return read('/api/finance',signal,financeRecord);},
     async competitors(signal){return namedList(await get('/api/competitors',signal));},
+    async sampleState(signal){return read('/api/samples/state',signal,sampleState);},
+    async sampleCatalog(params={},signal){const q=new URLSearchParams({offset:String(params.offset??0),q:params.q??'',active:params.all?'all':'active'});return read('/api/samples/catalog?'+q,signal,v=>samplePage(v));},
+    async sampleLoans(params={},signal){const q=new URLSearchParams({offset:String(params.offset??0),view:params.team?'team':'own',status:params.status??'open'});return read('/api/samples/loans?'+q,signal,v=>samplePage(v,true));},
+    async sampleWrite(action,owner,value,version){return mutations.send(sampleOperationPath(action,owner),action==='relocate'?'PATCH':'POST',samplePayload(action,value,version));},
+    async sampleReceipt(key,action,owner){const path=sampleOperationPath(action,owner);try{const result=await get('/api/samples/receipts/'+endpointId(key));if(!record(result)||typeof result.id!=='string')throw new ContractError();endpointId(result.id);mutations.confirmRead(path);return result;}catch(e){if(e.status===404){mutations.confirmRead(path);return null;}throw e;}},
     async samples(params={},signal){const q=new URLSearchParams({offset:String(params.offset??0),q:params.q??'',active:'all'});return pagedRows(await get('/api/samples/catalog?'+q,signal));},
     async attendance(params={},signal){const q=new URLSearchParams({view:params.view??'own',offset:String(params.offset??0)});for(const key of ['from','to']){if(params[key]){if(!validDate(params[key]))throw new ContractError('日期格式无效。');q.set(key,params[key]);}}if(params.from&&params.to&&params.from>params.to)throw new ContractError('开始日期不能晚于结束日期。');return pagedRows(await get('/api/attendance/periods?'+q,signal));},
     async loginAccounts(signal){const rows=list(await get('/api/admin/accounts',signal));if(rows.some(r=>!record(r)||!string(r.id)||!string(r.username)||!['admin','employee'].includes(r.role)||typeof r.active!=='boolean'))throw new ContractError();return rows;},
@@ -113,9 +127,9 @@ export function createCloudApi(fetcher=globalThis.fetch,{allowWrites=false}={}){
     async knowledge(signal){return read('/api/knowledge',signal,knowledgeList);},
     async createKnowledgeNavigation(value){return mutations.send('/api/knowledge/navigation','POST',knowledgeNavigationPayload(value));},
     async updateKnowledgeNavigation(id,value,version){return mutations.send('/api/knowledge/'+endpointId(id)+'/navigation','PATCH',knowledgeNavigationPayload(value,version));},
-    async members(signal){return namedList(await get('/api/admin/members',signal),'displayName');},
-    async businessAccounts(signal){return namedList(await get('/api/admin/business-accounts',signal));},
-    async stores(signal){return namedList(await get('/api/admin/stores',signal));},
+    async members(signal){return read('/api/admin/members',signal,v=>namedList(v,'displayName'));},
+    async businessAccounts(signal){return read('/api/admin/business-accounts',signal,namedList);},
+    async stores(signal){return read('/api/admin/stores',signal,namedList);},
     async workTasks(signal){return executionRows(await get('/api/tasks',signal));},
     async products(signal){return read('/api/products',signal,v=>list(v).map(p=>productRecord(p)));},
     async product(id,signal){return read('/api/products/'+endpointId(id),signal,v=>productRecord(v,true));},
