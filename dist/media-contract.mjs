@@ -21,6 +21,7 @@ export async function readMedia(response,{maxBytes=maxFileBytes,imagesOnly=false
 const id=value=>{if(typeof value!=='string'||!/^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/.test(value))throw new ContractError('附件关联记录无效。');return value;};
 export function assetPath(kind,ownerId,assetId,{taskId}={}){
  const owner=id(ownerId),asset=id(assetId);
+ if(kind==='equipment')return `/api/equipment/catalog/${owner}/images/${asset}`;
  if(kind==='expense')return `/api/finance/expenses/${owner}/receipts/${asset}`;
  if(kind==='material')return `/api/materials/${owner}/assets/${asset}`;
  if(kind==='shooting')return `/api/shooting/requests/${owner}/assets/${asset}`;

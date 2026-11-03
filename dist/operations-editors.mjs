@@ -48,7 +48,7 @@ export function createOperationsEditors({api,h,mount,input,area,select}){
   if(['return','relocate'].includes(action))row=await api.equipmentLoan(id);else if(id)row=await api.equipmentDetail(id);
   if(['register','edit'].includes(action)){
    const members=await api.members(),keepers=[['','暂未指定'],...members.filter(m=>m.active||m.id===row?.keeperMemberId).map(m=>[m.id,m.displayName])];
-   body=input('assetTag','设备编号',row?.assetTag,'required maxlength="64"')+input('name','设备名称',row?.name,'required maxlength="120"')+input('model','型号说明',row?.model,'maxlength="200"')+select('keeperMemberId','保管人',row?.keeperMemberId||'',keepers)+input('location','归还及存放位置',row?.location,'required maxlength="150"')+area('notes','设备说明',row?.notes||'')+'<p class="muted">采购金额与支出来源在采购资料中维护，不填入普通设备说明。</p>';
+   body=input('assetTag','设备编号',row?.assetTag,'required maxlength="64" '+(row?'readonly':''))+input('name','设备名称',row?.name,'required maxlength="120"')+input('deviceType','设备类型',row?.deviceType||'','maxlength="80"')+input('brand','品牌',row?.brand||'','maxlength="100"')+input('serialNumber','序列号（仅资源管理员可见）',row?.serialNumber||'','maxlength="150"')+input('model','型号说明',row?.model,'maxlength="200"')+select('keeperMemberId','保管人',row?.keeperMemberId||'',keepers)+input('location','归还及存放位置',row?.location,'required maxlength="150"')+area('notes','设备说明',row?.notes||'')+'<p class="muted">采购金额与支出来源在采购资料中维护，不填入普通设备说明。</p>';
   }else if(action==='borrow'){
    if(row.status!=='available')throw new ContractError('设备当前不可借，请刷新目录。');const state=await api.sampleState();if(!state.canBorrow)throw new ContractError('请先关联有效成员档案。');
    body=`<p>${h(row.name)} · ${h(row.assetTag)} · 借用人：${h(state.member.displayName)}</p>`+input('location','借用后使用位置','','required maxlength="150"')+select('shootingRequestId','关联拍摄需求',shootingId||'',[['','不关联'],...state.shooting.map(s=>[s.id,s.title])])+area('note','借用说明');
@@ -58,7 +58,7 @@ export function createOperationsEditors({api,h,mount,input,area,select}){
   else{operation='state';body=`<p>${h(row.name)} · ${h(row.assetTag)}</p>`+area('note','操作原因（必填）')+'<p class="muted">在借设备必须先由借用人归还，维修及停用记录会保留。</p>';}
   const label={register:'登记设备',edit:'编辑设备',borrow:'借用设备',return:'归还设备',relocate:'更新设备使用位置',maintenance:'设备送修',ready:row?.status==='retired'?'恢复设备':'完成设备维修',retired:'停用设备'}[action];
   mount(label,body,f=>{
-   let value;if(['register','edit'].includes(action))value={assetTag:f.get('assetTag'),name:f.get('name'),model:f.get('model'),keeperMemberId:f.get('keeperMemberId')||null,location:f.get('location'),notes:f.get('notes')};
+   let value;if(['register','edit'].includes(action))value={assetTag:f.get('assetTag'),deviceType:f.get('deviceType'),brand:f.get('brand'),serialNumber:f.get('serialNumber'),name:f.get('name'),model:f.get('model'),keeperMemberId:f.get('keeperMemberId')||null,location:f.get('location'),notes:f.get('notes')};
    else if(action==='borrow')value={location:f.get('location'),shootingRequestId:f.get('shootingRequestId')||null,note:f.get('note')};
    else if(action==='return')value={condition:f.get('condition'),note:f.get('note')};else if(action==='relocate')value={location:f.get('location'),note:f.get('note')};else value={action,note:f.get('note')};
    return api.equipmentWrite(operation,id,{...value,requestKey:key},row?.version);

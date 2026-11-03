@@ -339,6 +339,13 @@ export async function createStudioApp(
     }
     @Get('warehouse/items') warehouseCatalog(@Req() r: AuthRequest) { return warehouse.catalog(r.identity!,r.query); }
     @Get('equipment/catalog/:id/purchase') equipmentPurchaseState(@Req() r:AuthRequest,@Param('id') id:string){return equipmentPurchase.state(r.identity!,id);}
+    @Get('equipment/catalog/:id/handover') equipmentHandoverState(@Req() r:AuthRequest,@Param('id') id:string){return equipment.handoverState(r.identity!,id);}
+    @Post('equipment/catalog/:id/handover') equipmentHandover(@Req() r:AuthRequest,@Param('id') id:string,@Body() b:unknown){return equipment.handover(r.identity!,id,b);}
+    @Get('equipment/catalog/:id/handovers') equipmentHandovers(@Req() r:AuthRequest,@Param('id') id:string){return equipment.handovers(r.identity!,id,r.query);}
+    @Get('equipment/catalog/:id/images/:image')
+    async equipmentImage(@Req() r:AuthRequest,@Param('id') id:string,@Param('image') image:string,@Res() res:express.Response){const f=await equipment.image(r.identity!,id,image);res.setHeader('Content-Type',f.mime);res.setHeader('Content-Disposition',`inline; filename*=UTF-8''${encodeURIComponent(f.name)}`);res.send(f.content);}
+    @Post('equipment/catalog/:id/image') equipmentImageUpload(@Req() r:AuthRequest,@Param('id') id:string,@Body() b:unknown){return equipment.uploadImage(r.identity!,id,b,r.headers['x-file-name'],r.headers['content-type'],r.headers['x-expected-version'],r.headers['x-request-key']);}
+    @Delete('equipment/catalog/:id/image') equipmentImageRemove(@Req() r:AuthRequest,@Param('id') id:string,@Body() b:unknown){return equipment.removeImage(r.identity!,id,b);}
     @Post('equipment/catalog/:id/purchase') equipmentPurchaseSave(@Req() r:AuthRequest,@Param('id') id:string,@Body() b:unknown){return equipmentPurchase.save(r.identity!,id,b);}
     @Get('equipment/catalog/:id/purchase/history') equipmentPurchaseHistory(@Req() r:AuthRequest,@Param('id') id:string){return equipmentPurchase.history(r.identity!,id,r.query);}
     @Get('equipment/catalog/:id/purchase/receipts/:key') equipmentPurchaseReceipt(@Req() r:AuthRequest,@Param('id') id:string,@Param('key') key:string){return equipmentPurchase.receipt(r.identity!,id,key);}
@@ -1714,10 +1721,12 @@ export async function createStudioApp(
           if(req.method==='POST'&&/^catalog\/[^/]+\/purchase$/.test(route)){requirePermission(req.identity,'resources');auth.csrf(req);return true;}
           throw new ForbiddenException();
         }
-        const allowed=(req.method==='GET' && /^(catalog|catalog\/[^/]+(?:\/history)?|loans(?:\/[^/]+)?|receipts\/[^/]+)$/.test(route)) ||
-          (req.method==='POST' && /^(catalog|catalog\/[^/]+\/(?:borrow|state)|loans\/[^/]+\/return)$/.test(route)) ||
+        const allowed=(req.method==='GET' && /^(catalog|catalog\/[^/]+(?:\/(?:history|handover|handovers|images\/[^/]+))?|loans(?:\/[^/]+)?|receipts\/[^/]+)$/.test(route)) ||
+          (req.method==='POST' && /^(catalog|catalog\/[^/]+\/(?:borrow|state|handover|image)|loans\/[^/]+\/return)$/.test(route)) ||
+          (req.method==='DELETE' && /^catalog\/[^/]+\/image$/.test(route)) ||
           (req.method==='PATCH' && /^(catalog\/[^/]+|loans\/[^/]+\/location)$/.test(route));
         if(!allowed)throw new ForbiddenException();
+        if(/\/(?:handover|handovers|image)$/.test(route))requirePermission(req.identity,'resources');
         if((req.method==='POST' && (route==='catalog'||route.endsWith('/state')))||(req.method==='PATCH' && /^catalog\/[^/]+$/.test(route))||route.endsWith('/history'))requirePermission(req.identity,'resources');
         if(req.method!=='GET')auth.csrf(req);
         return true;
@@ -2203,6 +2212,7 @@ export async function createStudioApp(
       '/api/materials/:id/assets',
       '/api/tasks/:id/publications/:publicationId/assets',
       '/api/products/:id/image',
+      '/api/equipment/catalog/:id/image',
       '/api/knowledge/:id/cover',
       '/api/templates/:id/assets',
       '/api/shooting/requests/:id/assets',

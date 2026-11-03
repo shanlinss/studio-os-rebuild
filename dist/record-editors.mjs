@@ -1,3 +1,4 @@
+import {createEquipmentAssetsEditors} from './equipment-assets-editors.mjs';
 import {createEquipmentPurchaseEditors} from './equipment-purchase-editors.mjs';
 import {createInventoryAccessEditors} from './inventory-access-editors.mjs';
 import {createPersonnelEditors} from './personnel-editors.mjs';
@@ -123,12 +124,13 @@ export function createRecordEditors({api,h,onSaved,notify}){
  const exceptionEditors=createExceptionEditors({api,h,mount,area,select});
  const leaveEditors=createLeaveEditors({api,h,mount,input,area});
  const attendanceEditors=createAttendanceEditors({api,h,mount,input,area,select});
+ const equipmentAssetsEditors=createEquipmentAssetsEditors({api,h,mount,input,area,select});
  const equipmentPurchaseEditors=createEquipmentPurchaseEditors({api,h,mount,input,area,select});
  const inventoryAccessEditors=createInventoryAccessEditors({api,h,mount,area,select});
  const accountLifecycleEditors=createAccountLifecycleEditors({api,h,mount,input,area,select});
  const warehouseTransferEditors=createWarehouseTransferEditors({api,h,mount,input,area,select});
  const warehouseEditors=createWarehouseEditors({api,h,mount,input,area,select});
  const shootingEditors=createShootingEditors({api,h,mount,input,area,select});
- return {material,product,publication,snapshot,todo,experiment,dispatch,review,conclusion,...shootingEditors,...operations,...warehouseEditors,...warehouseTransferEditors,...accountLifecycleEditors,...inventoryAccessEditors,...equipmentPurchaseEditors,...attendanceEditors,...leaveEditors,...exceptionEditors,...monthlyEditors,...closureEditors,...payrollEditors,...payrollConfirmationEditors,...personnelEditors};
+ return {material,product,publication,snapshot,todo,experiment,dispatch,review,conclusion,...shootingEditors,...operations,...warehouseEditors,...warehouseTransferEditors,...accountLifecycleEditors,...inventoryAccessEditors,...equipmentPurchaseEditors,...equipmentAssetsEditors,...attendanceEditors,...leaveEditors,...exceptionEditors,...monthlyEditors,...closureEditors,...payrollEditors,...payrollConfirmationEditors,...personnelEditors};
 
 }

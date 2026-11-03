@@ -107,3 +107,7 @@ id、variant、observedAt（北京时间）、window、url、note、metrics（na
 ## 资源敏感字段与设备采购资料（2026-11-03）
 
 052增加equipment_purchase_versions（原equipment_id、递增版本、可空购买日期/整数分金额、供应商、原expense_id及当时来源快照、设备基础身份快照、原因和操作者快照）及私人equipment_purchase_receipts，两者不可改写。普通equipment_assets及原借还快照不加财务字段，不增加设备/账本副本；使用原设备行锁协调采购版本，原设备版本与采购版本各自保留。来源变化提示重核，不自动改采购金额或分摊账本支出。
+
+## 设备档案、照片及交接（2026-11-03）
+
+053在原equipment_assets补device_type/brand/serial_number/image_id，编号不可改；equipment_images追加保存私有字节并由复合外键保证当前照片属于本设备；移除仅清当前指针。equipment_handovers引用原双方loans/members，保留姓名/管理员/时间/状况快照。原equipment_loans新增handover结束类型，不假造员工完好归还。所有交接复用原设备行锁、版本、事件与equipment_receipts，不新增平行使用人表；图片和交接事实不可改写。
