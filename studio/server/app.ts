@@ -1,5 +1,6 @@
 import {Warehouse} from './warehouse';
 import {Equipment} from './equipment';
+import {AccountLifecycle} from './account-lifecycle';
 import {AccountAccess} from './account-access';
 import 'reflect-metadata';
 import {
@@ -85,6 +86,7 @@ export async function createStudioApp(
   const observations = new OperationalObservations(database);
   const knowledge = new Knowledge(database);
   const accountAccess = new AccountAccess(database);
+  const accountLifecycle = new AccountLifecycle(database);
   const equipment = new Equipment(database);
   const warehouse = new Warehouse(database);
   const templates = new Templates(database);
@@ -1538,6 +1540,12 @@ export async function createStudioApp(
     }
     @Get('admin/accounts')
     accounts(@Req() r: AuthRequest) { return accountAccess.list(r.identity!); }
+    @Post('admin/accounts')
+    accountCreate(@Req() r: AuthRequest,@Body() body: unknown) { return accountLifecycle.save(r.identity!,body); }
+    @Post('admin/accounts/:id/password-reset')
+    accountPasswordReset(@Req() r: AuthRequest,@Param('id') id:string,@Body() body:unknown) { return accountLifecycle.save(r.identity!,body,id); }
+    @Get('admin/account-operations/:key')
+    accountOperation(@Req() r: AuthRequest,@Param('key') key:string) { return accountLifecycle.receipt(r.identity!,key); }
     @Patch('admin/accounts/:id')
     accountEdit(@Req() r: AuthRequest,@Param('id') id: string,@Body() body: unknown) { return accountAccess.update(r.identity!,id,body); }
     @Get('admin/accounts/:id/history')
@@ -2015,6 +2023,9 @@ export async function createStudioApp(
       if (req.method === 'POST' && req.path === '/api/logout') {
         auth.csrf(req);
         return true;
+      }
+      if ((req.method === 'POST' && (req.path === '/api/admin/accounts' || /^\/api\/admin\/accounts\/[^/]+\/password-reset$/.test(req.path))) || (req.method === 'GET' && /^\/api\/admin\/account-operations\/[^/]+$/.test(req.path))) {
+        requireAdministrator(req.identity);if(req.method !== 'GET') auth.csrf(req);return true;
       }
       if ((req.method === 'PATCH' && /^\/api\/admin\/accounts\/[^/]+$/.test(req.path)) ||
           (req.method === 'GET' && /^\/api\/admin\/accounts\/[^/]+\/history$/.test(req.path))) {

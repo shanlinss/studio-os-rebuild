@@ -17,12 +17,15 @@ test('local preview allows only known GETs and never forwards a write or credent
   const before=seen.length;
   for(const method of ['POST','PATCH','PUT','DELETE','OPTIONS'])assert.equal((await request(port,'/api/materials',{method,headers:{Cookie:cookie}})).status,405);
   assert.equal((await request(port,'/api/admin/credentials',{headers:{Cookie:cookie}})).status,404);
+  assert.equal((await request(port,'/api/admin/account-operations/11111111-1111-4111-8111-111111111111',{headers:{Cookie:cookie}})).status,404);
+  assert.equal((await request(port,'/api/admin/accounts/11111111-1111-4111-8111-111111111111/password-reset',{method:'POST',headers:{Cookie:cookie}})).status,405);
   assert.equal((await request(port,'/api/materials?target=http://example.invalid')).status,400);
   assert.equal((await request(port,'/api/materials',{headers:{Origin:'https://example.invalid'}})).status,403);
   assert.equal((await request(port,'/api/materials',{headers:{'Sec-Fetch-Site':'cross-site'}})).status,403);
   assert.equal((await request(port,'/api/materials',{headers:{Host:'attacker.invalid'}})).status,403);
   for(const path of ['/.env','/../docs/requirements.md','/%2e%2e/docs/requirements.md','/app.js'])assert.equal((await request(port,path)).status,404);
   assert.equal(seen.length,before,'blocked traffic must not reach the upstream');
+  for(const module of ['/account-lifecycle-contract.mjs','/account-lifecycle-editors.mjs'])assert.equal((await request(port,module)).status,200);
   const read=await request(port,'/api/materials',{headers:{Cookie:cookie,'Sec-Fetch-Site':'same-origin'}});assert.equal(read.status,200);assert.equal(read.headers['cache-control'],'no-store');assert.equal(seen.at(-1).method,'GET');
  }finally{await close(preview);await close(upstream);}
 });

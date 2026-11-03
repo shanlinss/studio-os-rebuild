@@ -50,11 +50,14 @@ export class Authentication {
     const verification = await verifyPassword(password, account?.password_hash);
     if (!verification.valid || !account?.active)
       throw new UnauthorizedException('Invalid credentials');
+    let verifiedHash = account.password_hash;
     if (verification.legacy) {
       const upgraded = await hashPassword(password);
-      await this.db
+      const changed = await this.db
         .client`UPDATE studio_os.accounts SET password_hash = ${upgraded}
-        WHERE id = ${account.id} AND password_hash = ${account.password_hash}`;
+        WHERE id = ${account.id} AND password_hash = ${account.password_hash} RETURNING id`;
+      if (!changed.length) throw new UnauthorizedException('Invalid credentials');
+      verifiedHash = upgraded;
     }
     await this.db
       .client`DELETE FROM studio_os.sessions WHERE expires_at <= now()`;
@@ -62,13 +65,20 @@ export class Authentication {
       .client`DELETE FROM studio_os.login_limits WHERE reset_at <= now()`;
     const token = randomBytes(32).toString('hex');
     const csrf = randomBytes(32).toString('hex');
-    await this.db
-      .client`INSERT INTO studio_os.sessions (token_hash, account_id, csrf_token, expires_at)
-      VALUES (${digest(token)}, ${account.id}, ${csrf}, now() + interval '8 hours')`;
+    const current = await this.db.client.begin(async tx => {
+      // Verification is expensive and happens outside the lock. Recheck under a
+      // shared account lock so a concurrent reset cannot leave an old-password session.
+      const [row] = await tx`SELECT id,username,role,active,password_hash FROM studio_os.accounts WHERE id=${account.id} FOR SHARE`;
+      if (!row?.active || row.password_hash !== verifiedHash)
+        throw new UnauthorizedException('Invalid credentials');
+      await tx`INSERT INTO studio_os.sessions (token_hash, account_id, csrf_token, expires_at)
+        VALUES (${digest(token)}, ${row.id}, ${csrf}, now() + interval '8 hours')`;
+      return row;
+    });
     return {
       token,
       csrf,
-      user: { id: account.id, username: account.username, role: account.role },
+      user: { id: current.id, username: current.username, role: current.role },
     };
   }
   async authenticate(req: AuthRequest) {

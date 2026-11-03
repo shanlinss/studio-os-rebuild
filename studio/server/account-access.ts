@@ -38,6 +38,6 @@ export class AccountAccess {
  }
  history(identity: Identity,id: string){
   requireAdministrator(identity);uuid(id);
-  return this.db.client`SELECT e.id,e.before_value AS "beforeValue",e.after_value AS "afterValue",e.created_at AS "createdAt",a.username AS actor FROM studio_os.account_access_events e JOIN studio_os.accounts a ON a.id=e.actor_id WHERE e.account_id=${id} ORDER BY e.created_at DESC,e.id LIMIT 50`;
+  return this.db.client`SELECT e.id,e.before_value AS "beforeValue",e.after_value AS "afterValue",e.created_at AS "createdAt",a.username AS actor,e.action,e.reason FROM (SELECT id,account_id,actor_id,before_value,after_value,created_at,'access-changed'::text AS action,''::text AS reason FROM studio_os.account_access_events UNION ALL SELECT id,account_id,actor_id,before_value,after_value,created_at,action,reason FROM studio_os.account_lifecycle_events) e JOIN studio_os.accounts a ON a.id=e.actor_id WHERE e.account_id=${id} ORDER BY e.created_at DESC,e.id LIMIT 50`;
  }
 }

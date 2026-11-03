@@ -1,3 +1,4 @@
+import {createAccountLifecycleEditors} from './account-lifecycle-editors.mjs';
 import {createWarehouseTransferEditors} from './warehouse-transfer-editors.mjs';
 import {createWarehouseEditors} from './warehouse-editors.mjs';
 import {createOperationsEditors} from './operations-editors.mjs';
@@ -104,9 +105,10 @@ export function createRecordEditors({api,h,onSaved,notify}){
   const root=await api.experiment(id);mount(root.status==='concluded'?'更新实验结论':'形成实验结论',`<p class="muted">${h(root.title)}</p>`+select('verdict','复用判断',root.verdict||'unclear',[['unclear','暂时无法判断'],['reusable','值得复用'],['conditional','满足条件后复用'],['rejected','暂不采用']])+area('finding','结论与适用条件',root.finding)+area('recommendation','下一步建议',root.recommendation)+input('tags','结论标签（用逗号分开）',(root.tags||[]).join('，'),'maxlength="800"')+'<p class="muted">保存后结论直接进入测试结论页；结束实验会停止新增发布，请先完成本轮记录。</p>',async f=>api.concludeExperiment(id,{verdict:f.get('verdict'),finding:f.get('finding'),recommendation:f.get('recommendation'),tags:f.get('tags').split(/[,，\n]/).map(t=>t.trim()).filter(Boolean)},root.version),{kind:'test',id});
  }
  const operations=createOperationsEditors({api,h,mount,input,area,select});
+ const accountLifecycleEditors=createAccountLifecycleEditors({api,h,mount,input,area,select});
  const warehouseTransferEditors=createWarehouseTransferEditors({api,h,mount,input,area,select});
  const warehouseEditors=createWarehouseEditors({api,h,mount,input,area,select});
  const shootingEditors=createShootingEditors({api,h,mount,input,area,select});
- return {material,product,publication,snapshot,todo,experiment,dispatch,review,conclusion,...shootingEditors,...operations,...warehouseEditors,...warehouseTransferEditors};
+ return {material,product,publication,snapshot,todo,experiment,dispatch,review,conclusion,...shootingEditors,...operations,...warehouseEditors,...warehouseTransferEditors,...accountLifecycleEditors};
 
 }

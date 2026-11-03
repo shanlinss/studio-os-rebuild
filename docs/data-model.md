@@ -65,3 +65,5 @@ id、variant、observedAt（北京时间）、window、url、note、metrics（na
 038：warehouse_items 引用原 products，quantity=NULL 与 opening_confirmed=false 表示未登记；warehouse_movements 保存期初/出入库/实盘差异、原项目快照和可选纠错来源，禁止更新删除；warehouse_item_events 记录资料变更；warehouse_receipts 只负责幂等回放。基础单位与产品/规格在期初后锁定，汇总按类型和单位分组，不生成订单、财务或样品副本。
 
 039：warehouse_sample_links 固定一个原样品的来源库存项目与规格/单位；warehouse_sample_transfers 只记录原出库、原样品入库事件的双向标识、数量及双方前后值/快照。两表禁止改写删除。余额仍由 warehouse_items.quantity 与 shooting_samples.available_quantity 承载，没有第三套库存；借还不回增产品数量。
+
+040：account_lifecycle_events 记录原账号创建/重置密码的操作者、请求标识、非敏感元信息校验、原因、前后公开值和安全回执，禁止改写。密码及密码指纹不进入审计/回执；原 accounts.password_hash 是凭证存储。成员仍用 members.login_account_id，账号创建与可选绑定同一事务完成；重置不改变角色、启停或成员关联。
