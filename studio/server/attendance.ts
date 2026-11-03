@@ -38,6 +38,13 @@ async function activeStudio(tx: TransactionSql, owner: string) {
   return tx`SELECT id FROM studio_os.attendance_periods WHERE owner_id=${owner} AND kind='studio' AND coalesce(adjusted_in,original_in) IS NOT NULL AND coalesce(adjusted_out,original_out) IS NULL`;
 }
 
+async function validateCorrectionTime(tx:TransactionSql,p:any,dir:string,proposed:any){
+ if(p.kind==='field'&&p.approval_status!=='approved')throw new ConflictException('外勤须先获批准');
+ if(p.kind==='studio'){const [day]=await tx`SELECT (${proposed}::timestamptz AT TIME ZONE 'Asia/Shanghai')::date=${p.work_date}::date AS valid`;if(!day.valid)throw new BadRequestException('补正时间须属于原工作日');}
+ const start=dir==='in'?proposed:p.adjusted_in||p.original_in,end=dir==='out'?proposed:p.adjusted_out||p.original_out;
+ if(end&&(!start||new Date(end).getTime()<new Date(start).getTime()))throw new BadRequestException('开始结束顺序不成立');
+}
+
 export class Attendance {
   constructor(private readonly db: StudioDatabase) {}
   private async write(identity: Identity, action: string, b: Record<string, unknown>, work: (tx: TransactionSql) => Promise<{ id: string }>) {
@@ -76,7 +83,7 @@ export class Attendance {
   }
   private filters(identity: Identity, query: Record<string, unknown>, corrections = false) {
     requireContributor(identity);
-    const q = objectInput(query, ['view','memberId','from','to','offset',...(corrections ? ['periodId'] : [])]);
+    const q = objectInput(query, ['view','memberId','from','to','offset',...(corrections ? ['periodId','status'] : [])]);
     if (q.view !== undefined && !['own','team'].includes(String(q.view))) throw new BadRequestException();
     const team = q.view === 'team';
     if (team) requireAdministrator(identity);
@@ -85,31 +92,54 @@ export class Attendance {
     if (from && to && from > to) throw new BadRequestException();
     const offset = q.offset === undefined ? 0 : Number(q.offset);
     if (!Number.isSafeInteger(offset) || offset < 0 || offset > 2147483647) throw new BadRequestException();
-    return { team, memberId, from, to, offset, periodId: q.periodId ? uuid(q.periodId) : null };
+    const status=q.status===undefined?'all':String(q.status);if(!['all','pending','approved','rejected'].includes(status))throw new BadRequestException();
+    return { team, memberId, from, to, offset,status, periodId: q.periodId ? uuid(q.periodId) : null };
   }
   async list(identity: Identity, query: Record<string, unknown>, corrections = false) {
-    const { team, memberId, from, to, offset, periodId } = this.filters(identity, query, corrections);
+    const { team, memberId, from, to, offset, periodId,status } = this.filters(identity, query, corrections);
+    return this.db.client.begin(async tx=>{
+      await tx`SET TRANSACTION ISOLATION LEVEL REPEATABLE READ READ ONLY`;
     if (corrections) {
-      const where = this.db.client`(${team} OR c.owner_id=${identity.id}) AND (${memberId}::uuid IS NULL OR c.member_id=${memberId}) AND (${from}::date IS NULL OR (c.proposed_at AT TIME ZONE 'Asia/Shanghai')::date>=${from}) AND (${to}::date IS NULL OR (c.proposed_at AT TIME ZONE 'Asia/Shanghai')::date<=${to}) AND (${periodId}::uuid IS NULL OR c.period_id=${periodId})`;
-      const rows = await this.db.client`SELECT c.*,m.display_name AS "memberName" FROM studio_os.attendance_corrections c JOIN studio_os.members m ON m.id=c.member_id WHERE ${where} ORDER BY c.created_at DESC,c.id LIMIT 50 OFFSET ${offset}`;
-      const [count] = await this.db.client`SELECT count(*) FROM studio_os.attendance_corrections c WHERE ${where}`;
+      const where = tx`(${team} OR c.owner_id=${identity.id}) AND (${memberId}::uuid IS NULL OR c.member_id=${memberId}) AND (${from}::date IS NULL OR (c.proposed_at AT TIME ZONE 'Asia/Shanghai')::date>=${from}) AND (${to}::date IS NULL OR (c.proposed_at AT TIME ZONE 'Asia/Shanghai')::date<=${to}) AND (${periodId}::uuid IS NULL OR c.period_id=${periodId}) AND (${status}='all' OR c.status=${status})`;
+      const rows = await tx`SELECT c.*,m.display_name AS "memberName" FROM studio_os.attendance_corrections c JOIN studio_os.members m ON m.id=c.member_id WHERE ${where} ORDER BY c.created_at DESC,c.id LIMIT 50 OFFSET ${offset}`;
+      const [count] = await tx`SELECT count(*) FROM studio_os.attendance_corrections c WHERE ${where}`;
       return { rows: rows.map(publicValue), total: Number(count.count), offset, limit: 50 };
     }
-    const where = this.db.client`(${team} OR p.owner_id=${identity.id}) AND (${memberId}::uuid IS NULL OR p.member_id=${memberId}) AND (${from}::date IS NULL OR p.work_date>=${from}) AND (${to}::date IS NULL OR p.work_date<=${to})`;
-    const rows = await this.db.client`SELECT p.*,p.work_date::text AS work_date,m.display_name AS "memberName" FROM studio_os.attendance_periods p JOIN studio_os.members m ON m.id=p.member_id WHERE ${where} ORDER BY p.work_date DESC,p.created_at DESC,p.id LIMIT 50 OFFSET ${offset}`;
-    const [count] = await this.db.client`SELECT count(*) FROM studio_os.attendance_periods p WHERE ${where}`;
+    const where = tx`(${team} OR p.owner_id=${identity.id}) AND (${memberId}::uuid IS NULL OR p.member_id=${memberId}) AND (${from}::date IS NULL OR p.work_date>=${from}) AND (${to}::date IS NULL OR p.work_date<=${to})`;
+    const rows = await tx`SELECT p.*,p.work_date::text AS work_date,m.display_name AS "memberName" FROM studio_os.attendance_periods p JOIN studio_os.members m ON m.id=p.member_id WHERE ${where} ORDER BY p.work_date DESC,p.created_at DESC,p.id LIMIT 50 OFFSET ${offset}`;
+    const [count] = await tx`SELECT count(*) FROM studio_os.attendance_periods p WHERE ${where}`;
     return { rows: rows.map(publicValue), total: Number(count.count), offset, limit: 50 };
+    });
+  }
+  async detail(identity:Identity,id:string,query:unknown,correction=false){
+    requireContributor(identity);uuid(id);objectInput(query,[]);
+    return this.db.client.begin(async tx=>{
+      await tx`SET TRANSACTION ISOLATION LEVEL REPEATABLE READ READ ONLY`;
+      const [row]=correction?await tx`SELECT c.*,m.display_name AS "memberName" FROM studio_os.attendance_corrections c JOIN studio_os.members m ON m.id=c.member_id WHERE c.id=${id} AND (${identity.role==='admin'} OR c.owner_id=${identity.id})`:await tx`SELECT p.*,p.work_date::text AS work_date,m.display_name AS "memberName" FROM studio_os.attendance_periods p JOIN studio_os.members m ON m.id=p.member_id WHERE p.id=${id} AND (${identity.role==='admin'} OR p.owner_id=${identity.id})`;
+      if(!row)throw new NotFoundException();
+      const [period]=correction&&row.period_id?await tx`SELECT *,work_date::text AS work_date FROM studio_os.attendance_periods WHERE id=${row.period_id} AND owner_id=${row.owner_id}`:[];
+      let approvalBlocker:string|null=null;
+      if(correction&&row.status==='pending'){
+        if(period&&period.version!==row.period_version)approvalBlocker='source-changed';
+        if(!row.period_id){if((await tx`SELECT id FROM studio_os.attendance_periods WHERE owner_id=${row.owner_id} AND kind='studio' AND work_date=(${row.proposed_at}::timestamptz AT TIME ZONE 'Asia/Shanghai')::date`).length)approvalBlocker='day-already-exists';else if((await activeStudio(tx,row.owner_id)).length)approvalBlocker='other-open-period';}
+      }
+      const [clock]=await tx`SELECT clock_timestamp() AS now`;
+      return {record:publicValue(row),period:correction?(period?publicValue(period):null):publicValue(row),serverNow:new Date(clock.now).toISOString(),approvalBlocker};
+    });
   }
   async history(identity: Identity, id: string, query: Record<string, unknown>, correction = false) {
     requireContributor(identity); uuid(id); objectInput(query, ['offset']);
     const offset = query.offset === undefined ? 0 : Number(query.offset);
     if (!Number.isSafeInteger(offset) || offset < 0 || offset > 2147483647) throw new BadRequestException();
-    const [p] = correction ? await this.db.client`SELECT id FROM studio_os.attendance_corrections WHERE id=${id} AND (${identity.role === 'admin'} OR owner_id=${identity.id})` : await this.db.client`SELECT id FROM studio_os.attendance_periods WHERE id=${id} AND (${identity.role === 'admin'} OR owner_id=${identity.id})`;
+    return this.db.client.begin(async tx=>{
+      await tx`SET TRANSACTION ISOLATION LEVEL REPEATABLE READ READ ONLY`;
+    const [p] = correction ? await tx`SELECT id FROM studio_os.attendance_corrections WHERE id=${id} AND (${identity.role === 'admin'} OR owner_id=${identity.id})` : await tx`SELECT id FROM studio_os.attendance_periods WHERE id=${id} AND (${identity.role === 'admin'} OR owner_id=${identity.id})`;
     if (!p) throw new NotFoundException();
-    const where = correction ? this.db.client`correction_id=${id}` : this.db.client`(period_id=${id} OR correction_id IN (SELECT id FROM studio_os.attendance_corrections WHERE period_id=${id}))`;
-    const rows = await this.db.client`SELECT id,actor_id,actor_name,action,before_value,after_value,created_at FROM studio_os.attendance_events WHERE ${where} ORDER BY created_at,id LIMIT 50 OFFSET ${offset}`;
-    const [count] = await this.db.client`SELECT count(*) FROM studio_os.attendance_events WHERE ${where}`;
+    const where = correction ? tx`correction_id=${id}` : tx`(period_id=${id} OR correction_id IN (SELECT id FROM studio_os.attendance_corrections WHERE period_id=${id}))`;
+    const rows = await tx`SELECT id,actor_id,actor_name,action,before_value,after_value,created_at FROM studio_os.attendance_events WHERE ${where} ORDER BY created_at,id LIMIT 50 OFFSET ${offset}`;
+    const [count] = await tx`SELECT count(*) FROM studio_os.attendance_events WHERE ${where}`;
     return { rows: rows.map(publicValue), total: Number(count.count), offset, limit: 50 };
+    });
   }
   async studioIn(identity: Identity, value: unknown) {
     const b=objectInput(value,['requestKey']);
@@ -168,7 +198,10 @@ export class Attendance {
         const [old] = await tx`SELECT * FROM studio_os.attendance_corrections WHERE id=${editId} AND owner_id=${identity.id} FOR UPDATE`;
         if (!old) throw new NotFoundException();
         if (old.status !== 'pending' || old.version !== expected) throw new ConflictException('申请已变化，请核对');
-        const [after] = await tx`UPDATE studio_os.attendance_corrections SET proposed_at=${proposed},reason=${reason},version=version+1,updated_at=now() WHERE id=${editId} RETURNING *`;
+        let currentVersion=old.period_version;
+        if(old.period_id){const [p]=await tx`SELECT * FROM studio_os.attendance_periods WHERE id=${old.period_id} AND owner_id=${identity.id} FOR UPDATE`;if(!p)throw new NotFoundException();await validateCorrectionTime(tx,p,old.direction,proposed);currentVersion=p.version;}
+        else if((await tx`SELECT id FROM studio_os.attendance_periods WHERE owner_id=${identity.id} AND kind='studio' AND work_date=(${proposed}::timestamptz AT TIME ZONE 'Asia/Shanghai')::date`).length)throw new ConflictException('该日已有记录，请从原记录申请');
+        const [after] = await tx`UPDATE studio_os.attendance_corrections SET proposed_at=${proposed},reason=${reason},period_version=${currentVersion},version=version+1,updated_at=now() WHERE id=${editId} RETURNING *`;
         await audit(tx, identity, identity.id, old.period_id, editId, 'correction-edited', old, after); return { id: editId };
       }
       let periodVersion: number | null = null;
@@ -176,8 +209,11 @@ export class Attendance {
         const [p] = await tx`SELECT * FROM studio_os.attendance_periods WHERE id=${periodId} AND owner_id=${identity.id} FOR UPDATE`;
         if (!p) throw new NotFoundException();
         if (p.kind === 'field' && p.approval_status !== 'approved') throw new ConflictException('外勤须先获批准');
+        await validateCorrectionTime(tx,p,dir!,proposed);
         periodVersion = p.version;
       }
+      if(!periodId&&(await tx`SELECT id FROM studio_os.attendance_periods WHERE owner_id=${identity.id} AND kind='studio' AND work_date=(${proposed}::timestamptz AT TIME ZONE 'Asia/Shanghai')::date`).length)throw new ConflictException('该日已有记录，请从原记录申请');
+      if((await tx`SELECT id FROM studio_os.attendance_corrections WHERE owner_id=${identity.id} AND status='pending' AND direction=${dir!} AND ((period_id=${periodId}) OR (period_id IS NULL AND ${periodId}::uuid IS NULL AND (proposed_at AT TIME ZONE 'Asia/Shanghai')::date=(${proposed}::timestamptz AT TIME ZONE 'Asia/Shanghai')::date))`).length)throw new ConflictException('已有同方向待审核申请');
       const [row] = await tx`INSERT INTO studio_os.attendance_corrections(owner_id,member_id,period_id,direction,proposed_at,reason,period_version) VALUES(${identity.id},${m.id},${periodId},${dir!},${proposed},${reason},${periodVersion}) RETURNING *`;
       await audit(tx, identity, identity.id, periodId, row.id, 'correction-requested', null, row); return { id: row.id };
     });
@@ -185,7 +221,7 @@ export class Attendance {
   async decideCorrection(identity: Identity, id: string, value: unknown) {
     requireAdministrator(identity); uuid(id);
     const b = objectInput(value, ['requestKey','expectedVersion','decision','note']), expected = version(b.expectedVersion), note = optionalLongText(b.note, 2000);
-    if (!['approved','rejected'].includes(String(b.decision))) throw new BadRequestException();
+    if (typeof b.decision!=='string'||!['approved','rejected'].includes(b.decision)||(b.decision==='rejected'&&!note.trim())) throw new BadRequestException();
     return this.write(identity, 'decision:correction:' + id, b, async tx => {
       const [lookup] = await tx`SELECT owner_id FROM studio_os.attendance_corrections WHERE id=${id}`; if (!lookup) throw new NotFoundException();
       await lockOwner(tx, lookup.owner_id);
@@ -202,6 +238,7 @@ export class Attendance {
         } else {
           const [p] = await tx`SELECT * FROM studio_os.attendance_periods WHERE id=${periodId} AND owner_id=${c.owner_id} FOR UPDATE`;
           if (!p || p.version !== c.period_version || (p.kind === 'field' && p.approval_status !== 'approved')) throw new ConflictException('原记录已变化，请重新核对申请');
+          await validateCorrectionTime(tx,p,c.direction,c.proposed_at);
           const nextIn = c.direction === 'in' ? c.proposed_at : p.adjusted_in || p.original_in, nextOut = c.direction === 'out' ? c.proposed_at : p.adjusted_out || p.original_out;
           if (nextOut && (!nextIn || new Date(nextOut).getTime() < new Date(nextIn).getTime())) throw new ConflictException('补卡开始/结束顺序不成立');
           const [after] = c.direction === 'in' ? await tx`UPDATE studio_os.attendance_periods SET adjusted_in=${c.proposed_at},version=version+1,updated_at=now() WHERE id=${periodId} RETURNING *` : await tx`UPDATE studio_os.attendance_periods SET adjusted_out=${c.proposed_at},version=version+1,updated_at=now() WHERE id=${periodId} RETURNING *`;

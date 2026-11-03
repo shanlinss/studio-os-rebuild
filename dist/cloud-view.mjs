@@ -166,7 +166,7 @@ createSampleWorkspace({api,h,writable,getUser:()=>user,notify,localTime});
 const equipmentWorkspace=createEquipmentWorkspace({api,h,writable,getUser:()=>user,notify,localTime});
 const warehouseViews=createWarehouseViews({api,h,heading,showPanel,localTime,writable,getUser:()=>user});
 const planning=createPlanningViews({api,h,heading,notify,warehouse:warehouseViews});
-const management=createManagementViews({api,h,heading,showPanel,source,localTime,writable});
+const management=createManagementViews({api,h,heading,showPanel,source,localTime,writable,onAttendanceEdit:args=>editors?.attendanceCorrection(args).catch(e=>notify(e.message)),onAttendanceDecision:(id,decision)=>editors?.attendanceDecision(id,decision).catch(e=>notify(e.message))});
 const resources=createResourceViews({api,h,heading,showPanel,source,localTime,notify,writable});
 const business=createBusinessViews({api,h,heading,showPanel,source,localTime,writable,getRole:()=>user?.role});
 const editors=writable?createRecordEditors({api,h,notify,onSaved:async result=>{if(result?.kind==='warehouse'){await warehouseViews.refresh();if(result.id)await warehouseViews.detail(result.id);return;}if(result?.kind==='equipment'){await equipmentWorkspace.refresh();return;}if(['directory','finance'].includes(result?.kind))$('#cloud-detail').close();await route();if(result?.expenseId)await management.expenseDetail(result.expenseId);else if(result?.id&&result.kind==='shooting')await business.shootingDetail(result.id);else if(result?.id&&['material','task','test'].includes(result.kind))await openDetail(result.kind,result.id);}}):null;

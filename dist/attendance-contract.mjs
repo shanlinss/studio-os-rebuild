@@ -1,0 +1,23 @@
+import {ContractError,validDate} from './cloud-contract.mjs';
+import {pagedRows} from './management-model.mjs';
+export const approvalBlockers={'source-changed':'原考勤已有变化。请员工重新核对并修改本申请，再由管理员批准。','day-already-exists':'该日现在已有考勤记录，请从原记录申请补正。本申请可驳回并说明。','other-open-period':'该员工还有未结束的工作室记录，请先核对处理后再批准漏登上班。'};
+export const correctionLabels={pending:'待审核',approved:'已批准',rejected:'已驳回'};
+export const attendanceActions={'login-started':'登录登记上班','day-ended':'结束工作','studio-in':'登记上班','studio-out':'登记下班','correction-requested':'提交补卡申请','correction-edited':'修改申请','correction-applied':'应用补正','correction-approved':'批准申请','correction-rejected':'驳回申请','missing-studio-in-confirmed':'确认漏登上班'};
+export const attendanceId=v=>{if(typeof v!=='string'||!/^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/.test(v))throw new ContractError('考勤标识无效。');return v;};
+const version=v=>{if(!Number.isSafeInteger(v)||v<1)throw new ContractError('请重新读取记录版本。');return v;};
+const stamp=v=>typeof v==='string'&&Number.isFinite(Date.parse(v));
+export function periodRecord(r){if(!r||!['studio','field'].includes(r.kind)||!validDate(r.work_date))throw new ContractError('考勤记录不完整。');attendanceId(r.id);version(r.version);for(const k of ['original_in','original_out','adjusted_in','adjusted_out'])if(r[k]!==null&&!stamp(r[k]))throw new ContractError();return r;}
+export function correctionRecord(r){if(!r||!Object.hasOwn(correctionLabels,r.status)||!['in','out'].includes(r.direction)||!stamp(r.proposed_at)||typeof r.reason!=='string'||typeof r.review_note!=='string')throw new ContractError('补卡申请不完整。');attendanceId(r.id);version(r.version);if(r.period_id!==null){attendanceId(r.period_id);if(r.period_version!==null)version(r.period_version);else if(r.status==='pending')throw new ContractError();}else if(r.direction!=='in')throw new ContractError();return r;}
+export function attendancePage(v,corrections=false){pagedRows(v);if(v.limit!==50||v.rows.length>50||new Set(v.rows.map(r=>r.id)).size!==v.rows.length)throw new ContractError();v.rows.forEach(corrections?correctionRecord:periodRecord);return v;}
+export function attendanceDetail(v,correction=false){if(!v||!stamp(v.serverNow))throw new ContractError();(correction?correctionRecord:periodRecord)(v.record);if(v.period!==null)periodRecord(v.period);if(!correction&&v.period?.id!==v.record.id)throw new ContractError();if(correction&&v.period?.id!==undefined&&v.period.id!==v.record.period_id)throw new ContractError();return v;}
+export function attendanceHistory(v){pagedRows(v);for(const r of v.rows)if(!r||typeof r.action!=='string'||typeof r.actor_name!=='string'||!stamp(r.created_at)||!r.after_value)throw new ContractError('修改记录不完整。');return v;}
+export function beijingCorrectionInput(v){if(!stamp(v))throw new ContractError();return new Date(Date.parse(v)+8*3600000).toISOString().slice(0,23);}
+export function correctionTimestamp(v){if(typeof v!=='string'||!/^\d{4}-\d\d-\d\dT(?:[01]\d|2[0-3]):[0-5]\d(?::[0-5]\d(?:\.\d{1,3})?)?$/.test(v)||!validDate(v.slice(0,10)))throw new ContractError('请填写有效的北京时间。');return new Date(v+'+08:00').toISOString();}
+export function attendancePayload(action,value,expected){
+ const keys=action==='create'?['requestKey','periodId','direction','proposedAt','reason']:action==='edit'?['requestKey','proposedAt','reason']:action==='decision'?['requestKey','decision','note']:null;
+ if(!keys||!value||keys.some(k=>!Object.hasOwn(value,k))||Object.keys(value).some(k=>!keys.includes(k)))throw new ContractError('请填写完整申请。');const out={requestKey:attendanceId(value.requestKey)};
+ if(action==='decision'){if(!['approved','rejected'].includes(value.decision)||typeof value.note!=='string'||!value.note.trim()||value.note.length>2000)throw new ContractError('请填写审核说明。');out.decision=value.decision;out.note=value.note.trim();}
+ else{if(!stamp(value.proposedAt)||!/(Z|[+-]\d\d:\d\d)$/.test(value.proposedAt)||typeof value.reason!=='string'||!value.reason.trim()||value.reason.length>2000)throw new ContractError('请核对补卡时间和原因。');out.proposedAt=value.proposedAt;out.reason=value.reason.trim();if(action==='create'){out.periodId=value.periodId===null?null:attendanceId(value.periodId);if(!['in','out'].includes(value.direction)||(!out.periodId&&value.direction!=='in'))throw new ContractError('没有原记录时先申请补上班。');out.direction=value.direction;}}
+ if(action!=='create')out.expectedVersion=version(expected);return out;
+}
+export function attendanceWritePath(action,id){if(action==='create')return '/api/attendance/corrections';attendanceId(id);return '/api/attendance/corrections/'+id+(action==='decision'?'/decision':action==='edit'?'':(()=>{throw new ContractError();})());}

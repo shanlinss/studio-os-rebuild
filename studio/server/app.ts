@@ -361,6 +361,8 @@ export async function createStudioApp(
     @Get('attendance/state') attendanceState(@Req() r: AuthRequest) { return attendance.state(r.identity!); }
     @Get('attendance/receipts/:key') attendanceReceipt(@Req() r: AuthRequest, @Param('key') key: string) { return attendance.receipt(r.identity!, key); }
     @Get('attendance/periods') attendancePeriods(@Req() r: AuthRequest) { return attendance.list(r.identity!, r.query); }
+    @Get('attendance/periods/:id') attendancePeriodDetail(@Req() r:AuthRequest,@Param('id') id:string){return attendance.detail(r.identity!,id,r.query);}
+    @Get('attendance/corrections/:id') attendanceCorrectionDetail(@Req() r:AuthRequest,@Param('id') id:string){return attendance.detail(r.identity!,id,r.query,true);}
     @Get('attendance/corrections') attendanceCorrections(@Req() r: AuthRequest) { return attendance.list(r.identity!, r.query, true); }
     @Get('attendance/periods/:id/history') attendanceHistory(@Req() r: AuthRequest, @Param('id') id: string) { return attendance.history(r.identity!, id, r.query); }
     @Get('attendance/corrections/:id/history') attendanceCorrectionHistory(@Req() r: AuthRequest, @Param('id') id: string) { return attendance.history(r.identity!, id, r.query, true); }
@@ -1642,7 +1644,7 @@ export async function createStudioApp(
       if (req.path.startsWith('/api/attendance/')) {
         requireContributor(req.identity);
         const route = req.path.slice('/api/attendance/'.length);
-        const allowed = (req.method === 'GET' && /^(daily|state|receipts\/[^/]+|periods|corrections|(?:periods|corrections)\/[^/]+\/history)$/.test(route)) ||
+        const allowed = (req.method === 'GET' && /^(daily|state|receipts\/[^/]+|periods|corrections|(?:periods|corrections)\/[^/]+(?:\/history)?)$/.test(route)) ||
           (req.method === 'POST' && /^(end-work|studio\/in|field|periods\/[^/]+\/(?:in|out|decision)|corrections(?:\/[^/]+\/decision)?)$/.test(route)) ||
           (req.method === 'PATCH' && /^corrections\/[^/]+$/.test(route));
         if (!allowed) throw new ForbiddenException();

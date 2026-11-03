@@ -65,3 +65,10 @@ test('warehouse preview forwards only scoped reads and keeps journal edits and r
  for(const path of ['/warehouse-view.mjs','/warehouse-editors.mjs','/warehouse-contract.mjs','/warehouse-transfer-editors.mjs'])assert.equal((await request(port,path)).status,200);
  }finally{await close(preview);await close(upstream);}
 });
+test('attendance review preview exposes only scoped records and history while refusing review writes and private receipts',async()=>{
+ const id='11111111-1111-4111-8111-111111111111',seen=[];const upstream=http.createServer((req,res)=>{seen.push(req.url);res.writeHead(200,{'Content-Type':'application/json'});res.end('{}');});await listen(upstream);const preview=createPreviewServer({upstreamPort:upstream.address().port});await listen(preview);const port=preview.address().port;
+ try{for(const path of ['/api/attendance/corrections?view=team&status=pending&offset=50','/api/attendance/corrections/'+id,'/api/attendance/periods/'+id,'/api/attendance/corrections/'+id+'/history?offset=50'])assert.equal((await request(port,path)).status,200);const count=seen.length;
+ assert.equal((await request(port,'/api/attendance/corrections/'+id+'/decision',{method:'POST'})).status,405);assert.equal((await request(port,'/api/attendance/corrections/'+id,{method:'PATCH'})).status,405);assert.equal((await request(port,'/api/attendance/receipts/'+id)).status,404);assert.equal((await request(port,'/api/attendance/corrections/'+id+'?owner=other')).status,400);assert.equal(seen.length,count);
+ for(const module of ['/attendance-contract.mjs','/attendance-editors.mjs','/attendance-view.mjs'])assert.equal((await request(port,module)).status,200);
+ }finally{await close(preview);await close(upstream);}
+});
