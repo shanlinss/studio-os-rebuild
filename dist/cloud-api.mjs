@@ -1,3 +1,4 @@
+import {closureState,closureDetail,closureHistory,closurePayload} from './closure-contract.mjs';
 import {validMonth,monthlyResult,calendarMonth,calendarHistory,calendarPayload} from './monthly-contract.mjs';
 import {exceptionPage,exceptionDetail,exceptionHistory,exceptionPayload} from './exception-contract.mjs';
 import {leavePage,leaveRecord,leaveHistory,leavePayload,leavePath} from './leave-contract.mjs';
@@ -154,6 +155,11 @@ export function createCloudApi(fetcher=globalThis.fetch,{allowWrites=false}={}){
     async sampleWrite(action,owner,value,version){return mutations.send(sampleOperationPath(action,owner),action==='relocate'?'PATCH':'POST',samplePayload(action,value,version));},
     async sampleReceipt(key,action,owner){const path=sampleOperationPath(action,owner);try{const result=await get('/api/samples/receipts/'+endpointId(key));if(!record(result)||typeof result.id!=='string')throw new ContractError();endpointId(result.id);mutations.confirmRead(path);return result;}catch(e){if(e.status===404){mutations.confirmRead(path);return null;}throw e;}},
     async samples(params={},signal){const q=new URLSearchParams({offset:String(params.offset??0),q:params.q??'',active:'all'});return pagedRows(await get('/api/samples/catalog?'+q,signal));},
+    async closureState(month,memberId,signal){const q=new URLSearchParams({month:validMonth(month)});if(memberId)q.set('memberId',endpointId(memberId));return read('/api/attendance/month-closures?'+q,signal,closureState);},
+    async closureDetail(id,signal){return read('/api/attendance/month-closures/'+endpointId(id),signal,closureDetail);},
+    async closureHistory(month,memberId,offset=0,signal){const q=new URLSearchParams({month:validMonth(month),memberId:endpointId(memberId),offset:String(offset)});return read('/api/attendance/month-closures/history?'+q,signal,closureHistory);},
+    async closureSave(value){return mutations.send('/api/attendance/month-closures','POST',closurePayload(value));},
+    async closureReceipt(key){try{const r=await get('/api/attendance/month-closure-receipts/'+endpointId(key));endpointId(r?.id);if(!Number.isSafeInteger(r.revision)||r.revision<1)throw new ContractError();mutations.confirmRead('/api/attendance/month-closures');return r;}catch(e){if(e.status===404){mutations.confirmRead('/api/attendance/month-closures');return null;}throw e;}},
     async monthlyAttendance(month,memberId,signal){const q=new URLSearchParams({month:validMonth(month)});if(memberId)q.set('memberId',endpointId(memberId));return read('/api/attendance/monthly?'+q,signal,monthlyResult);},
     async attendanceCalendar(month,signal){return read('/api/attendance/calendar?month='+validMonth(month),signal,calendarMonth);},
     async calendarHistory(date,offset=0,signal){if(!validDate(date))throw new ContractError();return read('/api/attendance/calendar/'+date+'/history?offset='+String(offset),signal,calendarHistory);},

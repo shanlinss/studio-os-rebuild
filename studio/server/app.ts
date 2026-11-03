@@ -1,3 +1,4 @@
+import {AttendanceClosures} from './attendance-closures';
 import {AttendanceMonthly} from './attendance-monthly';
 import {AttendanceExceptions} from './attendance-exceptions';
 import {LeaveRequests} from './leave';
@@ -76,6 +77,7 @@ export async function createStudioApp(
   const leaveRequests = new LeaveRequests(database);
   const attendanceExceptions = new AttendanceExceptions(database);
   const attendanceMonthly = new AttendanceMonthly(database);
+  const attendanceClosures = new AttendanceClosures(database);
   const samples = new ShootingSamples(database);
   const businessAccounts = new BusinessAccounts(database);
   const workflow = new Workflow(database);
@@ -360,6 +362,11 @@ export async function createStudioApp(
     @Post('samples/catalog/:id/borrow') samplesBorrow(@Req() r: AuthRequest,@Param('id') id: string,@Body() b: unknown) { return samples.borrow(r.identity!,id,b); }
     @Post('samples/loans/:id/return') samplesReturn(@Req() r: AuthRequest,@Param('id') id: string,@Body() b: unknown) { return samples.ownLoan(r.identity!,id,b); }
     @Patch('samples/loans/:id/location') samplesMove(@Req() r: AuthRequest,@Param('id') id: string,@Body() b: unknown) { return samples.ownLoan(r.identity!,id,b,true); }
+    @Get('attendance/month-closures') closureState(@Req() r:AuthRequest){return attendanceClosures.state(r.identity!,r.query);}
+    @Get('attendance/month-closures/history') closureHistory(@Req() r:AuthRequest){return attendanceClosures.history(r.identity!,r.query);}
+    @Get('attendance/month-closures/:id') closureDetail(@Req() r:AuthRequest,@Param('id') id:string){return attendanceClosures.detail(r.identity!,id,r.query);}
+    @Post('attendance/month-closures') closureSave(@Req() r:AuthRequest,@Body() b:unknown){return attendanceClosures.save(r.identity!,b);}
+    @Get('attendance/month-closure-receipts/:key') closureReceipt(@Req() r:AuthRequest,@Param('key') key:string){return attendanceClosures.receipt(r.identity!,key);}
     @Get('attendance/monthly') monthlyAttendance(@Req() r:AuthRequest){return attendanceMonthly.monthly(r.identity!,r.query);}
     @Get('attendance/calendar') attendanceCalendar(@Req() r:AuthRequest){return attendanceMonthly.calendar(r.identity!,r.query);}
     @Get('attendance/calendar/:date/history') calendarHistory(@Req() r:AuthRequest,@Param('date') date:string){return attendanceMonthly.calendarHistory(r.identity!,date,r.query);}
@@ -1672,8 +1679,10 @@ export async function createStudioApp(
           (req.method === 'PATCH' && /^(?:leaves|corrections)\/[^/]+$/.test(route));
         const exceptionRead=req.method==='GET'&&/^(exceptions|exception-receipts\/[^/]+|periods\/[^/]+\/exceptions(?:\/history)?)$/.test(route),exceptionWrite=req.method==='POST'&&/^periods\/[^/]+\/exceptions$/.test(route);
         const calendarRead=req.method==='GET'&&/^(monthly|calendar|calendar-receipts\/[^/]+|calendar\/[^/]+\/history)$/.test(route),calendarWrite=req.method==='POST'&&/^calendar\/[^/]+$/.test(route);
+        const closureRead=req.method==='GET'&&/^(month-closures(?:\/[^/]+)?|month-closure-receipts\/[^/]+)$/.test(route),closureWrite=req.method==='POST'&&route==='month-closures';
+        if(closureWrite)requireAdministrator(req.identity);
         if(calendarWrite)requireAdministrator(req.identity);
-        if (!allowed&&!exceptionRead&&!exceptionWrite&&!calendarRead&&!calendarWrite) throw new ForbiddenException();
+        if (!allowed&&!exceptionRead&&!exceptionWrite&&!calendarRead&&!calendarWrite&&!closureRead&&!closureWrite) throw new ForbiddenException();
         if(exceptionWrite)requireAdministrator(req.identity);
         if (route.endsWith('/decision')) requireAdministrator(req.identity);
         if (req.method !== 'GET') auth.csrf(req);

@@ -1,3 +1,4 @@
+import type {TransactionSql} from 'postgres';
 import {BadRequestException,ConflictException,ForbiddenException,NotFoundException,UnauthorizedException} from '@nestjs/common';
 import {createHash} from 'node:crypto';
 import type {Identity} from './auth';
@@ -7,14 +8,14 @@ import {objectInput,uuid,longText} from './validation';
 import {publicValue} from './attendance-support';
 import {attendanceMetrics} from './daily-attendance';
 function date(v:unknown){if(typeof v!=='string'||!/^\d{4}-\d\d-\d\d$/.test(v)||v<'1900-01-01'||v>'2199-12-31'||!Number.isFinite(Date.parse(v+'T00:00:00Z'))||new Date(v+'T00:00:00Z').toISOString().slice(0,10)!==v)throw new BadRequestException();return v;}
-function month(v:unknown){if(typeof v!=='string'||!/^\d{4}-\d\d$/.test(v))throw new BadRequestException();date(v+'-01');return v;}
+export function attendanceMonth(v:unknown){if(typeof v!=='string'||!/^\d{4}-\d\d$/.test(v))throw new BadRequestException();date(v+'-01');return v;}
 const iso=(v:any)=>v==null?null:new Date(v).toISOString();
 const nextDay=(d:string)=>new Date(Date.parse(d+'T00:00:00Z')+86400000).toISOString().slice(0,10);
 const working=(d:string,mode:string)=>mode==='work'||(mode==='default'&&![0,6].includes(new Date(d+'T00:00:00Z').getUTCDay()));
 function dates(m:string){const days:string[]=[];for(let d=m+'-01';d.startsWith(m);d=nextDay(d))days.push(d);return days;}
 export class AttendanceMonthly {
  constructor(private readonly db:StudioDatabase){}
- async calendar(who:Identity,value:unknown){requireContributor(who);const q=objectInput(value,['month']),m=month(q.month),ds=dates(m);const rows=await this.db.client`SELECT work_date::text AS date,mode,note,version FROM studio_os.attendance_calendar WHERE work_date BETWEEN ${ds[0]}::date AND ${ds.at(-1)!}::date`;return {month:m,days:ds.map(d=>{const r=rows.find(r=>r.date===d);return {date:d,mode:r?.mode||'default',note:r?.note||'',version:r?.version||0,workday:working(d,r?.mode||'default')};})};}
+ async calendar(who:Identity,value:unknown){requireContributor(who);const q=objectInput(value,['month']),m=attendanceMonth(q.month),ds=dates(m);const rows=await this.db.client`SELECT work_date::text AS date,mode,note,version FROM studio_os.attendance_calendar WHERE work_date BETWEEN ${ds[0]}::date AND ${ds.at(-1)!}::date`;return {month:m,days:ds.map(d=>{const r=rows.find(r=>r.date===d);return {date:d,mode:r?.mode||'default',note:r?.note||'',version:r?.version||0,workday:working(d,r?.mode||'default')};})};}
  async saveCalendar(who:Identity,day:string,value:unknown){
   requireAdministrator(who);date(day);const b=objectInput(value,['requestKey','expectedVersion','mode','note']),key=uuid(b.requestKey),note=longText(b.note,2000);if(!['work','rest','default'].includes(String(b.mode))||typeof b.expectedVersion!=='number'||!Number.isSafeInteger(b.expectedVersion)||b.expectedVersion<0||b.expectedVersion>=2147483647)throw new BadRequestException();const mode=String(b.mode),hash=createHash('sha256').update(JSON.stringify({day,mode,note,expected:b.expectedVersion})).digest('hex');
   return this.db.client.begin(async tx=>{
@@ -29,10 +30,9 @@ export class AttendanceMonthly {
  }
  async receipt(who:Identity,key:string){requireAdministrator(who);uuid(key);const [r]=await this.db.client`SELECT result FROM studio_os.attendance_calendar_receipts WHERE actor_id=${who.id} AND request_key=${key}`;if(!r)throw new NotFoundException();return r.result;}
  async calendarHistory(who:Identity,day:string,value:unknown){requireContributor(who);date(day);const b=objectInput(value,['offset']),offset=b.offset===undefined?0:Number(b.offset);if(!Number.isSafeInteger(offset)||offset<0||offset>2147483647)throw new BadRequestException();return this.db.client.begin(async tx=>{await tx`SET TRANSACTION ISOLATION LEVEL REPEATABLE READ READ ONLY`;const rows=await tx`SELECT *,work_date::text AS work_date FROM studio_os.attendance_calendar_events WHERE work_date=${day}::date ORDER BY created_at,id LIMIT 50 OFFSET ${offset}`,[n]=await tx`SELECT count(*)::int AS n FROM studio_os.attendance_calendar_events WHERE work_date=${day}::date`;return {rows:rows.map(publicValue),total:n.n,offset,limit:50};});}
- async monthly(who:Identity,value:unknown){
-  requireContributor(who);const q=objectInput(value,['month','memberId']),m=month(q.month),memberId=q.memberId===undefined?null:uuid(q.memberId);if(who.role!=='admin'&&memberId)throw new ForbiddenException();
-  return this.db.client.begin(async tx=>{
-   await tx`SET TRANSACTION ISOLATION LEVEL REPEATABLE READ READ ONLY`;
+ async monthly(who:Identity,value:unknown){return this.db.client.begin(async tx=>{await tx`SET TRANSACTION ISOLATION LEVEL REPEATABLE READ READ ONLY`;return this.read(tx,who,value);});}
+ async read(tx:TransactionSql,who:Identity,value:unknown,includeSources=false){
+  requireContributor(who);const q=objectInput(value,['month','memberId']),m=attendanceMonth(q.month),memberId=q.memberId===undefined?null:uuid(q.memberId);if(who.role!=='admin'&&memberId)throw new ForbiddenException();
    // Only minimal attendance identities, never the admin account/security directory.
    const roster=await tx`SELECT m.id,m.display_name AS name,m.start_date::text AS "startDate",m.active,a.active AS "loginActive",m.login_account_id AS owner FROM studio_os.members m JOIN studio_os.accounts a ON a.id=m.login_account_id WHERE a.role='employee' AND (${who.role==='admin'} OR a.id=${who.id}) ORDER BY m.active DESC,m.display_name,m.id`;
    const member=memberId?roster.find(r=>r.id===memberId):roster[0];if(memberId&&!member)throw new NotFoundException();
@@ -40,19 +40,24 @@ export class AttendanceMonthly {
    const base={month:m,today,serverNow,roster:roster.map(({owner,...r})=>r),member:member?(({owner,...r})=>r)(member):null,days:[] as any[],summary:null as any};if(!member)return base;
    const cal=await tx`SELECT work_date::text AS date,mode,note,version FROM studio_os.attendance_calendar WHERE work_date>=${start}::date AND work_date<${end}::date`;
    const periods=await tx`SELECT *,work_date::text AS work_date FROM studio_os.attendance_periods WHERE owner_id=${member.owner} AND work_date>=${start}::date AND work_date<${end}::date ORDER BY studio_os.attendance_periods.work_date,created_at,id`;
-   const leaves=await tx`SELECT id,leave_type,starts_at,ends_at,status FROM studio_os.leave_requests WHERE owner_id=${member.owner} AND starts_at<${end+'T00:00:00+08:00'}::timestamptz AND ends_at>${start+'T00:00:00+08:00'}::timestamptz AND status IN('pending','approved')`;
-   const corrections=await tx`SELECT c.id,c.status,coalesce(p.work_date,(c.proposed_at AT TIME ZONE 'Asia/Shanghai')::date)::text AS date FROM studio_os.attendance_corrections c LEFT JOIN studio_os.attendance_periods p ON p.id=c.period_id WHERE c.owner_id=${member.owner} AND coalesce(p.work_date,(c.proposed_at AT TIME ZONE 'Asia/Shanghai')::date)>=${start}::date AND coalesce(p.work_date,(c.proposed_at AT TIME ZONE 'Asia/Shanghai')::date)<${end}::date`;
-   const reviews=await tx`SELECT DISTINCT ON(r.period_id,r.kind) r.period_id,r.kind,r.period_version,r.outcome FROM studio_os.attendance_exception_reviews r JOIN studio_os.attendance_periods p ON p.id=r.period_id WHERE p.owner_id=${member.owner} AND p.work_date>=${start}::date AND p.work_date<${end}::date ORDER BY r.period_id,r.kind,r.revision DESC`;
+   const leaves=await tx`SELECT id,leave_type,starts_at,ends_at,status FROM studio_os.leave_requests WHERE owner_id=${member.owner} AND starts_at<${end+'T00:00:00+08:00'}::timestamptz AND ends_at>${start+'T00:00:00+08:00'}::timestamptz`;
+   const corrections=await tx`SELECT c.*,coalesce(p.work_date,(c.proposed_at AT TIME ZONE 'Asia/Shanghai')::date)::text AS date FROM studio_os.attendance_corrections c LEFT JOIN studio_os.attendance_periods p ON p.id=c.period_id WHERE c.owner_id=${member.owner} AND coalesce(p.work_date,(c.proposed_at AT TIME ZONE 'Asia/Shanghai')::date)>=${start}::date AND coalesce(p.work_date,(c.proposed_at AT TIME ZONE 'Asia/Shanghai')::date)<${end}::date`;
+   const reviews=await tx`SELECT DISTINCT ON(r.period_id,r.kind) r.* FROM studio_os.attendance_exception_reviews r JOIN studio_os.attendance_periods p ON p.id=r.period_id WHERE p.owner_id=${member.owner} AND p.work_date>=${start}::date AND p.work_date<${end}::date ORDER BY r.period_id,r.kind,r.revision DESC`;
    base.days=ds.map(d=>{
-    const c=cal.find(r=>r.date===d),mode=c?.mode||'default',workday=working(d,mode),employed=!member.startDate||d>=member.startDate,ps=periods.filter(p=>p.work_date===d),studio=ps.filter(p=>p.kind==='studio'),p=studio.length===1?studio[0]:null,inAt=p?iso(p.adjusted_in||p.original_in):null,outAt=p?iso(p.adjusted_out||p.original_out):null,metrics=inAt?attendanceMetrics(inAt,outAt,d,serverNow):null,complete=!!(metrics&&outAt),a=Date.parse(d+'T00:00:00+08:00'),b=a+86400000;
-    const ls=leaves.filter(l=>Date.parse(String(l.starts_at))<b&&Date.parse(String(l.ends_at))>a).map(l=>({id:l.id,type:l.leave_type,status:l.status,minutes:Math.floor((Math.min(b,Date.parse(String(l.ends_at)))-Math.max(a,Date.parse(String(l.starts_at))))/60000)}));
+    const c=cal.find(r=>r.date===d),mode=c?.mode||'default',workday=working(d,mode),employed=!member.startDate||d>=member.startDate,ps=periods.filter(p=>p.work_date===d),studio=ps.filter(p=>p.kind==='studio'),p=studio.length===1?studio[0]:null,inAt=p?iso(p.adjusted_in||p.original_in):null,outAt=p?iso(p.adjusted_out||p.original_out):null,metrics=inAt&&(outAt||d===today)?attendanceMetrics(inAt,outAt,d,serverNow):null,complete=!!(metrics&&outAt),a=Date.parse(d+'T00:00:00+08:00'),b=a+86400000;
+    const ls=leaves.filter(l=>['pending','approved'].includes(l.status)&&Date.parse(String(l.starts_at))<b&&Date.parse(String(l.ends_at))>a).map(l=>({id:l.id,type:l.leave_type,status:l.status,minutes:Math.floor((Math.min(b,Date.parse(String(l.ends_at)))-Math.max(a,Date.parse(String(l.starts_at))))/60000)}));
     let state=d>today?'future':!employed?'before-start':studio.length>1?'needs-review':p?(!metrics?'needs-review':outAt?'finished':d===today?'working':'needs-review'):ps.length?'legacy-field':ls.some(l=>l.status==='approved')?'leave-review':!workday?'rest':d===today?'not-started':'unverified-absence';
     const pendingExceptions=complete?['late','insufficient'].filter(k=>metrics![k as 'late'|'insufficient']).filter(k=>{const r=reviews.find(r=>r.period_id===p!.id&&r.kind===k);return !r||r.period_version!==p!.version||r.outcome==='reopened';}):[];
-    return {date:d,workday,employed,calendar:{mode,note:c?.note||'',version:c?.version||0},state,inAt,outAt,metrics,complete,pendingExceptions,periods:ps.map(publicValue),leaves:ls,corrections:corrections.filter(c=>c.date===d)};
+    return {date:d,workday,employed,calendar:{mode,note:c?.note||'',version:c?.version||0},state,inAt,outAt,metrics,complete,pendingExceptions,periods:ps.map(publicValue),leaves:ls,corrections:corrections.filter(c=>c.date===d).map(c=>({id:c.id,status:c.status,date:c.date}))};
    });
    const days=base.days,occurred=days.filter(d=>d.date<=today&&d.employed),finished=occurred.filter(d=>d.complete);
    base.summary={expectedDays:days.filter(d=>d.workday&&d.employed).length,elapsedExpectedDays:occurred.filter(d=>d.workday).length,normalDays:finished.filter(d=>d.workday&&!d.metrics.late&&!d.metrics.insufficient).length,lateDays:finished.filter(d=>d.metrics.late).length,insufficientDays:finished.filter(d=>d.metrics.insufficient).length,leaveDays:days.filter(d=>d.leaves.some((l:any)=>l.status==='approved')).length,leaveMinutes:days.reduce((n,d)=>n+d.leaves.filter((l:any)=>l.status==='approved').reduce((s:number,l:any)=>s+l.minutes,0),0),unverifiedAbsenceDays:occurred.filter(d=>d.state==='unverified-absence'&&d.workday).length,approvedCorrections:corrections.filter(c=>c.status==='approved').length,pendingCorrections:corrections.filter(c=>c.status==='pending').length,restWorkDays:occurred.filter(d=>!d.workday&&d.periods.some((p:any)=>p.kind==='studio'&&(p.adjusted_in||p.original_in))).length,needsReviewDays:occurred.filter(d=>['needs-review','legacy-field','leave-review'].includes(d.state)).length,pendingExceptions:occurred.reduce((n,d)=>n+d.pendingExceptions.length,0)};
-   return base;
-  });
+   const sourceFacts={schema:1,month:m,owner:member.owner,member:base.member,calendar:cal,periods,leaves,corrections,reviews};
+   return {...base,sourceHash:attendanceSourceHash(sourceFacts),...(includeSources?{sourceFacts:publicValue(sourceFacts)}:{})};
  }
+}
+// Stable across query row order, clock readings, timezone encodings and roster changes.
+export function attendanceSourceHash(value:unknown):string {
+ const canonical=(v:any):any=>v instanceof Date?v.toISOString():Array.isArray(v)?v.map(canonical).sort((a,b)=>{const x=JSON.stringify(a),y=JSON.stringify(b);return x<y?-1:x>y?1:0;}):v&&typeof v==='object'?Object.fromEntries(Object.keys(v).sort().map(k=>[k,canonical(v[k])])):v;
+ return createHash('sha256').update(JSON.stringify(canonical(publicValue(value)))).digest('hex');
 }

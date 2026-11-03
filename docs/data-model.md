@@ -79,3 +79,7 @@ id、variant、observedAt（北京时间）、window、url、note、metrics（na
 ## 工作日历与月度考勤更新（2026-11-03）
 
 045 新增 attendance_calendar（日期主键、work/rest/default、说明、版本）、attendance_calendar_events（前后快照及操作者，不可改写）、attendance_calendar_receipts（原操作者请求回执）。AttendanceMonthly 在单一可重复读快照内读取原成员、考勤、补卡、请假与核实记录，逐日计算；不另存月度打卡副本或工资。工作日历全工作室共享，月度口径与未锁定边界见 attendance-monthly.md。
+
+## 月份核定与锁定更新（2026-11-03）
+
+046新增 attendance_month_closures，记录成员/原账号/月份、递增revision、previous_id、lock/reopen、source_hash、不可改写snapshot、day_notes、整月说明及操作者；attendance_month_closure_receipts按原操作者/请求键记录幂等回执。AttendanceMonthly.read复用同事务原来源并生成稳定指纹；锁定单独保存规范化来源事实，不复制可写打卡台账。

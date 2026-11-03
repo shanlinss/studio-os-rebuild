@@ -3,10 +3,10 @@ import {createExceptionViews} from './exception-view.mjs';
 import {createLeaveViews} from './leave-view.mjs';
 import {leaveLabels} from './leave-contract.mjs';
 import {correctionLabels,attendanceActions,approvalBlockers} from './attendance-contract.mjs';
-export function createAttendanceView({api,h,heading,showPanel,localTime,writable,onEdit,onDecision,onLeaveEdit,onLeaveAction,onExceptionReview,onCalendarEdit}){
+export function createAttendanceView({api,h,heading,showPanel,localTime,writable,onEdit,onDecision,onLeaveEdit,onLeaveAction,onExceptionReview,onCalendarEdit,onClosureAction}){
  const $=s=>document.querySelector(s);let tab,identity,user,parent,request,offset=0,serial=0;
- const monthlyView=createMonthlyView({api,h,heading,showPanel,localTime,writable,onCalendarEdit});
- const exceptionViews=createExceptionViews({api,h,showPanel,localTime,writable,getUser:()=>user,onReview:onExceptionReview,onCalendarEdit});
+ const monthlyView=createMonthlyView({api,h,heading,showPanel,localTime,writable,onCalendarEdit,onClosureAction});
+ const exceptionViews=createExceptionViews({api,h,showPanel,localTime,writable,getUser:()=>user,onReview:onExceptionReview});
  const leaveViews=createLeaveViews({api,h,showPanel,localTime,writable,getUser:()=>user,onEdit:onLeaveEdit,onAction:onLeaveAction});
  const statuses=()=>tab==='exceptions'?'<option value="pending">待核实 / 待复核</option><option value="handled">已核实</option><option value="all">全部异常</option>':Object.entries(tab==='leaves'?leaveLabels:correctionLabels).map(([key,label])=>`<option value="${key}">${h(label)}</option>`).join('')+'<option value="all">全部申请</option>';
  const hint=()=>tab==='exceptions'?'只列已完整签退、同日且唯一工作段的迟到或不足时长；缺失、跨日和重复记录先走补正。每类异常分别核实，说明不抹去时间事实，不自动扣款。':tab==='leaves'?'请假按时间段涉及的日期筛选；待审核可修改或撤回，已批准请假由管理员说明原因后撤销。时间段暂不折算出勤天数或工资。':user.role==='admin'?'审核前对照原考勤及申请原因。原记录变化后，需要员工核对更新申请；驳回时说明原因。':'已有当天记录，请进入记录申请补正；申请提交后可在待审核状态修改，已处理的申请保留历史。';
