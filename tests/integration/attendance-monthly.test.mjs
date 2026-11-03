@@ -1,0 +1,57 @@
+import test,{before,after} from 'node:test';
+import assert from 'node:assert/strict';
+import {randomUUID,randomBytes} from 'node:crypto';
+import {startLocalDatabase} from '../../dev/local-database.mjs';
+import {migrate} from '../../.build/server/migrations.js';
+import {checkReadiness} from '../../.build/server/readiness.js';
+import {createStudioApp} from '../../.build/server/app.js';
+import {Authentication,hashPassword} from '../../.build/server/auth.js';
+import {AttendanceMonthly} from '../../.build/server/attendance-monthly.js';
+import {createCloudApi} from '../../dist/cloud-api.mjs';
+let local,db,app,base,source;const people=[],sessions=[],clients=[];
+const req=(i,path,method='GET',body,csrf=true)=>fetch(base+'/api/attendance'+path,{method,headers:{'Content-Type':'application/json',Origin:base,Cookie:'studio_session='+sessions[i].token,...(csrf?{'x-csrf-token':sessions[i].csrf}:{})},...(body===undefined?{}:{body:JSON.stringify(body)})});
+const value=(expectedVersion=0,mode='rest',note='工作室统一安排休息')=>({requestKey:randomUUID(),expectedVersion,mode,note});
+async function seed(d,start='10:00:00',end='18:00:00',kind='studio'){const [p]=await db.client`INSERT INTO studio_os.attendance_periods(owner_id,member_id,kind,work_date,approval_status,original_in,original_out) VALUES(${people[1].id},${people[1].memberId},${kind},${d},${kind==='studio'?'not-required':'approved'},${d+'T'+start+'+08:00'},${end?(end.includes('T')?end:d+'T'+end+'+08:00'):null}) RETURNING id`;return p.id;}
+before(async()=>{
+ local=await startLocalDatabase();db=local.db;await migrate(db);const auth=new Authentication(db);
+ for(const role of ['admin','employee','employee','admin']){const username='monthly_'+randomBytes(6).toString('hex'),password=randomBytes(24).toString('hex');const [a]=await db.client`INSERT INTO studio_os.accounts(username,password_hash,role) VALUES(${username},${await hashPassword(password)},${role}) RETURNING id`;const [m]=await db.client`INSERT INTO studio_os.members(display_name,login_account_id) VALUES(${username},${a.id}) RETURNING id`;people.push({...a,memberId:m.id});sessions.push(await auth.login(username,password,'monthly-'+randomUUID()));}
+ await db.client`UPDATE studio_os.members SET start_date='2020-01-15' WHERE id=${people[2].memberId}`;
+ app=await createStudioApp(db,undefined,{diagnosticSink:()=>{}});await app.listen(0,'127.0.0.1');base=await app.getUrl();for(const s of sessions){const api=createCloudApi((path,options)=>{const headers=new Headers(options?.headers);headers.set('Cookie','studio_session='+s.token);headers.set('Origin',base);return fetch(base+path,{...options,headers});},{allowWrites:true});await api.session();clients.push(api);}
+ source=await seed('2020-01-01','10:31:00','18:00:00');await seed('2020-01-02');await seed('2020-01-03','10:00:00',null);await seed('2020-01-04');await seed('2020-01-05');await seed('2020-01-05');await seed('2020-01-08','10:00:00','18:00:00','field');await seed('2020-01-09','10:00:00','2020-01-10T18:00:00+08:00');
+ await db.client`INSERT INTO studio_os.leave_requests(owner_id,member_id,leave_type,starts_at,ends_at,reason,status,reviewed_by,reviewed_at,review_note) VALUES(${people[1].id},${people[1].memberId},'事假','2020-01-06T10:00:00+08:00','2020-01-06T12:00:00+08:00','个人安排','approved',${people[0].id},now(),'已审核'),(${people[1].id},${people[1].memberId},'事假','2020-01-31T23:00:00+08:00','2020-02-01T01:00:00+08:00','跨月安排','approved',${people[0].id},now(),'已审核')`;
+});
+after(async()=>{if(app)await app.close();if(local)await local.stop();});
+test('monthly source joins retain every day and independently flag late, short, incomplete and legacy records',async()=>{
+ const v=await clients[1].monthlyAttendance('2020-01');assert.equal(v.days.length,31);assert.equal(v.summary.expectedDays,23);assert.equal(v.summary.normalDays,1);assert.equal(v.summary.lateDays,1);assert.equal(v.summary.insufficientDays,1);assert.equal(v.summary.restWorkDays,2);assert.equal(v.summary.needsReviewDays,6);assert.equal(v.summary.pendingExceptions,2);assert.equal(v.days[0].periods[0].id,source);assert.deepEqual(v.days[0].pendingExceptions,['late','insufficient']);assert.equal(v.days[2].state,'needs-review');assert.equal(v.days[4].periods.length,2);assert.equal(v.days[7].state,'legacy-field');assert.equal(v.days[8].state,'needs-review');assert.equal(v.days[6].state,'unverified-absence');assert.ok(v.roster.every(r=>r.id===people[1].memberId));assert.ok(!('owner' in v.roster[0]));
+});
+test('approved leaves intersect the Beijing month and day without inventing paid days or excusing a partial-day gap',async()=>{
+ const jan=await clients[1].monthlyAttendance('2020-01'),feb=await clients[1].monthlyAttendance('2020-02');assert.equal(jan.summary.leaveDays,2);assert.equal(jan.summary.leaveMinutes,180);assert.equal(jan.days[5].state,'leave-review');assert.equal(jan.days[5].leaves[0].minutes,120);assert.equal(feb.summary.leaveDays,1);assert.equal(feb.summary.leaveMinutes,60);assert.equal(jan.summary.unverifiedAbsenceDays,16);
+});
+test('future dates and pre-employment dates never become missing attendance and admins are excluded from attendance roster',async()=>{
+ const future=await clients[1].monthlyAttendance('2199-01');assert.equal(future.summary.unverifiedAbsenceDays,0);assert.equal(future.summary.elapsedExpectedDays,0);assert.ok(future.days.every(d=>d.state==='future'));const second=await clients[0].monthlyAttendance('2020-01',people[2].memberId);assert.equal(second.summary.expectedDays,13);assert.equal(second.days[0].state,'before-start');assert.equal(second.summary.unverifiedAbsenceDays,13);assert.equal(second.roster.length,2);assert.ok(!second.roster.some(r=>r.id===people[0].memberId));
+});
+test('calendar override changes only expected attendance and preserves clocks, leave, original events and financial facts',async()=>{
+ const p=(await clients[1].attendanceDetail(source)).period,original=(await clients[1].attendanceHistory(source)).total;
+ const payload=value(),r=await clients[0].calendarSave('2020-01-01',payload);assert.equal(r.version,1);assert.deepEqual(await clients[0].calendarSave('2020-01-01',payload),r);assert.deepEqual(await clients[0].calendarReceipt(payload.requestKey,'2020-01-01'),r);assert.equal(await clients[3].calendarReceipt(payload.requestKey,'2020-01-01'),null);
+ const v=await clients[1].monthlyAttendance('2020-01');assert.equal(v.summary.expectedDays,22);assert.equal(v.summary.restWorkDays,3);assert.equal(v.summary.lateDays,1);assert.equal(v.days[0].calendar.mode,'rest');assert.deepEqual((await clients[1].attendanceDetail(source)).period,p);assert.equal((await clients[1].attendanceHistory(source)).total,original);assert.equal((await db.client`SELECT count(*)::int AS n FROM studio_os.expense_records`)[0].n,0);
+ await assert.rejects(clients[0].calendarSave('2020-01-01',{...payload,note:'改写请求'}),e=>e.status===409);
+});
+test('calendar versions serialize concurrent edits and resetting defaults appends history',async()=>{
+ const b=value(0,'work','调休上班'),responses=await Promise.all([req(0,'/calendar/2020-01-04','POST',b),req(3,'/calendar/2020-01-04','POST',{...b,requestKey:randomUUID()})]);assert.deepEqual(responses.map(r=>r.status).sort(),[201,409]);await clients[0].calendarSave('2020-01-04',value(1,'default','恢复周末休息'));const d=(await clients[1].attendanceCalendar('2020-01')).days[3];assert.equal(d.mode,'default');assert.equal(d.workday,false);assert.equal(d.version,2);const history=await clients[1].calendarHistory('2020-01-04');assert.equal(history.total,2);assert.equal(history.rows[0].after_value.mode,'work');assert.equal(history.rows[1].before_value.mode,'work');await assert.rejects(clients[0].calendarSave('2020-01-04',value(1)),e=>e.status===409);
+});
+test('corrections and changed exception interpretations are reflected on fresh monthly reads',async()=>{
+ const b={requestKey:randomUUID(),expectedPeriodVersion:1,expectedReviewId:null,kind:'late',outcome:'special',note:'已核实特殊情况'};await clients[0].exceptionReview(source,b);let m=await clients[1].monthlyAttendance('2020-01');assert.equal(m.summary.pendingExceptions,1);assert.equal(m.summary.lateDays,1);
+ const c=await clients[1].attendanceWrite('create',undefined,{requestKey:randomUUID(),periodId:source,direction:'out',proposedAt:'2020-01-01T10:31:00Z',reason:'补正真实下班时间'});m=await clients[1].monthlyAttendance('2020-01');assert.equal(m.summary.pendingCorrections,1);await clients[0].attendanceWrite('decision',c.id,{requestKey:randomUUID(),decision:'approved',note:'核实通过'},1);m=await clients[1].monthlyAttendance('2020-01');assert.equal(m.summary.pendingCorrections,0);assert.equal(m.summary.approvedCorrections,1);assert.equal(m.summary.insufficientDays,0);assert.equal(m.summary.pendingExceptions,1);assert.equal(m.days[0].periods[0].original_out,'2020-01-01T10:00:00.000Z');assert.equal(m.days[0].outAt,'2020-01-01T10:31:00.000Z');
+});
+test('calendar audit failure rolls back schedule and receipt, and history is append-only',async()=>{
+ await db.client.unsafe("CREATE FUNCTION studio_os.reject_calendar_event() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN RAISE EXCEPTION 'injected'; END $$; CREATE TRIGGER reject_calendar_event BEFORE INSERT ON studio_os.attendance_calendar_events FOR EACH ROW EXECUTE FUNCTION studio_os.reject_calendar_event()");const b=value();try{await assert.rejects(clients[0].calendarSave('2020-01-11',b),e=>e.status===500);assert.equal((await clients[1].attendanceCalendar('2020-01')).days[10].version,0);assert.equal(await clients[0].calendarReceipt(b.requestKey,'2020-01-11'),null);}finally{await db.client.unsafe('DROP TRIGGER reject_calendar_event ON studio_os.attendance_calendar_events; DROP FUNCTION studio_os.reject_calendar_event()');}await assert.rejects(db.client`UPDATE studio_os.attendance_calendar_events SET actor_name='rewrite'`,e=>e.code==='23514');await assert.rejects(db.client`DELETE FROM studio_os.attendance_calendar_events`,e=>e.code==='23514');
+});
+test('calendar history paginates beyond fifty edits without losing prior reasons',async()=>{
+ for(let i=0;i<52;i++)await clients[0].calendarSave('2020-01-12',value(i,'rest','安排原因 '+i));const a=await clients[1].calendarHistory('2020-01-12'),b=await clients[1].calendarHistory('2020-01-12',50);assert.equal(a.total,52);assert.equal(a.rows.length,50);assert.equal(b.rows.length,2);assert.equal(new Set([...a.rows,...b.rows].map(r=>r.id)).size,52);
+});
+test('monthly and calendar routes enforce own visibility, current admin authority, CSRF and strict input',async()=>{
+ assert.equal((await req(1,'/monthly?month=2020-01&memberId='+people[2].memberId)).status,403);assert.equal((await req(0,'/monthly?month=2020-01&memberId='+people[0].memberId)).status,404);assert.equal((await req(1,'/calendar/2020-01-13','POST',value())).status,403);assert.equal((await req(0,'/calendar/2020-01-13','POST',value(),false)).status,403);
+ for(const path of ['/monthly?month=2020-13','/monthly?month=0000-01','/monthly?month=2020-01&salary=1','/calendar?month=2020-01&owner=other','/calendar/2020-02-30/history'])assert.equal((await req(0,path)).status,400);
+ for(const patch of [{mode:'national-holiday'},{expectedVersion:-1},{note:' '},{deductSalary:100}])assert.equal((await req(0,'/calendar/2020-01-13','POST',{...value(),...patch})).status,400);
+ await db.client`UPDATE studio_os.accounts SET role='employee' WHERE id=${people[3].id}`;await assert.rejects(new AttendanceMonthly(db).saveCalendar(sessions[3].user,'2020-01-13',value()),e=>e.status===403);await checkReadiness(db);
+});

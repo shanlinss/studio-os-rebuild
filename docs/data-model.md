@@ -75,3 +75,7 @@ id、variant、observedAt（北京时间）、window、url、note、metrics（na
 043：leave_requests 关联原 accounts/members，存类型、起止时间、原因、状态、版本及审核/撤回/撤销信息；leave_events 追加前后快照，数据库禁止改写；leave_receipts 仅负责幂等恢复。请假独立于原打卡，不新增第二套人员/身份或任何薪资/财务数据。原批准信息在撤销后保留。时间段重叠在同员工事务锁下校验；不存猜测的计薪小时或假期余额。
 
 044：attendance_exception_reviews 为原工作段的迟到/时长不足保存追加核实（属实/特殊说明/重新待核实）、原因、来源版本/时间快照、递增序号与前一条引用。数据库禁止改写；attendance_exception_receipts 仅负责幂等恢复。核实同步追加原 attendance_events，但不更新原打卡、原版本、工资或财务。最新核实以每工作段/异常种类的序号确定，源版本变化时旧结论仅供追溯。
+
+## 工作日历与月度考勤更新（2026-11-03）
+
+045 新增 attendance_calendar（日期主键、work/rest/default、说明、版本）、attendance_calendar_events（前后快照及操作者，不可改写）、attendance_calendar_receipts（原操作者请求回执）。AttendanceMonthly 在单一可重复读快照内读取原成员、考勤、补卡、请假与核实记录，逐日计算；不另存月度打卡副本或工资。工作日历全工作室共享，月度口径与未锁定边界见 attendance-monthly.md。

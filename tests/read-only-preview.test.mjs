@@ -86,3 +86,9 @@ test('exception preview forwards scoped queue and history only, blocking review 
  for(const module of ['/exception-contract.mjs','/exception-editors.mjs','/exception-view.mjs'])assert.equal((await request(port,module)).status,200);
  }finally{await close(preview);await close(upstream);}
 });
+
+test('monthly preview allows calendar and own or team month reads but never schedule mutations or private receipts',async()=>{
+ const seen=[],upstream=http.createServer((req,res)=>{seen.push(req.url);res.setHeader('Content-Type','application/json');res.end('{}');});await listen(upstream);const preview=createPreviewServer({upstreamPort:upstream.address().port});await listen(preview);const port=preview.address().port;
+ try{for(const path of ['/api/attendance/monthly?month=2020-01&memberId=11111111-1111-4111-8111-111111111111','/api/attendance/calendar?month=2020-01','/api/attendance/calendar/2020-01-01/history?offset=50'])assert.equal((await request(port,path)).status,200);const count=seen.length;assert.equal((await request(port,'/api/attendance/calendar/2020-01-01',{method:'POST'})).status,405);assert.equal((await request(port,'/api/attendance/calendar-receipts/11111111-1111-4111-8111-111111111111')).status,404);assert.equal((await request(port,'/api/attendance/monthly?month=2020-01&salary=1')).status,400);assert.equal(seen.length,count);for(const path of ['/monthly-contract.mjs','/monthly-editors.mjs','/monthly-view.mjs'])assert.equal((await request(port,path)).status,200);
+ }finally{await close(preview);await close(upstream);}
+});

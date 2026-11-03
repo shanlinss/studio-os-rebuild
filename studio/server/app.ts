@@ -1,3 +1,4 @@
+import {AttendanceMonthly} from './attendance-monthly';
 import {AttendanceExceptions} from './attendance-exceptions';
 import {LeaveRequests} from './leave';
 import {DailyAttendance} from './daily-attendance';
@@ -74,6 +75,7 @@ export async function createStudioApp(
   const dailyAttendance = new DailyAttendance(database);
   const leaveRequests = new LeaveRequests(database);
   const attendanceExceptions = new AttendanceExceptions(database);
+  const attendanceMonthly = new AttendanceMonthly(database);
   const samples = new ShootingSamples(database);
   const businessAccounts = new BusinessAccounts(database);
   const workflow = new Workflow(database);
@@ -358,6 +360,11 @@ export async function createStudioApp(
     @Post('samples/catalog/:id/borrow') samplesBorrow(@Req() r: AuthRequest,@Param('id') id: string,@Body() b: unknown) { return samples.borrow(r.identity!,id,b); }
     @Post('samples/loans/:id/return') samplesReturn(@Req() r: AuthRequest,@Param('id') id: string,@Body() b: unknown) { return samples.ownLoan(r.identity!,id,b); }
     @Patch('samples/loans/:id/location') samplesMove(@Req() r: AuthRequest,@Param('id') id: string,@Body() b: unknown) { return samples.ownLoan(r.identity!,id,b,true); }
+    @Get('attendance/monthly') monthlyAttendance(@Req() r:AuthRequest){return attendanceMonthly.monthly(r.identity!,r.query);}
+    @Get('attendance/calendar') attendanceCalendar(@Req() r:AuthRequest){return attendanceMonthly.calendar(r.identity!,r.query);}
+    @Get('attendance/calendar/:date/history') calendarHistory(@Req() r:AuthRequest,@Param('date') date:string){return attendanceMonthly.calendarHistory(r.identity!,date,r.query);}
+    @Post('attendance/calendar/:date') calendarSave(@Req() r:AuthRequest,@Param('date') date:string,@Body() b:unknown){return attendanceMonthly.saveCalendar(r.identity!,date,b);}
+    @Get('attendance/calendar-receipts/:key') calendarReceipt(@Req() r:AuthRequest,@Param('key') key:string){return attendanceMonthly.receipt(r.identity!,key);}
     @Get('attendance/exceptions') exceptionList(@Req() r:AuthRequest){return attendanceExceptions.list(r.identity!,r.query);}
     @Get('attendance/exception-receipts/:key') exceptionReceipt(@Req() r:AuthRequest,@Param('key') key:string){return attendanceExceptions.receipt(r.identity!,key);}
     @Get('attendance/periods/:id/exceptions') exceptionDetail(@Req() r:AuthRequest,@Param('id') id:string){return attendanceExceptions.detail(r.identity!,id,r.query);}
@@ -1664,7 +1671,9 @@ export async function createStudioApp(
           (req.method === 'POST' && /^(leaves(?:\/[^/]+\/(?:decision|withdraw|revoke))?|end-work|studio\/in|field|periods\/[^/]+\/(?:in|out|decision)|corrections(?:\/[^/]+\/decision)?)$/.test(route)) ||
           (req.method === 'PATCH' && /^(?:leaves|corrections)\/[^/]+$/.test(route));
         const exceptionRead=req.method==='GET'&&/^(exceptions|exception-receipts\/[^/]+|periods\/[^/]+\/exceptions(?:\/history)?)$/.test(route),exceptionWrite=req.method==='POST'&&/^periods\/[^/]+\/exceptions$/.test(route);
-        if (!allowed&&!exceptionRead&&!exceptionWrite) throw new ForbiddenException();
+        const calendarRead=req.method==='GET'&&/^(monthly|calendar|calendar-receipts\/[^/]+|calendar\/[^/]+\/history)$/.test(route),calendarWrite=req.method==='POST'&&/^calendar\/[^/]+$/.test(route);
+        if(calendarWrite)requireAdministrator(req.identity);
+        if (!allowed&&!exceptionRead&&!exceptionWrite&&!calendarRead&&!calendarWrite) throw new ForbiddenException();
         if(exceptionWrite)requireAdministrator(req.identity);
         if (route.endsWith('/decision')) requireAdministrator(req.identity);
         if (req.method !== 'GET') auth.csrf(req);

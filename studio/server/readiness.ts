@@ -117,6 +117,9 @@ export async function checkReadiness(
     await tx`SELECT actor_id,request_key,action,request_hash,result FROM leave_receipts LIMIT 0`;
     await tx`SELECT period_id,owner_id,kind,outcome,note,period_version,revision,previous_review_id,source_snapshot,actor_id FROM attendance_exception_reviews LIMIT 0`;
     await tx`SELECT actor_id,request_key,request_hash,result FROM attendance_exception_receipts LIMIT 0`;
+    await tx`SELECT work_date,mode,note,version,updated_at FROM attendance_calendar LIMIT 0`;
+    await tx`SELECT work_date,actor_id,actor_name,before_value,after_value,created_at FROM attendance_calendar_events LIMIT 0`;
+    await tx`SELECT actor_id,request_key,request_hash,result FROM attendance_calendar_receipts LIMIT 0`;
     await tx`SELECT key, attempts, reset_at FROM login_limits LIMIT 0`;
     await tx`SELECT id, name, active, version, created_at, updated_at FROM stores LIMIT 0`;
     await tx`SELECT store_id, actor_id, action, before_value, after_value FROM store_events LIMIT 0`;

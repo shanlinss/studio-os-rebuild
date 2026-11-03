@@ -1,3 +1,4 @@
+import {validMonth,monthlyResult,calendarMonth,calendarHistory,calendarPayload} from './monthly-contract.mjs';
 import {exceptionPage,exceptionDetail,exceptionHistory,exceptionPayload} from './exception-contract.mjs';
 import {leavePage,leaveRecord,leaveHistory,leavePayload,leavePath} from './leave-contract.mjs';
 import {attendancePage,attendanceDetail,attendanceHistory,attendancePayload,attendanceWritePath} from './attendance-contract.mjs';
@@ -153,6 +154,11 @@ export function createCloudApi(fetcher=globalThis.fetch,{allowWrites=false}={}){
     async sampleWrite(action,owner,value,version){return mutations.send(sampleOperationPath(action,owner),action==='relocate'?'PATCH':'POST',samplePayload(action,value,version));},
     async sampleReceipt(key,action,owner){const path=sampleOperationPath(action,owner);try{const result=await get('/api/samples/receipts/'+endpointId(key));if(!record(result)||typeof result.id!=='string')throw new ContractError();endpointId(result.id);mutations.confirmRead(path);return result;}catch(e){if(e.status===404){mutations.confirmRead(path);return null;}throw e;}},
     async samples(params={},signal){const q=new URLSearchParams({offset:String(params.offset??0),q:params.q??'',active:'all'});return pagedRows(await get('/api/samples/catalog?'+q,signal));},
+    async monthlyAttendance(month,memberId,signal){const q=new URLSearchParams({month:validMonth(month)});if(memberId)q.set('memberId',endpointId(memberId));return read('/api/attendance/monthly?'+q,signal,monthlyResult);},
+    async attendanceCalendar(month,signal){return read('/api/attendance/calendar?month='+validMonth(month),signal,calendarMonth);},
+    async calendarHistory(date,offset=0,signal){if(!validDate(date))throw new ContractError();return read('/api/attendance/calendar/'+date+'/history?offset='+String(offset),signal,calendarHistory);},
+    async calendarSave(date,value){if(!validDate(date))throw new ContractError();return mutations.send('/api/attendance/calendar/'+date,'POST',calendarPayload(value));},
+    async calendarReceipt(key,date){const path='/api/attendance/calendar/'+date;try{const r=await get('/api/attendance/calendar-receipts/'+endpointId(key));if(r?.date!==date||!Number.isSafeInteger(r.version)||r.version<1)throw new ContractError();mutations.confirmRead(path);return r;}catch(e){if(e.status===404){mutations.confirmRead(path);return null;}throw e;}},
     async exceptionList(params={},signal){const q=new URLSearchParams({view:params.view??'own',status:params.status??'pending',kind:params.kind??'all',offset:String(params.offset??0)});for(const k of ['from','to'])if(params[k]){if(!validDate(params[k]))throw new ContractError();q.set(k,params[k]);}if(params.from&&params.to&&params.from>params.to)throw new ContractError('开始日期不能晚于结束日期。');return read('/api/attendance/exceptions?'+q,signal,exceptionPage);},
     async exceptionDetail(id,signal){return read('/api/attendance/periods/'+endpointId(id)+'/exceptions',signal,exceptionDetail);},
     async exceptionHistory(id,offset=0,signal){return read('/api/attendance/periods/'+endpointId(id)+'/exceptions/history?offset='+String(offset),signal,exceptionHistory);},
