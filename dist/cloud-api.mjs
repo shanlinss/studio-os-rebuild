@@ -1,3 +1,4 @@
+import {payrollState,payrollHistory,payrollPayload} from './payroll-contract.mjs';
 import {closureState,closureDetail,closureHistory,closurePayload} from './closure-contract.mjs';
 import {validMonth,monthlyResult,calendarMonth,calendarHistory,calendarPayload} from './monthly-contract.mjs';
 import {exceptionPage,exceptionDetail,exceptionHistory,exceptionPayload} from './exception-contract.mjs';
@@ -25,7 +26,7 @@ const record = v => v!==null&&typeof v==='object'&&!Array.isArray(v);
 const string = v => typeof v==='string';
 const number = v => typeof v==='number'&&Number.isFinite(v);
 function list(value){if(!Array.isArray(value))throw new ContractError();return value;}
-function identity(v){if(!record(v)||!string(v.id)||!string(v.username)||!['admin','employee'].includes(v.role))throw new ContractError();const out={id:v.id,username:v.username,role:v.role};if(Object.hasOwn(v,'superadmin')){if(typeof v.superadmin!=='boolean')throw new ContractError();out.superadmin=v.superadmin;}if(Object.hasOwn(v,'permissions')){if(!Array.isArray(v.permissions)||v.permissions.some(p=>!['finance','account_security'].includes(p)))throw new ContractError();out.permissions=[...v.permissions];}return out;}
+function identity(v){if(!record(v)||!string(v.id)||!string(v.username)||!['admin','employee'].includes(v.role))throw new ContractError();const out={id:v.id,username:v.username,role:v.role};if(Object.hasOwn(v,'superadmin')){if(typeof v.superadmin!=='boolean')throw new ContractError();out.superadmin=v.superadmin;}if(Object.hasOwn(v,'permissions')){if(!Array.isArray(v.permissions)||v.permissions.some(p=>!['finance','account_security','payroll'].includes(p)))throw new ContractError();out.permissions=[...v.permissions];}return out;}
 function base(v){if(!record(v)||!string(v.id)||!string(v.title))throw new ContractError();return v;}
 function endpointId(id){if(!/^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/.test(id))throw new ContractError('记录标识格式无效。');return id;}
 export function materialModel(raw){
@@ -155,6 +156,10 @@ export function createCloudApi(fetcher=globalThis.fetch,{allowWrites=false}={}){
     async sampleWrite(action,owner,value,version){return mutations.send(sampleOperationPath(action,owner),action==='relocate'?'PATCH':'POST',samplePayload(action,value,version));},
     async sampleReceipt(key,action,owner){const path=sampleOperationPath(action,owner);try{const result=await get('/api/samples/receipts/'+endpointId(key));if(!record(result)||typeof result.id!=='string')throw new ContractError();endpointId(result.id);mutations.confirmRead(path);return result;}catch(e){if(e.status===404){mutations.confirmRead(path);return null;}throw e;}},
     async samples(params={},signal){const q=new URLSearchParams({offset:String(params.offset??0),q:params.q??'',active:'all'});return pagedRows(await get('/api/samples/catalog?'+q,signal));},
+    async payrollState(month,memberId,signal){const q=new URLSearchParams({month:validMonth(month)});if(memberId)q.set('memberId',endpointId(memberId));return read('/api/payroll/state?'+q,signal,payrollState);},
+    async payrollHistory(month,memberId,offset=0,salaries=false,signal){const q=new URLSearchParams({memberId:endpointId(memberId),offset:String(offset)});if(!salaries)q.set('month',validMonth(month));return read('/api/payroll/'+(salaries?'salaries':'drafts')+'?'+q,signal,v=>payrollHistory(v,salaries));},
+    async payrollSave(value,salaries=false){return mutations.send('/api/payroll/'+(salaries?'salaries':'drafts'),'POST',payrollPayload(value,salaries));},
+    async payrollReceipt(key){try{const r=await get('/api/payroll/receipts/'+endpointId(key));endpointId(r?.id);if(!Number.isSafeInteger(r.revision)||r.revision<1)throw new ContractError();mutations.confirmRead('/api/payroll');return r;}catch(e){if(e.status===404){mutations.confirmRead('/api/payroll');return null;}throw e;}},
     async closureState(month,memberId,signal){const q=new URLSearchParams({month:validMonth(month)});if(memberId)q.set('memberId',endpointId(memberId));return read('/api/attendance/month-closures?'+q,signal,closureState);},
     async closureDetail(id,signal){return read('/api/attendance/month-closures/'+endpointId(id),signal,closureDetail);},
     async closureHistory(month,memberId,offset=0,signal){const q=new URLSearchParams({month:validMonth(month),memberId:endpointId(memberId),offset:String(offset)});return read('/api/attendance/month-closures/history?'+q,signal,closureHistory);},

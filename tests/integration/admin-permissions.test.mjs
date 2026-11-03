@@ -68,7 +68,7 @@ test('revoked grants invalidate old sessions and stale service identities cannot
 });
 test('invalid grants, missing CSRF and last-superadministrator changes fail without mutation',async()=>{
  const target=await row(people[1].id),path='/admin/accounts/'+target.id+'/permissions';
- for(const patch of [{permissions:['payroll']},{permissions:['finance','finance']},{superadmin:'true'},{reason:''},{extra:'grant'}])assert.equal((await request(sessions[0],path,'PATCH',{...grant([]),expectedVersion:target.version,...patch})).status,400);
+ for(const patch of [{permissions:['unknown']},{permissions:['finance','finance']},{superadmin:'true'},{reason:''},{extra:'grant'}])assert.equal((await request(sessions[0],path,'PATCH',{...grant([]),expectedVersion:target.version,...patch})).status,400);
  assert.equal((await request(sessions[0],path,'PATCH',{...grant(['finance']),expectedVersion:target.version},false)).status,403);assert.deepEqual(await row(target.id),target);
  const me=await row(people[0].id);await assert.rejects(clients[0].updateAccountAccess(me.id,{role:'employee',active:true},me.version),e=>e.status===409);await assert.rejects(clients[0].updateAccountAccess(me.id,{role:'admin',active:false},me.version),e=>e.status===409);
  await assert.rejects(db.client`UPDATE studio_os.accounts SET admin_permissions=ARRAY['unknown'] WHERE id=${target.id}`,e=>e.code==='23514');

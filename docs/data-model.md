@@ -83,3 +83,7 @@ id、variant、observedAt（北京时间）、window、url、note、metrics（na
 ## 月份核定与锁定更新（2026-11-03）
 
 046新增 attendance_month_closures，记录成员/原账号/月份、递增revision、previous_id、lock/reopen、source_hash、不可改写snapshot、day_notes、整月说明及操作者；attendance_month_closure_receipts按原操作者/请求键记录幂等回执。AttendanceMonthly.read复用同事务原来源并生成稳定指纹；锁定单独保存规范化来源事实，不复制可写打卡台账。
+
+## 薪资草稿更新（2026-11-03）
+
+047扩展account_permission_names允许payroll，不自动修改已有授权。salary_versions按原member追加生效月份、参考月薪整数分、全成员递增revision及原因/操作者；payroll_drafts按成员/月份追加revision、previous_id、原closure_id/salary_id、attendance_hash、四项人工金额与合计/说明；两表不可改写。payroll_receipts按原操作者/请求键记录回执。原账号、成员、DB连接和考勤继续共用。

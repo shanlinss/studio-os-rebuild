@@ -1,3 +1,4 @@
+import {Payroll} from './payroll';
 import {AttendanceClosures} from './attendance-closures';
 import {AttendanceMonthly} from './attendance-monthly';
 import {AttendanceExceptions} from './attendance-exceptions';
@@ -78,6 +79,7 @@ export async function createStudioApp(
   const attendanceExceptions = new AttendanceExceptions(database);
   const attendanceMonthly = new AttendanceMonthly(database);
   const attendanceClosures = new AttendanceClosures(database);
+  const payroll = new Payroll(database);
   const samples = new ShootingSamples(database);
   const businessAccounts = new BusinessAccounts(database);
   const workflow = new Workflow(database);
@@ -362,6 +364,12 @@ export async function createStudioApp(
     @Post('samples/catalog/:id/borrow') samplesBorrow(@Req() r: AuthRequest,@Param('id') id: string,@Body() b: unknown) { return samples.borrow(r.identity!,id,b); }
     @Post('samples/loans/:id/return') samplesReturn(@Req() r: AuthRequest,@Param('id') id: string,@Body() b: unknown) { return samples.ownLoan(r.identity!,id,b); }
     @Patch('samples/loans/:id/location') samplesMove(@Req() r: AuthRequest,@Param('id') id: string,@Body() b: unknown) { return samples.ownLoan(r.identity!,id,b,true); }
+    @Get('payroll/state') payrollState(@Req() r:AuthRequest){return payroll.state(r.identity!,r.query);}
+    @Get('payroll/salaries') salaryHistory(@Req() r:AuthRequest){return payroll.history(r.identity!,r.query,true);}
+    @Post('payroll/salaries') salarySave(@Req() r:AuthRequest,@Body() b:unknown){return payroll.saveSalary(r.identity!,b);}
+    @Get('payroll/drafts') payrollHistory(@Req() r:AuthRequest){return payroll.history(r.identity!,r.query);}
+    @Post('payroll/drafts') payrollSave(@Req() r:AuthRequest,@Body() b:unknown){return payroll.saveDraft(r.identity!,b);}
+    @Get('payroll/receipts/:key') payrollReceipt(@Req() r:AuthRequest,@Param('key') key:string){return payroll.receipt(r.identity!,key);}
     @Get('attendance/month-closures') closureState(@Req() r:AuthRequest){return attendanceClosures.state(r.identity!,r.query);}
     @Get('attendance/month-closures/history') closureHistory(@Req() r:AuthRequest){return attendanceClosures.history(r.identity!,r.query);}
     @Get('attendance/month-closures/:id') closureDetail(@Req() r:AuthRequest,@Param('id') id:string){return attendanceClosures.detail(r.identity!,id,r.query);}
@@ -1670,6 +1678,9 @@ export async function createStudioApp(
         if (/^catalog\/[^/]+\/transfers$/.test(route) || (req.method !== 'GET' && route === 'catalog') || (req.method === 'PATCH' && /^catalog\/[^/]+$/.test(route)) || /\/(stock-in|stocktake)$/.test(route) || /^catalog\/[^/]+\/history$/.test(route)) requireAdministrator(req.identity);
         if (req.method !== 'GET') auth.csrf(req);
         return true;
+      }
+      if(req.path.startsWith('/api/payroll/')){
+        requirePermission(req.identity,'payroll');const route=req.path.slice('/api/payroll/'.length);if(!((req.method==='GET'&&/^(state|salaries|drafts|receipts\/[^/]+)$/.test(route))||(req.method==='POST'&&/^(salaries|drafts)$/.test(route))))throw new ForbiddenException();if(req.method!=='GET')auth.csrf(req);return true;
       }
       if (req.path.startsWith('/api/attendance/')) {
         requireContributor(req.identity);

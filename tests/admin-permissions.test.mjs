@@ -13,7 +13,7 @@ test('new session claims drive sensitive navigation independently without removi
 });
 test('permission updates reject unsupported grants, duplicate grants, stale versions and unknown fields',()=>{
  const value={permissions:['finance'],superadmin:false,reason:'岗位授权'};assert.equal(permissionPayload(value,2).expectedVersion,2);
- for(const change of [{permissions:['payroll']},{permissions:['finance','finance']},{superadmin:'true'},{reason:''},{password:'secret'}])assert.throws(()=>permissionPayload({...value,...change},2),ContractError);assert.throws(()=>permissionPayload(value,0),ContractError);
+ for(const change of [{permissions:['unknown']},{permissions:['finance','finance']},{superadmin:'true'},{reason:''},{password:'secret'}])assert.throws(()=>permissionPayload({...value,...change},2),ContractError);assert.throws(()=>permissionPayload(value,0),ContractError);
 });
 test('session adaptation retains safe permission claims and rejects malformed claims',async()=>{
  const user={id:randomUUID(),username:'admin',role:'admin',superadmin:false,permissions:['finance']};const api=createCloudApi(async()=>Response.json({user,csrfToken:'hidden'}));assert.deepEqual(await api.session(),user);

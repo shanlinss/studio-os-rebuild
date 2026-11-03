@@ -23,11 +23,12 @@ export class AttendanceClosures {
  private monthly:AttendanceMonthly;
  constructor(private readonly db:StudioDatabase){this.monthly=new AttendanceMonthly(db);}
  private async current(tx:TransactionSql,who:Identity,value:unknown,includeSources=false){return this.monthly.read(tx,who,value,includeSources) as Promise<any>;}
- async state(who:Identity,value:unknown){requireContributor(who);return this.db.client.begin(async tx=>{await tx`SET TRANSACTION ISOLATION LEVEL REPEATABLE READ READ ONLY`;const current=await this.current(tx,who,value);
+ async state(who:Identity,value:unknown){requireContributor(who);return this.db.client.begin(async tx=>{await tx`SET TRANSACTION ISOLATION LEVEL REPEATABLE READ READ ONLY`;return this.read(tx,who,value);});}
+ async read(tx:TransactionSql,who:Identity,value:unknown){requireContributor(who);const current=await this.current(tx,who,value);
   // Member identity is selected by the same scoped monthly read; employee history also keeps original owner scope.
   const [row]=current.member?await tx`SELECT * FROM studio_os.attendance_month_closures WHERE member_id=${current.member.id} AND month=${current.month} AND (${who.role==='admin'} OR owner_id=${who.id}) ORDER BY revision DESC LIMIT 1`:[];
   return {current,latest:metadata(row),status:row?.action==='lock'?'locked':row?'reopened':'unlocked',drift:row?.action==='lock'&&row.source_hash!==current.sourceHash,...readiness(current)};
- });}
+ }
  async save(who:Identity,value:unknown){
   requireAdministrator(who);const b=objectInput(value,['requestKey','month','memberId','action','expectedLatestId','expectedSourceHash','note','dayNotes']),key=uuid(b.requestKey),m=attendanceMonth(b.month),memberId=uuid(b.memberId),expected=b.expectedLatestId===null?null:uuid(b.expectedLatestId),expectedHash=hash(b.expectedSourceHash),note=longText(b.note,2000),dayNotes=notes(b.dayNotes,m);if(!['lock','reopen'].includes(String(b.action)))throw new BadRequestException();const action=String(b.action);if(action==='reopen'&&dayNotes.length)throw new BadRequestException();const requestHash=attendanceSourceHash({m,memberId,expected,expectedHash,note,dayNotes,action});
   // Waiting for another confirmation under repeatable-read may require a fresh snapshot.

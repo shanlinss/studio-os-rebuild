@@ -3,7 +3,7 @@ import type {Identity} from './auth';
 import type {StudioDatabase} from './database';
 import type {TransactionSql} from 'postgres';
 import {objectInput,uuid,version,longText} from './validation';
-export const permissionNames=['finance','account_security'] as const;
+export const permissionNames=['finance','account_security','payroll'] as const;
 export type AdminPermission=typeof permissionNames[number];
 export function hasPermission(who:Identity|undefined,p:AdminPermission){return who?.role==='admin'&&(who.superadmin===true||who.permissions?.includes(p)===true);}
 export function requirePermission(who:Identity|undefined,p:AdminPermission){if(!who)throw new UnauthorizedException();if(!hasPermission(who,p))throw new ForbiddenException();}
