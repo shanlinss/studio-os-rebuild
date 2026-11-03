@@ -16,3 +16,10 @@ test('financial decimal amounts stay exact and mixed or duplicate settlement inp
  const item={expenseId:randomUUID(),expectedVersion:1};assert.throws(()=>settlementPayload({payerId:randomUUID(),startDate:'2026-11-01',endDate:'2026-11-30',items:[item,item],note:'',requestKey:randomUUID()}),ContractError);
  assert.throws(()=>paymentPayload({settlementId:randomUUID(),amount:'1.00',paidDate:'2026-02-30',note:'',requestKey:randomUUID()},1),ContractError);
 });
+
+test('account access changes only accept explicit roles, boolean state and an original version',async()=>{
+ const {accountAccessPayload}=await import('../dist/write-contract.mjs');
+ assert.deepEqual(accountAccessPayload({role:'employee',active:false},2),{role:'employee',active:false,expectedVersion:2});
+ for(const value of [{role:'owner',active:true},{role:'admin',active:'false'},{role:'employee',active:true,password:'blocked'}])assert.throws(()=>accountAccessPayload(value,2),ContractError);
+ assert.throws(()=>accountAccessPayload({role:'employee',active:true},0),ContractError);
+});

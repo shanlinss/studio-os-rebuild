@@ -1,3 +1,4 @@
+import {checkReadiness} from '../../.build/server/readiness.js';
 import test,{before,after} from 'node:test';
 import assert from 'node:assert/strict';
 import {randomBytes,randomUUID} from 'node:crypto';
@@ -173,4 +174,84 @@ test('expense, settlement and recorded reimbursement stay one exact-cent ledger 
  data=await api.finance();statement=data.settlements.find(s=>s.id===settlement.id);assert.equal(statement.paidCents,'234');assert.equal(statement.remainingCents,'1000');assert.equal(data.payments.filter(p=>p.requestKey===paymentKey).length,1);
  await assert.rejects(api.recordPayment({...payment,amount:'10.01',requestKey:randomUUID()},statement.version),e=>e.status===409);
  await api.recordPayment({...payment,amount:'10.00',requestKey:randomUUID()},statement.version);data=await api.finance();assert.equal(data.settlements.find(s=>s.id===settlement.id).remainingCents,'0');
+});
+let receiptExpense,expenseReceipt;
+test('original financial receipts retain private bytes up to 10 MiB with version and administrator boundaries',async()=>{
+ const api=clients[0];receiptExpense=await api.saveExpense(undefined,{expenseDate:'2026-11-02',description:'凭证核对',amount:'5.00',paymentMode:'advance',payerId:members[1],storeId:null,categoryId:null,note:'原备注保留',requestKey:randomUUID()});
+ const bytes=Buffer.alloc(8*1024*1024+1);png.copy(bytes);const file=new File([bytes],'大凭证.png',{type:'image/png'});expenseReceipt=await api.uploadExpenseReceipt(receiptExpense.id,file,1);
+ let row=(await api.finance()).records.find(r=>r.id===receiptExpense.id);assert.equal(row.version,2);assert.equal(row.note,'原备注保留');assert.equal(row.receipts.length,1);assert.equal(row.receipts[0].size,bytes.length);
+ assert.deepEqual(Buffer.from(await (await api.asset('expense',receiptExpense.id,expenseReceipt.id)).arrayBuffer()),bytes);
+ await assert.rejects(clients[1].asset('expense',receiptExpense.id,expenseReceipt.id),e=>e.status===403);await assert.rejects(clients[1].uploadExpenseReceipt(receiptExpense.id,file,2),e=>e.status===403);
+ await assert.rejects(api.uploadExpenseReceipt(receiptExpense.id,file,1),e=>e.status===409);
+ const headers={'Content-Type':'image/png','x-file-name':encodeURIComponent('错误.png'),'x-expected-version':'2'};assert.equal((await request(sessions[0],'/finance/expenses/'+receiptExpense.id+'/receipts','POST',Buffer.from('<html>not image</html>'),headers)).status,400);
+ const noCsrf=await fetch(base+'/api/finance/expenses/'+receiptExpense.id+'/receipts',{method:'POST',headers:{Cookie:'studio_session='+sessions[0].token,Origin:base,...headers},body:png});assert.equal(noCsrf.status,403);
+ const tooLarge=await request(sessions[0],'/finance/expenses/'+receiptExpense.id+'/receipts','POST',Buffer.alloc(10485761),headers);assert.equal(tooLarge.status,413);
+ row=(await api.finance()).records.find(r=>r.id===receiptExpense.id);assert.equal(row.version,2);assert.equal(row.receipts.length,1);
+});
+test('receipt scope, concurrent versions and explicit deletion preserve audit history without duplicate writes',async()=>{
+ const api=clients[0],id=receiptExpense.id,headers={'Content-Type':'image/png','x-file-name':encodeURIComponent('凭证二.png'),'x-expected-version':'2'};
+ const replies=await Promise.all([request(sessions[0],'/finance/expenses/'+id+'/receipts','POST',png,headers),request(sessions[0],'/finance/expenses/'+id+'/receipts','POST',png,headers)]);assert.deepEqual(replies.map(r=>r.status).sort(),[201,409]);
+ let row=(await api.finance()).records.find(r=>r.id===id);assert.equal(row.version,3);assert.equal(row.receipts.length,2);
+ const other=await api.saveExpense(undefined,{expenseDate:'2026-11-02',description:'另一支出',amount:'1.00',paymentMode:'company',payerId:null,storeId:null,categoryId:null,note:'',requestKey:randomUUID()});await assert.rejects(api.asset('expense',other.id,expenseReceipt.id),e=>e.status===404);
+ await assert.rejects(clients[1].removeExpenseReceipt(id,expenseReceipt.id,row.version),e=>e.status===403);await assert.rejects(api.removeExpenseReceipt(id,expenseReceipt.id,2),e=>e.status===409);
+ await api.removeExpenseReceipt(id,expenseReceipt.id,row.version);await assert.rejects(api.asset('expense',id,expenseReceipt.id),e=>e.status===404);
+ row=(await api.finance()).records.find(r=>r.id===id);assert.equal(row.version,4);assert.equal(row.receipts.length,1);
+ const history=await api.financeEvents(id);assert.equal(history.filter(e=>e.action==='uploaded').length,2);assert.equal(history.filter(e=>e.action==='deleted').length,1);assert.equal(history.find(e=>e.action==='deleted').detail.name,'大凭证.png');
+});
+test('settled expenses keep receipt reads available while blocking both uploads and deletion',async()=>{
+ const api=clients[0],row=(await api.finance()).records.find(r=>r.id===receiptExpense.id),file=row.receipts[0];
+ await api.createSettlement({payerId:members[1],startDate:'2026-11-01',endDate:'2026-11-30',items:[{expenseId:row.id,expectedVersion:row.version}],note:'锁定凭证',requestKey:randomUUID()});
+ const fresh=(await api.finance()).records.find(r=>r.id===row.id);assert.ok(fresh.settlementId);assert.ok((await api.asset('expense',row.id,file.id)).size>0);
+ await assert.rejects(api.uploadExpenseReceipt(row.id,new File([png],'结算后.png',{type:'image/png'}),fresh.version),e=>e.status===409);await assert.rejects(api.removeExpenseReceipt(row.id,file.id,fresh.version),e=>e.status===409);
+ assert.equal((await api.finance()).records.find(r=>r.id===row.id).receipts.length,1);
+});
+test('expense category editing and deactivation preserve old associations and reject stale changes',async()=>{
+ const api=clients[0],category=await api.createExpenseCategory('待维护分类');await api.updateExpenseCategory(category.id,'已维护分类',false,1);
+ let saved=(await api.finance()).categories.find(c=>c.id===category.id);assert.equal(saved.active,false);assert.equal(saved.name,'已维护分类');assert.equal(saved.version,2);
+ await assert.rejects(api.updateExpenseCategory(category.id,'过期覆盖',true,1),e=>e.status===409);await assert.rejects(clients[1].updateExpenseCategory(category.id,'越权',true,2),e=>e.status===403);
+});
+let accessTarget,accessPassword,accessAdmin;
+test('account permissions reuse original identities, revoke sessions, and expose no hashes or credentials',async()=>{
+ const api=clients[0];accessPassword=randomBytes(24).toString('hex');const username='access_'+randomBytes(6).toString('hex');
+ [accessTarget]=await db.client`INSERT INTO studio_os.accounts(username,password_hash,role) VALUES(${username},${await hashPassword(accessPassword)},'employee') RETURNING id,username`;
+ const auth=new Authentication(db),logged=await auth.login(username,accessPassword,'access-target');
+ const before=(await api.loginAccounts()).find(a=>a.id===accessTarget.id);assert.equal(before.version,1);assert.deepEqual(Object.keys(before).sort(),['active','id','role','username','version']);
+ await assert.rejects(clients[1].updateAccountAccess(before.id,{role:'admin',active:true},before.version),e=>e.status===403);
+ await api.updateAccountAccess(before.id,{role:'admin',active:true},before.version);
+ assert.equal((await request(logged,'/session')).status,401);assert.equal((await db.client`SELECT count(*)::int AS n FROM studio_os.sessions WHERE account_id=${before.id}`)[0].n,0);
+ const promoted=await auth.login(username,accessPassword,'access-promoted');assert.equal(promoted.user.role,'admin');accessAdmin=apiFor(promoted);await accessAdmin.session();
+ const history=await api.accountAccessHistory(before.id);assert.equal(history.length,1);assert.equal(history[0].beforeValue.role,'employee');assert.equal(history[0].afterValue.role,'admin');assert.ok(!JSON.stringify(history).includes('password_hash'));assert.equal((await accessAdmin.loginAccounts()).find(a=>a.id===before.id).version,2);
+});
+test('role updates reject stale values, unsupported fields and self-lockout; deactivation prevents login',async()=>{
+ const api=clients[0],me=await api.session();
+ await assert.rejects(api.updateAccountAccess(me.id,{role:'employee',active:true},1),e=>e.status===409);await assert.rejects(api.updateAccountAccess(me.id,{role:'admin',active:false},1),e=>e.status===409);
+ await assert.rejects(api.updateAccountAccess(accessTarget.id,{role:'employee',active:true},1),e=>e.status===409);
+ assert.equal((await request(sessions[0],'/admin/accounts/'+accessTarget.id,'PATCH',{role:'admin',active:true,expectedVersion:2,password:'must reject'})).status,400);
+ const noCsrf=await fetch(base+'/api/admin/accounts/'+accessTarget.id,{method:'PATCH',headers:{Cookie:'studio_session='+sessions[0].token,Origin:base,'Content-Type':'application/json'},body:JSON.stringify({role:'employee',active:true,expectedVersion:2})});assert.equal(noCsrf.status,403);
+ await api.updateAccountAccess(accessTarget.id,{role:'admin',active:false},2);await assert.rejects(accessAdmin.loginAccounts(),e=>e.status===401);
+ await assert.rejects(new Authentication(db).login(accessTarget.username,accessPassword,'access-disabled'));
+ const row=(await api.loginAccounts()).find(a=>a.id===accessTarget.id);assert.equal(row.active,false);assert.equal(row.version,3);
+});
+test('concurrent administrator changes cannot let two admins revoke one another simultaneously',async()=>{
+ const auth=new Authentication(db),people=[];
+ for(let i=0;i<2;i++){const username='mutual_'+randomBytes(6).toString('hex'),password=randomBytes(24).toString('hex');const [user]=await db.client`INSERT INTO studio_os.accounts(username,password_hash,role) VALUES(${username},${await hashPassword(password)},'admin') RETURNING id`;people.push({user,session:await auth.login(username,password,'mutual-'+i)});}
+ const replies=await Promise.all(people.map((p,i)=>request(p.session,'/admin/accounts/'+people[1-i].user.id,'PATCH',{role:'employee',active:true,expectedVersion:1})));
+ assert.equal(replies.filter(r=>r.status===200).length,1);assert.ok(replies.some(r=>[401,403].includes(r.status)));
+ const survivors=await db.client`SELECT id FROM studio_os.accounts WHERE id IN (${people[0].user.id},${people[1].user.id}) AND role='admin' AND active`;assert.equal(survivors.length,1);
+});
+test('member login association stays unique and preserves identity while making the existing own profile readable',async()=>{
+ const api=clients[0],auth=new Authentication(db),password=randomBytes(24).toString('hex'),username='link_'+randomBytes(6).toString('hex');
+ const [user]=await db.client`INSERT INTO studio_os.accounts(username,password_hash,role) VALUES(${username},${await hashPassword(password)},'employee') RETURNING id`;
+ const session=await auth.login(username,password,'link-local');assert.equal((await json(session,'/workbench/profile')).profile,null);
+ const member=await api.saveDirectory('member',undefined,{displayName:'待关联成员',jobTitle:'运营',startDate:null,employmentStatus:'在职'});await api.linkMemberLogin(member.id,user.id,1);
+ const profile=(await json(session,'/workbench/profile')).profile;assert.equal(profile.id,member.id);assert.equal(profile.displayName,'待关联成员');
+ const another=await api.saveDirectory('member',undefined,{displayName:'另一成员',jobTitle:'',startDate:null,employmentStatus:''});await assert.rejects(api.linkMemberLogin(another.id,user.id,1),e=>e.status===409);
+ await assert.rejects(api.linkMemberLogin(member.id,accessTarget.id,1),e=>e.status===409);await assert.rejects(clients[1].linkMemberLogin(another.id,user.id,1),e=>e.status===403);
+ assert.equal((await api.members()).find(m=>m.id===member.id).loginAccountId,user.id);
+});
+
+test('readiness rejects an incomplete account-access schema even when migration history claims it is current',async()=>{
+ await checkReadiness(db);await db.client`ALTER TABLE studio_os.accounts RENAME COLUMN version TO temporarily_missing_version`;
+ try{await assert.rejects(checkReadiness(db));}finally{await db.client`ALTER TABLE studio_os.accounts RENAME COLUMN temporarily_missing_version TO version`;}
+ await checkReadiness(db);
 });

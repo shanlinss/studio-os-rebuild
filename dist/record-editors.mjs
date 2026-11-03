@@ -23,19 +23,19 @@ export function createRecordEditors({api,h,onSaved,notify}){
  function mount(title,body,submit,after,recover,setup){
   if(saving)return;dirty=false;allowDiscard=false;
   dialog.innerHTML=`<form><div class="dialog-header"><h2>${h(title)}</h2><button type="button" class="icon-button" data-close aria-label="关闭编辑">×</button></div>${body}<p class="save-error" role="alert" aria-live="polite"></p><div data-discard hidden class="planning-rule">当前内容尚未保存。<button type="button" class="text-button" data-keep>继续编辑</button><button type="button" class="text-button" data-confirm-discard>放弃本次编辑</button></div><button type="button" class="secondary" data-reconcile hidden>核对上次保存结果</button><div class="form-actions"><button type="button" class="secondary" data-close>取消</button><button class="primary" type="submit">保存</button></div></form>`;
-  const form=dialog.querySelector('form'),save=form.querySelector('[type=submit]'),error=form.querySelector('[role=alert]');
+  const form=dialog.querySelector('form'),save=form.querySelector('[type=submit]'),error=form.querySelector('[role=alert]'),submitLabel=after?.submitLabel||'保存';save.textContent=submitLabel;
   form.addEventListener('input',()=>{dirty=true;});form.addEventListener('change',()=>{dirty=true;});
   form.querySelectorAll('[data-close]').forEach(el=>el.onclick=close);
   form.querySelector('[data-keep]').onclick=()=>{form.querySelector('[data-discard]').hidden=true;};
   form.querySelector('[data-confirm-discard]').onclick=()=>{allowDiscard=true;close();};
   const fields=()=>form.querySelectorAll('input,textarea,select');
-  const finished=async result=>{dirty=false;dialog.close();notify('已保存');try{await onSaved({...after,id:after?.id||result?.id});}catch{notify('已保存，页面刷新失败，请重新读取资料。');}};
+  const finished=async result=>{dirty=false;dialog.close();notify(after?.submitLabel==='确认删除'?'凭证已删除':'已保存');try{await onSaved({...after,id:after?.id||result?.id});}catch{notify('已保存，页面刷新失败，请重新读取资料。');}};
   const reconcile=form.querySelector('[data-reconcile]');reconcile.onclick=async()=>{if(saving)return;saving=true;reconcile.disabled=true;try{const result=await recover();if(result){await finished(result);}else{error.textContent='尚未找到这次记录，可以使用同一保存标识再次提交。';delete save.dataset.blocked;save.disabled=false;reconcile.hidden=true;fields().forEach(el=>el.disabled=false);}}catch(err){error.textContent=err.message;}finally{saving=false;reconcile.disabled=false;}};
   form.onsubmit=async e=>{
    e.preventDefault();if(saving)return;saving=true;save.disabled=true;save.textContent='正在保存…';error.textContent='';const payload=new FormData(form);fields().forEach(el=>el.disabled=true);
    try{await finished(await submit(payload));}
    catch(err){error.textContent=err.message;error.scrollIntoView({block:'nearest'});if(err.uncertain||err.status===409){save.dataset.blocked='true';if(recover&&err.uncertain)reconcile.hidden=false;error.textContent+=' 编辑内容已保留，请先核对记录，再重新打开编辑。';}}
-   finally{saving=false;save.disabled=save.dataset.blocked==='true';save.textContent='保存';if(!save.disabled)fields().forEach(el=>el.disabled=false);}
+   finally{saving=false;save.disabled=save.dataset.blocked==='true';save.textContent=submitLabel;if(!save.disabled)fields().forEach(el=>el.disabled=false);}
   };
   if(setup)setup(form);
   if(!dialog.open)dialog.showModal();form.querySelector('input,textarea,select')?.focus();

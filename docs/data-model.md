@@ -57,3 +57,5 @@ id、variant、observedAt（北京时间）、window、url、note、metrics（na
 - 知识库只做分类、查找与飞书文档导航；正文在飞书维护。
 - 仅管理员维护导航的分类、名称、说明、标签与链接，操作放在当前页面，不单独设编辑板块。
 - 复用现有知识条目与管理员权限；已有正文保留原数据，不新增正文编辑器或协作草稿存储。
+
+036 的 accounts.version 仅用于已有账号权限的并发控制，account_access_events 仅记录角色/启停前后值与操作者，不存密码或会话。成员绑定沿用 members.login_account_id 的唯一外键；权限变更撤销原 sessions，未创建新的身份系统。设备和仓库的建议对象尚未建表，详见 assets-warehouse-plan.md。

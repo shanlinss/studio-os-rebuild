@@ -1,3 +1,4 @@
+import {AccountAccess} from './account-access';
 import 'reflect-metadata';
 import {
   Controller,
@@ -81,6 +82,7 @@ export async function createStudioApp(
   const todos = new PersonalTodos(database);
   const observations = new OperationalObservations(database);
   const knowledge = new Knowledge(database);
+  const accountAccess = new AccountAccess(database);
   const templates = new Templates(database);
   const competitors = new Competitors(database);
   const finance = new Finance(database);
@@ -1506,9 +1508,11 @@ export async function createStudioApp(
       return products.complete(r.identity!, id, b);
     }
     @Get('admin/accounts')
-    async accounts() {
-      return database.client`SELECT id, username, role, active FROM studio_os.accounts ORDER BY username`;
-    }
+    accounts(@Req() r: AuthRequest) { return accountAccess.list(r.identity!); }
+    @Patch('admin/accounts/:id')
+    accountEdit(@Req() r: AuthRequest,@Param('id') id: string,@Body() body: unknown) { return accountAccess.update(r.identity!,id,body); }
+    @Get('admin/accounts/:id/history')
+    accountHistory(@Req() r: AuthRequest,@Param('id') id: string) { return accountAccess.history(r.identity!,id); }
   }
 
   @Module({ controllers: [InfrastructureController] })
@@ -1964,6 +1968,12 @@ export async function createStudioApp(
       }
       if (req.method === 'POST' && req.path === '/api/logout') {
         auth.csrf(req);
+        return true;
+      }
+      if ((req.method === 'PATCH' && /^\/api\/admin\/accounts\/[^/]+$/.test(req.path)) ||
+          (req.method === 'GET' && /^\/api\/admin\/accounts\/[^/]+\/history$/.test(req.path))) {
+        requireAdministrator(req.identity);
+        if(req.method !== 'GET') auth.csrf(req);
         return true;
       }
       if (req.method === 'GET' && req.path === '/api/admin/accounts') {

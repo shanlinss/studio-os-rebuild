@@ -37,3 +37,8 @@ test('private media GET keeps original bytes without forwarding uploads, receipt
   html=true;assert.equal((await request(port,path)).status,502);
  }finally{await close(preview);await close(upstream);}
 });
+test('read-only financial receipt routes preserve the 10 MiB image contract and refuse mutations or disguised media',async()=>{
+ const id='11111111-1111-4111-8111-111111111111',path='/api/finance/expenses/'+id+'/receipts/'+id;let mime='image/png',seen=0;const bytes=Buffer.alloc(8*1024*1024+1);
+ const upstream=http.createServer((req,res)=>{seen++;res.writeHead(200,{'Content-Type':mime});res.end(bytes);});await listen(upstream);const preview=createPreviewServer({upstreamPort:upstream.address().port});await listen(preview);const port=preview.address().port;
+ try{const result=await request(port,path);assert.equal(result.status,200);assert.deepEqual(result.bytes,bytes);assert.equal((await request(port,path,{method:'DELETE'})).status,405);assert.equal((await request(port,path,{method:'POST'})).status,405);assert.equal(seen,1);mime='video/mp4';assert.equal((await request(port,path)).status,502);assert.equal((await request(port,path+'?target=other')).status,400);assert.equal((await request(port,'/api/finance/expenses/'+id+'/receipts/not-a-uuid')).status,404);}finally{await close(preview);await close(upstream);}
+});

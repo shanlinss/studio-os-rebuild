@@ -1,9 +1,9 @@
 import {sampleState,samplePage,samplePayload,sampleOperationPath} from './sample-contract.mjs';
-import {assetPath,mediaUpload,readMedia} from './media-contract.mjs';
+import {assetPath,mediaUpload,readMedia,expenseReceiptMaxBytes} from './media-contract.mjs';
 import {shootingPayload,shootingAction,shootingProgress,shootingArchive} from './shooting-contract.mjs';
 import {expectedVersion} from './write-contract.mjs';
 import {createMutationGateway} from './mutation-gateway.mjs';
-import {materialPayload,productPayload,publicationPayload,snapshotPayload,todoPayload,experimentDraftPayload,dispatchPayload,reviewPayload,conclusionPayload,nextRoundPayload,directoryPayload,expensePayload,settlementPayload,paymentPayload} from './write-contract.mjs';
+import {materialPayload,productPayload,publicationPayload,snapshotPayload,todoPayload,experimentDraftPayload,dispatchPayload,reviewPayload,conclusionPayload,nextRoundPayload,directoryPayload,expensePayload,settlementPayload,paymentPayload,accountAccessPayload} from './write-contract.mjs';
 import {todoModel} from './workbench-model.mjs';
 import {financeRecord,pagedRows} from './management-model.mjs';
 import {namedList,templateRecord,titleCatalog,titleBatch,knowledgeList,knowledgeNavigationPayload} from './resource-model.mjs';
@@ -63,7 +63,10 @@ export function createCloudApi(fetcher=globalThis.fetch,{allowWrites=false}={}){
   async function read(path,signal,adapt){const value=adapt(await get(path,signal));mutations.confirmRead(path);return value;}
   async function labCapability(){if(!allowWrites)throw new ApiError(405,'当前为只读预览，未发送保存请求。');const c=await get('/api/workbench/capabilities');if(!record(c)||c.materialLabDrafts!==1)throw new ContractError('实验草稿与执行安排兼容尚未接入。');}
   return {
-    async asset(kind,owner,asset,context={},signal){let r;try{r=await fetcher(assetPath(kind,owner,asset,context),{method:'GET',credentials:'same-origin',cache:'no-store',redirect:'error',signal});}catch(e){if(e.name==='AbortError')throw e;throw new ApiError(0,'附件读取中断，请重试。');}if(!r.ok){if(r.status===401)mutations.clear();throw new ApiError(r.status,r.status===401?'登录已失效，请重新登录。':r.status===403?'当前账号无权读取这个附件。':'附件暂不可读取，请刷新资料核对。');}return readMedia(r);},
+    async asset(kind,owner,asset,context={},signal){let r;try{r=await fetcher(assetPath(kind,owner,asset,context),{method:'GET',credentials:'same-origin',cache:'no-store',redirect:'error',signal});}catch(e){if(e.name==='AbortError')throw e;throw new ApiError(0,'附件读取中断，请重试。');}if(!r.ok){if(r.status===401)mutations.clear();throw new ApiError(r.status,r.status===401?'登录已失效，请重新登录。':r.status===403?'当前账号无权读取这个附件。':'附件暂不可读取，请刷新资料核对。');}return readMedia(r,kind==='expense'?{maxBytes:expenseReceiptMaxBytes,imagesOnly:true}:{});},
+    async uploadExpenseReceipt(id,file,version){const f=mediaUpload(file,{imagesOnly:true,maxBytes:expenseReceiptMaxBytes});return mutations.send('/api/finance/expenses/'+endpointId(id)+'/receipts','POST',f.file,{binary:true,headers:{'Content-Type':f.mime,'x-file-name':encodeURIComponent(f.name),'x-expected-version':String(expectedVersion(version))}});},
+    async removeExpenseReceipt(id,receipt,version){return mutations.send(assetPath('expense',id,receipt),'DELETE',{expectedVersion:expectedVersion(version)});},
+    async financeEvents(id,signal){return read('/api/finance/events/'+endpointId(id),signal,v=>{if(!Array.isArray(v)||v.some(e=>!record(e)||typeof e.action!=='string'||typeof e.actor!=='string'||!Number.isFinite(Date.parse(e.createdAt))))throw new ContractError();return v;});},
     async uploadMaterial(id,file){const f=mediaUpload(file);return mutations.send('/api/materials/'+endpointId(id)+'/assets','POST',f.file,{binary:true,headers:{'Content-Type':f.mime,'x-file-name':encodeURIComponent(f.name),'x-asset-kind':'screenshot'}});},
     async downloadMaterial(id,asset){return mutations.send(assetPath('material',id,asset)+'/downloads','POST',{}, {responseType:'media'});},
     async confirmMaterialDownload(id,asset,receipt){return mutations.send(assetPath('material',id,asset)+'/downloads/'+endpointId(receipt),'POST',{});},
@@ -78,10 +81,14 @@ export function createCloudApi(fetcher=globalThis.fetch,{allowWrites=false}={}){
     async nextRound(id,value,version){return mutations.send('/api/lab/experiments/'+endpointId(id)+'/rounds','POST',nextRoundPayload(value,version));},
     async experimentProduct(id,product,version){return mutations.send('/api/lab/experiments/'+endpointId(id)+'/product','PATCH',{linkedProductId:product===null?null:endpointId(product),expectedVersion:expectedVersion(version)});},
     async experimentPriority(id,priority,version){if(typeof priority!=='boolean')throw new ContractError();return mutations.send('/api/lab/experiments/'+endpointId(id)+'/priority','PATCH',{priority,expectedVersion:expectedVersion(version)});},
+    async linkMemberLogin(id,login,version){return mutations.send('/api/admin/members/'+endpointId(id),'PATCH',{loginAccountId:endpointId(login),expectedVersion:expectedVersion(version)});},
+    async updateAccountAccess(id,value,version){return mutations.send('/api/admin/accounts/'+endpointId(id),'PATCH',accountAccessPayload(value,version));},
+    async accountAccessHistory(id,signal){return read('/api/admin/accounts/'+endpointId(id)+'/history',signal,v=>{if(!Array.isArray(v)||v.some(e=>!record(e)||typeof e.actor!=='string'||!record(e.beforeValue)||!record(e.afterValue)||!Number.isFinite(Date.parse(e.createdAt))))throw new ContractError();return v;});},
     async saveDirectory(kind,id,value,version){const route={member:'members',account:'business-accounts',store:'stores'}[kind];if(!route)throw new ContractError();return mutations.send('/api/admin/'+route+(id?'/'+endpointId(id):''),id?'PATCH':'POST',directoryPayload(kind,value,version));},
     async saveExpense(id,value,version){return mutations.send('/api/finance/expenses'+(id?'/'+endpointId(id):''),id?'PATCH':'POST',expensePayload(value,version));},
     async createSettlement(value){return mutations.send('/api/finance/settlements','POST',settlementPayload(value));},
     async recordPayment(value,version){return mutations.send('/api/finance/payments','POST',paymentPayload(value,version));},
+    async updateExpenseCategory(id,name,active,version){if(typeof name!=='string'||!name.trim()||name.length>100||typeof active!=='boolean')throw new ContractError('请核对分类名称与使用状态。');return mutations.send('/api/finance/categories/'+endpointId(id),'PATCH',{name:name.trim(),active,expectedVersion:expectedVersion(version)});},
     async createExpenseCategory(name){if(typeof name!=='string'||!name.trim()||name.length>100)throw new ContractError('分类名称最多 100 字。');return mutations.send('/api/finance/categories','POST',{name:name.trim()});},
     async createExperiment(value){const payload=experimentDraftPayload(value);await labCapability();return mutations.send('/api/lab/experiments','POST',payload);},
     async dispatchRound(id,round,value,version){const payload=dispatchPayload(value,version),path='/api/lab/experiments/'+endpointId(id)+'/rounds/'+endpointId(round)+'/assignments';await labCapability();return mutations.send(path,'POST',payload);},
@@ -118,7 +125,7 @@ export function createCloudApi(fetcher=globalThis.fetch,{allowWrites=false}={}){
     async sampleReceipt(key,action,owner){const path=sampleOperationPath(action,owner);try{const result=await get('/api/samples/receipts/'+endpointId(key));if(!record(result)||typeof result.id!=='string')throw new ContractError();endpointId(result.id);mutations.confirmRead(path);return result;}catch(e){if(e.status===404){mutations.confirmRead(path);return null;}throw e;}},
     async samples(params={},signal){const q=new URLSearchParams({offset:String(params.offset??0),q:params.q??'',active:'all'});return pagedRows(await get('/api/samples/catalog?'+q,signal));},
     async attendance(params={},signal){const q=new URLSearchParams({view:params.view??'own',offset:String(params.offset??0)});for(const key of ['from','to']){if(params[key]){if(!validDate(params[key]))throw new ContractError('日期格式无效。');q.set(key,params[key]);}}if(params.from&&params.to&&params.from>params.to)throw new ContractError('开始日期不能晚于结束日期。');return pagedRows(await get('/api/attendance/periods?'+q,signal));},
-    async loginAccounts(signal){const rows=list(await get('/api/admin/accounts',signal));if(rows.some(r=>!record(r)||!string(r.id)||!string(r.username)||!['admin','employee'].includes(r.role)||typeof r.active!=='boolean'))throw new ContractError();return rows;},
+    async loginAccounts(signal){return read('/api/admin/accounts',signal,value=>{const rows=list(value);if(rows.some(r=>!record(r)||!string(r.id)||!string(r.username)||!['admin','employee'].includes(r.role)||typeof r.active!=='boolean'))throw new ContractError();return rows;});},
     async templates(signal){return list(await get('/api/templates',signal)).map(v=>templateRecord(v));},
     async template(id,signal){return templateRecord(await get('/api/templates/'+endpointId(id),signal),true);},
     async titleCatalog(params={},signal){const q=new URLSearchParams({page:String(params.page??1),q:params.q??''});return titleCatalog(await get('/api/titles/catalog?'+q,signal));},

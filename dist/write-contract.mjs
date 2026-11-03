@@ -91,3 +91,7 @@ export function settlementPayload(value){
  return {payerId:uuid(b.payerId),startDate:b.startDate,endDate:b.endDate,items,note:text(b.note,2000),requestKey:uuid(b.requestKey)};
 }
 export function paymentPayload(value,version){const b=fields(value,['settlementId','amount','paidDate','note','requestKey']);return {settlementId:uuid(b.settlementId),amount:decimalAmount(b.amount),paidDate:day(b.paidDate),note:text(b.note,2000),requestKey:uuid(b.requestKey),expectedVersion:expectedVersion(version)};}
+
+export function accountAccessPayload(value,version){
+ const b=fields(value,['role','active']);if(!['admin','employee'].includes(b.role)||typeof b.active!=='boolean')throw new ContractError('请选择有效的账号角色和使用状态。');return {role:b.role,active:b.active,expectedVersion:expectedVersion(version)};
+}

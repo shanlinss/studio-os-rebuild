@@ -96,8 +96,9 @@ export async function checkReadiness(
     await tx`SELECT id,settlement_id,payer_id,amount_cents,paid_date,note,request_key,request_hash FROM expense_reimbursements LIMIT 0`;
     await tx`SELECT entity_type,entity_id,actor_id,action,detail FROM expense_events LIMIT 0`;
     // Test the actual columns required by authentication, not only table names.
-    await tx`SELECT id, username, password_hash, role, active FROM accounts LIMIT 0`;
+    await tx`SELECT id, username, password_hash, role, active, version FROM accounts LIMIT 0`;
     await tx`SELECT token_hash, account_id, csrf_token, expires_at FROM sessions LIMIT 0`;
+    await tx`SELECT id,account_id,actor_id,before_value,after_value,created_at FROM account_access_events LIMIT 0`;
     await tx`SELECT key, attempts, reset_at FROM login_limits LIMIT 0`;
     await tx`SELECT id, name, active, version, created_at, updated_at FROM stores LIMIT 0`;
     await tx`SELECT store_id, actor_id, action, before_value, after_value FROM store_events LIMIT 0`;
