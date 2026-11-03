@@ -72,3 +72,10 @@ test('attendance review preview exposes only scoped records and history while re
  for(const module of ['/attendance-contract.mjs','/attendance-editors.mjs','/attendance-view.mjs'])assert.equal((await request(port,module)).status,200);
  }finally{await close(preview);await close(upstream);}
 });
+test('leave preview permits scoped reads only and never forwards submission, approval or cancellation',async()=>{
+ const id='11111111-1111-4111-8111-111111111111',seen=[];const upstream=http.createServer((req,res)=>{seen.push(req.url);res.writeHead(200,{'Content-Type':'application/json'});res.end('{}');});await listen(upstream);const preview=createPreviewServer({upstreamPort:upstream.address().port});await listen(preview);const port=preview.address().port;
+ try{for(const path of ['/api/attendance/leaves?view=team&status=pending&from=2027-01-01&offset=50','/api/attendance/leaves/'+id,'/api/attendance/leaves/'+id+'/history?offset=50'])assert.equal((await request(port,path)).status,200);const count=seen.length;
+ for(const action of ['decision','withdraw','revoke'])assert.equal((await request(port,'/api/attendance/leaves/'+id+'/'+action,{method:'POST'})).status,405);assert.equal((await request(port,'/api/attendance/leaves',{method:'POST'})).status,405);assert.equal((await request(port,'/api/attendance/leaves/'+id,{method:'PATCH'})).status,405);assert.equal((await request(port,'/api/attendance/leave-receipts/'+id)).status,404);assert.equal((await request(port,'/api/attendance/leaves/'+id+'?owner=other')).status,400);assert.equal(seen.length,count);
+ for(const module of ['/leave-contract.mjs','/leave-editors.mjs','/leave-view.mjs'])assert.equal((await request(port,module)).status,200);
+ }finally{await close(preview);await close(upstream);}
+});

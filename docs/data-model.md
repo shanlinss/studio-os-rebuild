@@ -71,3 +71,5 @@ id、variant、observedAt（北京时间）、window、url、note、metrics（na
 041：accounts 追加 superadmin 和 admin_permissions，角色仍为原 admin/employee；权限名称仅含已实现的 finance 与 account_security。account_permission_events 为不可改写的权限前后值/原因/操作者记录。新账号默认无敏感授权；旧管理员迁移显式保留原访问，不自动授予超级管理员。授权/账号状态变化与原 sessions 撤销共用账号管理事务锁。
 
 042：attendance_daily_links 只保存 owner_id＋work_date 对原 period_id 的唯一关联及来源（登录生成/旧记录关联），原上下班时间、版本和审批历史仍在 attendance_periods。首次登录与原 sessions 同事务，签退与回执/事件/全部旧会话清理同事务。无跨日时间猜测、工资字段或第二套考勤事实。
+
+043：leave_requests 关联原 accounts/members，存类型、起止时间、原因、状态、版本及审核/撤回/撤销信息；leave_events 追加前后快照，数据库禁止改写；leave_receipts 仅负责幂等恢复。请假独立于原打卡，不新增第二套人员/身份或任何薪资/财务数据。原批准信息在撤销后保留。时间段重叠在同员工事务锁下校验；不存猜测的计薪小时或假期余额。

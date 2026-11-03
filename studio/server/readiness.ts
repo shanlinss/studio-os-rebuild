@@ -112,6 +112,9 @@ export async function checkReadiness(
     await tx`SELECT actor_id,account_id,request_key,action,metadata_hash,reason,before_value,after_value,result FROM account_lifecycle_events LIMIT 0`;
     await tx`SELECT account_id,actor_id,reason,before_value,after_value FROM account_permission_events LIMIT 0`;
     await tx`SELECT owner_id,work_date,period_id,origin FROM attendance_daily_links LIMIT 0`;
+    await tx`SELECT id,owner_id,member_id,leave_type,starts_at,ends_at,status,version,reviewed_at,withdrawn_at,revoked_at FROM leave_requests LIMIT 0`;
+    await tx`SELECT leave_id,actor_id,actor_name,action,before_value,after_value FROM leave_events LIMIT 0`;
+    await tx`SELECT actor_id,request_key,action,request_hash,result FROM leave_receipts LIMIT 0`;
     await tx`SELECT key, attempts, reset_at FROM login_limits LIMIT 0`;
     await tx`SELECT id, name, active, version, created_at, updated_at FROM stores LIMIT 0`;
     await tx`SELECT store_id, actor_id, action, before_value, after_value FROM store_events LIMIT 0`;

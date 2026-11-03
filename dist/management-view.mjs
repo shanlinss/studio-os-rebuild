@@ -3,12 +3,12 @@ import {sensitivePermissions} from './admin-permissions.mjs';
 import {attachmentList} from './attachments.mjs';
 import {money,outstandingAdvance,cents,visibleExecutionSummary} from './management-model.mjs';
 export const managementPages=new Set(['ledger','settlements','assets','attendance','roles','competitors','dashboard']);
-export function createManagementViews({api,h,heading,showPanel,source,localTime,writable=false,onAttendanceEdit,onAttendanceDecision}){
+export function createManagementViews({api,h,heading,showPanel,source,localTime,writable=false,onAttendanceEdit,onAttendanceDecision,onLeaveEdit,onLeaveAction}){
  const $=s=>document.querySelector(s),blank=(title,desc)=>`<div class="empty"><h3>${h(title)}</h3><p>${h(desc)}</p></div>`;
  const head=title=>`<div class="dialog-header"><h2>${h(title)}</h2><button class="icon-button" data-manage-close aria-label="关闭管理详情">×</button></div>`;
  const facts=rows=>`<dl class="record-facts">${rows.map(([label,v])=>`<div><dt>${h(label)}</dt><dd>${h(v??'未填写')}</dd></div>`).join('')}</dl>`;
  const disabled=label=>`<button class="secondary" disabled title="当前仅查看云端记录">${h(label)}</button>`;
- const attendanceViews=createAttendanceView({api,h,heading,showPanel,localTime,writable,onEdit:onAttendanceEdit,onDecision:onAttendanceDecision});
+ const attendanceViews=createAttendanceView({api,h,heading,showPanel,localTime,writable,onEdit:onAttendanceEdit,onDecision:onAttendanceDecision,onLeaveEdit,onLeaveAction});
  let onOpen=null,canMaintain=false;
  document.addEventListener('click',e=>{const o=e.target.closest('[data-manage-open]'),c=e.target.closest('[data-manage-close]');if(o)onOpen?.(o.dataset.manageOpen);if(c)$('#cloud-detail').close();});
  async function expenseDetail(id){

@@ -1,3 +1,4 @@
+import {LeaveRequests} from './leave';
 import {DailyAttendance} from './daily-attendance';
 import {AccountPermissions,requirePermission} from './permissions';
 import {Warehouse} from './warehouse';
@@ -70,6 +71,7 @@ export async function createStudioApp(
   const members = new Members(database);
   const attendance = new Attendance(database);
   const dailyAttendance = new DailyAttendance(database);
+  const leaveRequests = new LeaveRequests(database);
   const samples = new ShootingSamples(database);
   const businessAccounts = new BusinessAccounts(database);
   const workflow = new Workflow(database);
@@ -354,6 +356,13 @@ export async function createStudioApp(
     @Post('samples/catalog/:id/borrow') samplesBorrow(@Req() r: AuthRequest,@Param('id') id: string,@Body() b: unknown) { return samples.borrow(r.identity!,id,b); }
     @Post('samples/loans/:id/return') samplesReturn(@Req() r: AuthRequest,@Param('id') id: string,@Body() b: unknown) { return samples.ownLoan(r.identity!,id,b); }
     @Patch('samples/loans/:id/location') samplesMove(@Req() r: AuthRequest,@Param('id') id: string,@Body() b: unknown) { return samples.ownLoan(r.identity!,id,b,true); }
+    @Get('attendance/leaves') leaves(@Req() r:AuthRequest){return leaveRequests.list(r.identity!,r.query);}
+    @Get('attendance/leave-receipts/:key') leaveReceipt(@Req() r:AuthRequest,@Param('key') key:string){return leaveRequests.receipt(r.identity!,key);}
+    @Get('attendance/leaves/:id') leaveDetail(@Req() r:AuthRequest,@Param('id') id:string){return leaveRequests.detail(r.identity!,id,r.query);}
+    @Get('attendance/leaves/:id/history') leaveHistory(@Req() r:AuthRequest,@Param('id') id:string){return leaveRequests.history(r.identity!,id,r.query);}
+    @Post('attendance/leaves') leaveCreate(@Req() r:AuthRequest,@Body() b:unknown){return leaveRequests.save(r.identity!,b);}
+    @Patch('attendance/leaves/:id') leaveEdit(@Req() r:AuthRequest,@Param('id') id:string,@Body() b:unknown){return leaveRequests.save(r.identity!,b,id);}
+    @Post('attendance/leaves/:id/:action') leaveAction(@Req() r:AuthRequest,@Param('id') id:string,@Param('action') action:string,@Body() b:unknown){return leaveRequests.act(r.identity!,id,action,b);}
     @Get('attendance/daily')
     attendanceDaily(@Req() r:AuthRequest){return dailyAttendance.state(r.identity!);}
     @Post('attendance/end-work')
@@ -1644,9 +1653,9 @@ export async function createStudioApp(
       if (req.path.startsWith('/api/attendance/')) {
         requireContributor(req.identity);
         const route = req.path.slice('/api/attendance/'.length);
-        const allowed = (req.method === 'GET' && /^(daily|state|receipts\/[^/]+|periods|corrections|(?:periods|corrections)\/[^/]+(?:\/history)?)$/.test(route)) ||
-          (req.method === 'POST' && /^(end-work|studio\/in|field|periods\/[^/]+\/(?:in|out|decision)|corrections(?:\/[^/]+\/decision)?)$/.test(route)) ||
-          (req.method === 'PATCH' && /^corrections\/[^/]+$/.test(route));
+        const allowed = (req.method === 'GET' && /^(daily|state|(?:receipts|leave-receipts)\/[^/]+|leaves|periods|corrections|(?:leaves|periods|corrections)\/[^/]+(?:\/history)?)$/.test(route)) ||
+          (req.method === 'POST' && /^(leaves(?:\/[^/]+\/(?:decision|withdraw|revoke))?|end-work|studio\/in|field|periods\/[^/]+\/(?:in|out|decision)|corrections(?:\/[^/]+\/decision)?)$/.test(route)) ||
+          (req.method === 'PATCH' && /^(?:leaves|corrections)\/[^/]+$/.test(route));
         if (!allowed) throw new ForbiddenException();
         if (route.endsWith('/decision')) requireAdministrator(req.identity);
         if (req.method !== 'GET') auth.csrf(req);
