@@ -101,6 +101,8 @@ export async function checkReadiness(
     await tx`SELECT id,equipment_id,owner_id,returned_at,return_condition,return_location,version FROM equipment_loans LIMIT 0`;
     await tx`SELECT id,equipment_id,actor_id,action,before_value,after_value FROM equipment_events LIMIT 0`;
     await tx`SELECT actor_id,request_key,action,request_hash,result FROM equipment_receipts LIMIT 0`;
+    await tx`SELECT id,equipment_id,version,purchase_date,amount_cents,supplier,expense_id,expense_snapshot,equipment_snapshot,reason,actor_id,actor_name FROM equipment_purchase_versions LIMIT 0`;
+    await tx`SELECT actor_id,request_key,equipment_id,request_hash,result FROM equipment_purchase_receipts LIMIT 0`;
     await tx`SELECT id,item_code,kind,product_id,unit,opening_confirmed,quantity,version FROM warehouse_items LIMIT 0`;
     await tx`SELECT id,item_id,type,quantity,delta,before_quantity,after_quantity,item_snapshot,corrects_movement_id FROM warehouse_movements LIMIT 0`;
     await tx`SELECT id,item_id,actor_id,action,before_value,after_value FROM warehouse_item_events LIMIT 0`;

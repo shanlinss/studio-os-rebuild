@@ -176,7 +176,7 @@ document.addEventListener('click',async e=>{
 });
 document.addEventListener('click',async e=>{
  const button=e.target.closest('button[data-equipment-action]');if(!button||!editors)return;const action=button.dataset.equipmentAction;if(!['borrow','return','relocate'].includes(action)&&user?.role!=='admin')return;
- button.disabled=true;try{await editors.equipment(action,button.dataset.equipmentId||undefined,equipmentWorkspace.context());}catch(err){notify(err.message);}finally{if(button.isConnected)button.disabled=false;}
+ button.disabled=true;try{if(action==='purchase')await editors.equipmentPurchase(button.dataset.equipmentId);else await editors.equipment(action,button.dataset.equipmentId||undefined,equipmentWorkspace.context());}catch(err){notify(err.message);}finally{if(button.isConnected)button.disabled=false;}
 });
 document.addEventListener('click',async e=>{
  if(!editors||user?.role!=='admin')return;const button=e.target.closest('button[data-next-round],button[data-experiment-product],button[data-experiment-priority],button[data-directory-kind],button[data-edit-expense],button[data-expense-category],button[data-create-settlement],button[data-record-payment],button[data-remove-expense-receipt],button[data-member-login],button[data-account-access],button[data-account-lifecycle],button[data-account-permissions],button[data-inventory-access],button[data-employment-dates]');if(!button)return;

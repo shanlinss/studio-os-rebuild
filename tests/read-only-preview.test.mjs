@@ -128,3 +128,9 @@ test('inventory scope preview permits configuration and paginated history reads 
  try{for(const p of [path,path+'/history?offset=50'])assert.equal((await request(port,p)).status,200);const count=seen.length;assert.equal((await request(port,path,{method:'POST'})).status,405);assert.equal((await request(port,path+'/receipts/'+id)).status,404);assert.equal((await request(port,path+'?storeId='+id)).status,400);assert.equal((await request(port,path+'/history?permissions=resources')).status,400);assert.equal(seen.length,count);for(const p of ['/inventory-access-contract.mjs','/inventory-access-editors.mjs'])assert.equal((await request(port,p)).status,200);
  }finally{await close(preview);await close(upstream);}
 });
+
+test('acquisition preview allows protected read routes only and rejects receipt forwarding, mutation and unexpected queries',async()=>{
+ const seen=[],upstream=http.createServer((req,res)=>{seen.push(req.url);res.setHeader('Content-Type','application/json');res.end('{}');});await listen(upstream);const preview=createPreviewServer({upstreamPort:upstream.address().port});await listen(preview);const port=preview.address().port,id='11111111-1111-4111-8111-111111111111',path='/api/equipment/catalog/'+id+'/purchase';
+ try{for(const p of [path,path+'/history?offset=50'])assert.equal((await request(port,p)).status,200);const count=seen.length;assert.equal((await request(port,path,{method:'POST'})).status,405);assert.equal((await request(port,path+'/receipts/'+id)).status,404);assert.equal((await request(port,path+'?finance=true')).status,400);assert.equal((await request(port,path+'/history?amount=0')).status,400);assert.equal(seen.length,count);for(const p of ['/equipment-purchase-contract.mjs','/equipment-purchase-editors.mjs'])assert.equal((await request(port,p)).status,200);
+ }finally{await close(preview);await close(upstream);}
+});

@@ -11,6 +11,7 @@ import {AccountPermissions,requirePermission} from './permissions';
 import {InventoryAccess} from './inventory-access';
 import {Warehouse} from './warehouse';
 import {Equipment} from './equipment';
+import {EquipmentPurchase} from './equipment-purchase';
 import {AccountLifecycle} from './account-lifecycle';
 import {AccountAccess} from './account-access';
 import 'reflect-metadata';
@@ -109,6 +110,7 @@ export async function createStudioApp(
   const accountAccess = new AccountAccess(database);
   const accountPermissions = new AccountPermissions(database);
   const inventoryAccess = new InventoryAccess(database);
+  const equipmentPurchase = new EquipmentPurchase(database);
   const accountLifecycle = new AccountLifecycle(database);
   const equipment = new Equipment(database);
   const warehouse = new Warehouse(database);
@@ -336,6 +338,10 @@ export async function createStudioApp(
       return stores.update(id, body, req.identity!.id);
     }
     @Get('warehouse/items') warehouseCatalog(@Req() r: AuthRequest) { return warehouse.catalog(r.identity!,r.query); }
+    @Get('equipment/catalog/:id/purchase') equipmentPurchaseState(@Req() r:AuthRequest,@Param('id') id:string){return equipmentPurchase.state(r.identity!,id);}
+    @Post('equipment/catalog/:id/purchase') equipmentPurchaseSave(@Req() r:AuthRequest,@Param('id') id:string,@Body() b:unknown){return equipmentPurchase.save(r.identity!,id,b);}
+    @Get('equipment/catalog/:id/purchase/history') equipmentPurchaseHistory(@Req() r:AuthRequest,@Param('id') id:string){return equipmentPurchase.history(r.identity!,id,r.query);}
+    @Get('equipment/catalog/:id/purchase/receipts/:key') equipmentPurchaseReceipt(@Req() r:AuthRequest,@Param('id') id:string,@Param('key') key:string){return equipmentPurchase.receipt(r.identity!,id,key);}
     @Get('warehouse/items/:id') warehouseDetail(@Req() r: AuthRequest,@Param('id') id: string) { return warehouse.detail(r.identity!,id); }
     @Get('warehouse/items/:id/movements') warehouseMovements(@Req() r: AuthRequest,@Param('id') id: string) { return warehouse.movements(r.identity!,id,r.query); }
     @Get('warehouse/items/:id/movements/:movement') warehouseMovement(@Req() r: AuthRequest,@Param('id') id: string,@Param('movement') movement: string) { return warehouse.movement(r.identity!,id,movement); }
@@ -1702,6 +1708,12 @@ export async function createStudioApp(
       if(req.path.startsWith('/api/equipment/')){
         requireContributor(req.identity);
         const route=req.path.slice('/api/equipment/'.length);
+        if(/^catalog\/[^/]+\/purchase(?:\/history|\/receipts\/[^/]+)?$/.test(route)){
+          requirePermission(req.identity,'finance');
+          if(req.method==='GET')return true;
+          if(req.method==='POST'&&/^catalog\/[^/]+\/purchase$/.test(route)){requirePermission(req.identity,'resources');auth.csrf(req);return true;}
+          throw new ForbiddenException();
+        }
         const allowed=(req.method==='GET' && /^(catalog|catalog\/[^/]+(?:\/history)?|loans(?:\/[^/]+)?|receipts\/[^/]+)$/.test(route)) ||
           (req.method==='POST' && /^(catalog|catalog\/[^/]+\/(?:borrow|state)|loans\/[^/]+\/return)$/.test(route)) ||
           (req.method==='PATCH' && /^(catalog\/[^/]+|loans\/[^/]+\/location)$/.test(route));

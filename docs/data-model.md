@@ -103,3 +103,7 @@ id、variant、observedAt（北京时间）、window、url、note、metrics（na
 ## 库存范围配置（2026-11-03）
 
 051新增inventory_access_grants（引用原accounts/stores，生成scope_key区分公共与明确店铺，can_move表示正常数量登记配置）、inventory_access_events和inventory_access_receipts（追加式保护）。账号版本和studio-account-access锁沿用原系统，授权/撤会话/留痕/回执同事务。没有新增余额或更改原仓库数量；未知归属不等于公共授权，员工数量接口仍未开放。
+
+## 资源敏感字段与设备采购资料（2026-11-03）
+
+052增加equipment_purchase_versions（原equipment_id、递增版本、可空购买日期/整数分金额、供应商、原expense_id及当时来源快照、设备基础身份快照、原因和操作者快照）及私人equipment_purchase_receipts，两者不可改写。普通equipment_assets及原借还快照不加财务字段，不增加设备/账本副本；使用原设备行锁协调采购版本，原设备版本与采购版本各自保留。来源变化提示重核，不自动改采购金额或分摊账本支出。

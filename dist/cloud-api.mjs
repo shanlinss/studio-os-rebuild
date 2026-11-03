@@ -1,3 +1,4 @@
+import {equipmentPurchaseState,equipmentPurchaseHistory,equipmentPurchasePayload,equipmentPurchaseResult} from './equipment-purchase-contract.mjs';
 import {inventoryAccessPayload,inventoryAccessState,inventoryAccessMine,inventoryAccessHistory,inventoryAccessResult} from './inventory-access-contract.mjs';
 import {employmentPayload,adminReviewPayload,personnelHistory,adminReviewHistory} from './personnel-contract.mjs';
 import {confirmationDetail,confirmationHistory,confirmationPayload,exportable,exportPayload,readWorkbook} from './payroll-confirmation-contract.mjs';
@@ -155,6 +156,10 @@ export function createCloudApi(fetcher=globalThis.fetch,{allowWrites=false}={}){
     async equipmentDetail(id,signal){return read('/api/equipment/catalog/'+endpointId(id),signal,v=>{equipmentRecord(v);if(typeof v.notes!=='string')throw new ContractError('设备说明不完整，请重新读取。');return v;});},
     async equipmentLoan(id,signal){return read('/api/equipment/loans/'+endpointId(id),signal,v=>equipmentPage({rows:[v],total:1,offset:0,limit:50},true).rows[0]);},
     async equipmentLoans(params={},signal){const q=new URLSearchParams({view:params.team?'team':'own',status:params.status??'open',offset:String(params.offset??0)});return read('/api/equipment/loans?'+q,signal,v=>equipmentPage(v,true));},
+    async equipmentPurchase(id,signal){return read('/api/equipment/catalog/'+endpointId(id)+'/purchase',signal,v=>equipmentPurchaseState(v,id));},
+    async equipmentPurchaseHistory(id,offset=0,signal){if(!Number.isSafeInteger(offset)||offset<0||offset>2147483647)throw new ContractError();return read('/api/equipment/catalog/'+endpointId(id)+'/purchase/history?offset='+offset,signal,v=>equipmentPurchaseHistory(v,id));},
+    async saveEquipmentPurchase(id,value){return mutations.send('/api/equipment/catalog/'+endpointId(id)+'/purchase','POST',equipmentPurchasePayload(value));},
+    async equipmentPurchaseReceipt(id,key){const path='/api/equipment/catalog/'+endpointId(id)+'/purchase';try{const result=equipmentPurchaseResult(await get(path+'/receipts/'+endpointId(key)),id);mutations.confirmRead(path);return result;}catch(e){if(e.status===404){mutations.confirmRead(path);return null;}throw e;}},
     async equipmentHistory(id,offset=0,signal){return read('/api/equipment/catalog/'+endpointId(id)+'/history?offset='+String(offset),signal,v=>{pagedRows(v);if(v.rows.some(e=>!record(e)||typeof e.action!=='string'||typeof e.actor!=='string'||typeof e.note!=='string'||!Number.isFinite(Date.parse(e.createdAt))))throw new ContractError();return v;});},
     async equipmentWrite(action,id,value,version){return mutations.send(equipmentPath(action,id),['edit','relocate'].includes(action)?'PATCH':'POST',equipmentPayload(action,value,version));},
     async equipmentReceipt(key,action,id){const path=equipmentPath(action,id);try{const value=await get('/api/equipment/receipts/'+endpointId(key));if(!record(value)||typeof value.id!=='string')throw new ContractError();endpointId(value.id);mutations.confirmRead(path);return value;}catch(e){if(e.status===404){mutations.confirmRead(path);return null;}throw e;}},
