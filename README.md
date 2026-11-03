@@ -20,6 +20,7 @@
 
 ## 文档与剩余工作
 
+- [11 月 3 日需求整理与当前实现差距核对](docs/requirements-gap-review-2026-11-03.md)：考勤工资、工作室资源、库存归属及财务月结的新范围与建议顺序。
 - [页面清单及开发顺序](docs/roadmap.md)
 - [需求与确认状态](docs/requirements.md)、[页面与操作规划](docs/product-blueprint.md)、[设计基线](docs/design-baseline.md)
 - [产品转样品](docs/warehouse-sample-transfers.md)、[库存首版](docs/warehouse-implementation.md)、[设备首版](docs/equipment-implementation.md)、[设备与仓库规划](docs/assets-warehouse-plan.md)
