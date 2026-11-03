@@ -111,3 +111,7 @@ id、variant、observedAt（北京时间）、window、url、note、metrics（na
 ## 设备档案、照片及交接（2026-11-03）
 
 053在原equipment_assets补device_type/brand/serial_number/image_id，编号不可改；equipment_images追加保存私有字节并由复合外键保证当前照片属于本设备；移除仅清当前指针。equipment_handovers引用原双方loans/members，保留姓名/管理员/时间/状况快照。原equipment_loans新增handover结束类型，不假造员工完好归还。所有交接复用原设备行锁、版本、事件与equipment_receipts，不新增平行使用人表；图片和交接事实不可改写。
+
+## 手机卡与实名版本（2026-11-03）
+
+054扩展原accounts.admin_permissions合法集合新增resource_identity，不自动赋权。phone_cards记录独立卡号/号码/状态/套餐/到期日期/原成员设备店铺引用；phone_card_accounts保存原运营账号的明确多对多关联。phone_card_events、phone_card_identities与phone_card_receipts不可改写。实名版本单独保存主体、原因、操作者与当时卡号/号码/普通档案版本快照，普通字段及事件不读取实名表。姓名/旧号码字段均不被卡片关联默改。见phone-cards.md。

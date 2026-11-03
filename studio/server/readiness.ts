@@ -106,6 +106,11 @@ export async function checkReadiness(
     await tx`SELECT id,equipment_id,previous_loan_id,new_loan_id,from_member_id,to_member_id,occurred_at,condition,note,actor_name FROM equipment_handovers LIMIT 0`;
     await tx`SELECT id,equipment_id,version,purchase_date,amount_cents,supplier,expense_id,expense_snapshot,equipment_snapshot,reason,actor_id,actor_name FROM equipment_purchase_versions LIMIT 0`;
     await tx`SELECT actor_id,request_key,equipment_id,request_hash,result FROM equipment_purchase_receipts LIMIT 0`;
+    await tx`SELECT id,card_code,phone_number,carrier,status,user_member_id,device_id,store_id,plan_description,plan_expires_on,notes,version FROM phone_cards LIMIT 0`;
+    await tx`SELECT card_id,account_id FROM phone_card_accounts LIMIT 0`;
+    await tx`SELECT card_id,actor_id,actor_name,reason,before_value,after_value FROM phone_card_events LIMIT 0`;
+    await tx`SELECT card_id,version,registered_entity,card_snapshot,actor_name,reason FROM phone_card_identities LIMIT 0`;
+    await tx`SELECT actor_id,request_key,action,request_hash,result FROM phone_card_receipts LIMIT 0`;
     await tx`SELECT id,item_code,kind,product_id,unit,opening_confirmed,quantity,version FROM warehouse_items LIMIT 0`;
     await tx`SELECT id,item_id,type,quantity,delta,before_quantity,after_quantity,item_snapshot,corrects_movement_id FROM warehouse_movements LIMIT 0`;
     await tx`SELECT id,item_id,actor_id,action,before_value,after_value FROM warehouse_item_events LIMIT 0`;

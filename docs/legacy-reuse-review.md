@@ -86,3 +86,7 @@
 ## 设备档案、照片及交接（2026-11-03）
 
 开发前读取旧products.ts图片返回/上传、media.ts签名校验、samples.ts和当前equipment/attachments。图片私有读取、8 MiB限制、MIME签名检查和前端预览直接复用；未发现可直接使用的独立设备交接单。053只补设备字段、图片与交接事实，复用原资产/成员/账号/loans/事件/回执；不移植旧UI，不新建平行当前使用人或复制采购金额。旧ZIP当前未挂载，核查使用已提取参考。
+
+## 手机卡与实名版本（2026-11-03）
+
+先检索旧独立后端phone/sim_card/实名/mobile/card_id及原020_business_account_details.sql、business-accounts.ts。可直接沿用原号码字段、账号/成员/设备/店铺ID、鉴权/CSRF/版本/授权管理，但没有独立SIM卡或实名版本可直接复制。054只补缺失模型，不把bound_phone/actual_phone自动导入为卡或实名事实，也不复制原运营账号/设备。原ZIP未挂载，本轮读取现有解包参考。

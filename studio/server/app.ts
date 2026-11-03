@@ -11,6 +11,7 @@ import {AccountPermissions,requirePermission} from './permissions';
 import {InventoryAccess} from './inventory-access';
 import {Warehouse} from './warehouse';
 import {Equipment} from './equipment';
+import {PhoneCards} from './phone-cards';
 import {EquipmentPurchase} from './equipment-purchase';
 import {AccountLifecycle} from './account-lifecycle';
 import {AccountAccess} from './account-access';
@@ -110,6 +111,7 @@ export async function createStudioApp(
   const accountAccess = new AccountAccess(database);
   const accountPermissions = new AccountPermissions(database);
   const inventoryAccess = new InventoryAccess(database);
+  const phoneCards = new PhoneCards(database);
   const equipmentPurchase = new EquipmentPurchase(database);
   const accountLifecycle = new AccountLifecycle(database);
   const equipment = new Equipment(database);
@@ -338,6 +340,15 @@ export async function createStudioApp(
       return stores.update(id, body, req.identity!.id);
     }
     @Get('warehouse/items') warehouseCatalog(@Req() r: AuthRequest) { return warehouse.catalog(r.identity!,r.query); }
+    @Get('phone-cards') phoneCardCatalog(@Req() r:AuthRequest){return phoneCards.catalog(r.identity!,r.query);}
+    @Get('phone-cards/options') phoneCardOptions(@Req() r:AuthRequest){return phoneCards.options(r.identity!);}
+    @Get('phone-cards/receipts/:key') phoneCardReceipt(@Req() r:AuthRequest,@Param('key') key:string){return phoneCards.receipt(r.identity!,key);}
+    @Get('phone-cards/:id') phoneCardDetail(@Req() r:AuthRequest,@Param('id') id:string){return phoneCards.detail(r.identity!,id);}
+    @Post('phone-cards') phoneCardCreate(@Req() r:AuthRequest,@Body() b:unknown){return phoneCards.save(r.identity!,b);}
+    @Patch('phone-cards/:id') phoneCardEdit(@Req() r:AuthRequest,@Param('id') id:string,@Body() b:unknown){return phoneCards.save(r.identity!,b,id);}
+    @Get('phone-cards/:id/history') phoneCardHistory(@Req() r:AuthRequest,@Param('id') id:string){return phoneCards.history(r.identity!,id,r.query);}
+    @Get('phone-cards/:id/identity') phoneCardIdentity(@Req() r:AuthRequest,@Param('id') id:string){return phoneCards.identity(r.identity!,id,r.query);}
+    @Post('phone-cards/:id/identity') phoneCardIdentityEdit(@Req() r:AuthRequest,@Param('id') id:string,@Body() b:unknown){return phoneCards.saveIdentity(r.identity!,id,b);}
     @Get('equipment/catalog/:id/purchase') equipmentPurchaseState(@Req() r:AuthRequest,@Param('id') id:string){return equipmentPurchase.state(r.identity!,id);}
     @Get('equipment/catalog/:id/handover') equipmentHandoverState(@Req() r:AuthRequest,@Param('id') id:string){return equipment.handoverState(r.identity!,id);}
     @Post('equipment/catalog/:id/handover') equipmentHandover(@Req() r:AuthRequest,@Param('id') id:string,@Body() b:unknown){return equipment.handover(r.identity!,id,b);}
@@ -1705,6 +1716,11 @@ export async function createStudioApp(
           pageFor(req.identity, id, page);
         } else sectionFor(req.identity, id);
         return true;
+      }
+      if(req.path==='/api/phone-cards'||req.path.startsWith('/api/phone-cards/')){
+        requirePermission(req.identity,'resources');
+        const route=req.path.slice('/api/phone-cards'.length),allowed=(req.method==='GET'&&/^(|\/options|\/receipts\/[^/]+|\/[^/]+(?:\/(?:history|identity))?)$/.test(route))||(req.method==='POST'&&/^(|\/[^/]+\/identity)$/.test(route))||(req.method==='PATCH'&&/^\/[^/]+$/.test(route));
+        if(!allowed)throw new ForbiddenException();if(route.endsWith('/identity'))requirePermission(req.identity,'resource_identity');if(req.method!=='GET')auth.csrf(req);return true;
       }
       if(req.path.startsWith('/api/warehouse/')){
         requirePermission(req.identity,'resources');

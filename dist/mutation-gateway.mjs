@@ -5,7 +5,7 @@ import {ApiError} from './cloud-contract.mjs';
 export function createMutationGateway(fetcher,{enabled=false}={}){
  let token=null;const pending=new Set(),uncertain=new Set();
  const acceptSession=data=>{token=enabled&&/^[a-f0-9]{64}$/.test(data?.csrfToken)?data.csrfToken:null;if(token)uncertain.delete('/api/login');};
- const confirmRead=path=>{for(const p of uncertain)if(p===path||p.startsWith(path+'/'))uncertain.delete(p);};
+ const confirmRead=(path,{exact=false}={})=>{for(const p of uncertain)if(p===path||(!exact&&p.startsWith(path+'/')))uncertain.delete(p);};
  async function send(path,method,body,{login=false,binary=false,headers={},responseType='json'}={}){
   if(!enabled)throw new ApiError(405,'当前为只读预览，未发送保存请求。');
   if(!login&&!token)throw new ApiError(401,'请先登录，再保存修改。');
