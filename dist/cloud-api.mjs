@@ -1,3 +1,4 @@
+import {inventoryAccessPayload,inventoryAccessState,inventoryAccessMine,inventoryAccessHistory,inventoryAccessResult} from './inventory-access-contract.mjs';
 import {employmentPayload,adminReviewPayload,personnelHistory,adminReviewHistory} from './personnel-contract.mjs';
 import {confirmationDetail,confirmationHistory,confirmationPayload,exportable,exportPayload,readWorkbook} from './payroll-confirmation-contract.mjs';
 import {payrollState,payrollHistory,payrollPayload} from './payroll-contract.mjs';
@@ -97,6 +98,11 @@ export function createCloudApi(fetcher=globalThis.fetch,{allowWrites=false}={}){
     async linkMemberLogin(id,login,version){return mutations.send('/api/admin/members/'+endpointId(id),'PATCH',{loginAccountId:endpointId(login),expectedVersion:expectedVersion(version)});},
     async accountLifecycle(id,value,version){const path=id?'/api/admin/accounts/'+endpointId(id)+'/password-reset':'/api/admin/accounts';return mutations.send(path,'POST',accountLifecyclePayload(value,version));},
     async accountOperation(key,action,id){const path=id?'/api/admin/accounts/'+endpointId(id)+'/password-reset':'/api/admin/accounts';try{const result=accountLifecycleResult(await get('/api/admin/account-operations/'+endpointId(key)),action,id);mutations.confirmRead(path);return result;}catch(e){if(e.status===404){mutations.confirmRead(path);return null;}throw e;}},
+    async inventoryAccess(id,signal){return read('/api/admin/accounts/'+endpointId(id)+'/inventory-access',signal,v=>inventoryAccessState(v,id));},
+    async myInventoryAccess(signal){return read('/api/inventory-access',signal,inventoryAccessMine);},
+    async inventoryAccessHistory(id,offset=0,signal){if(!Number.isSafeInteger(offset)||offset<0||offset>2147483647)throw new ContractError();return read('/api/admin/accounts/'+endpointId(id)+'/inventory-access/history?offset='+offset,signal,v=>inventoryAccessHistory(v,id));},
+    async saveInventoryAccess(id,value,version){return mutations.send('/api/admin/accounts/'+endpointId(id)+'/inventory-access','POST',inventoryAccessPayload(value,version));},
+    async inventoryAccessReceipt(id,key){const path='/api/admin/accounts/'+endpointId(id)+'/inventory-access';try{const result=inventoryAccessResult(await get(path+'/receipts/'+endpointId(key)),id);mutations.confirmRead(path);return result;}catch(e){if(e.status===404){mutations.confirmRead(path);return null;}throw e;}},
     async updateAccountPermissions(id,value,version){return mutations.send('/api/admin/accounts/'+endpointId(id)+'/permissions','PATCH',permissionPayload(value,version));},
     async updateAccountAccess(id,value,version){return mutations.send('/api/admin/accounts/'+endpointId(id),'PATCH',accountAccessPayload(value,version));},
     async accountAccessHistory(id,signal){return read('/api/admin/accounts/'+endpointId(id)+'/history',signal,v=>{if(!Array.isArray(v)||v.some(e=>!record(e)||typeof e.actor!=='string'||!record(e.beforeValue)||!record(e.afterValue)||!Number.isFinite(Date.parse(e.createdAt))))throw new ContractError();return v;});},

@@ -8,6 +8,7 @@ import {AttendanceExceptions} from './attendance-exceptions';
 import {LeaveRequests} from './leave';
 import {DailyAttendance} from './daily-attendance';
 import {AccountPermissions,requirePermission} from './permissions';
+import {InventoryAccess} from './inventory-access';
 import {Warehouse} from './warehouse';
 import {Equipment} from './equipment';
 import {AccountLifecycle} from './account-lifecycle';
@@ -107,6 +108,7 @@ export async function createStudioApp(
   const knowledge = new Knowledge(database);
   const accountAccess = new AccountAccess(database);
   const accountPermissions = new AccountPermissions(database);
+  const inventoryAccess = new InventoryAccess(database);
   const accountLifecycle = new AccountLifecycle(database);
   const equipment = new Equipment(database);
   const warehouse = new Warehouse(database);
@@ -1618,6 +1620,16 @@ export async function createStudioApp(
     accountOperation(@Req() r: AuthRequest,@Param('key') key:string) { return accountLifecycle.receipt(r.identity!,key); }
     @Patch('admin/accounts/:id/permissions')
     accountPermissionsEdit(@Req() r:AuthRequest,@Param('id') id:string,@Body() b:unknown){return accountPermissions.update(r.identity!,id,b);}
+    @Get('inventory-access')
+    inventoryAccessMine(@Req() r:AuthRequest){return inventoryAccess.mine(r.identity!);}
+    @Get('admin/accounts/:id/inventory-access')
+    inventoryAccessState(@Req() r:AuthRequest,@Param('id') id:string){return inventoryAccess.state(r.identity!,id);}
+    @Post('admin/accounts/:id/inventory-access')
+    inventoryAccessSave(@Req() r:AuthRequest,@Param('id') id:string,@Body() b:unknown){return inventoryAccess.save(r.identity!,id,b);}
+    @Get('admin/accounts/:id/inventory-access/history')
+    inventoryAccessHistory(@Req() r:AuthRequest,@Param('id') id:string){return inventoryAccess.history(r.identity!,id,r.query);}
+    @Get('admin/accounts/:id/inventory-access/receipts/:key')
+    inventoryAccessReceipt(@Req() r:AuthRequest,@Param('id') id:string,@Param('key') key:string){return inventoryAccess.receipt(r.identity!,id,key);}
     @Patch('admin/accounts/:id')
     accountEdit(@Req() r: AuthRequest,@Param('id') id: string,@Body() body: unknown) { return accountAccess.update(r.identity!,id,body); }
     @Get('admin/accounts/:id/history')
@@ -1657,6 +1669,12 @@ export async function createStudioApp(
       if(req.path==='/api/finance'||req.path.startsWith('/api/finance/'))requirePermission(req.identity,'finance');
       if(req.path==='/api/admin/accounts'||req.path.startsWith('/api/admin/accounts/')||req.path.startsWith('/api/admin/account-operations/'))requirePermission(req.identity,'account_security');
       if(req.method==='PATCH'&&/^\/api\/admin\/accounts\/[^/]+\/permissions$/.test(req.path)){auth.csrf(req);return true;}
+      if(req.path==='/api/inventory-access'&&req.method==='GET')return true;
+      if(/^\/api\/admin\/accounts\/[^/]+\/inventory-access(?:\/history|\/receipts\/[^/]+)?$/.test(req.path)){
+        if(req.method==='GET')return true;
+        if(req.method==='POST'&&/^\/api\/admin\/accounts\/[^/]+\/inventory-access$/.test(req.path)){auth.csrf(req);return true;}
+        throw new ForbiddenException();
+      }
       if (
         req.method === 'GET' &&
         ['/api/session', '/api/navigation'].includes(req.path)

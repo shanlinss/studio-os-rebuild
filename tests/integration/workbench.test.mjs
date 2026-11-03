@@ -32,7 +32,7 @@ before(async()=>{
 });
 after(async()=>{if(app)await app.close();if(local)await local.stop();});
 test('append-only migration preserves 33 existing checksums, old request replays and unknown historical dates',async()=>{
- assert.deepEqual(upgrade,{applied:17,total:50});assert.deepEqual(await migrate(db),{applied:0,total:50});
+ assert.deepEqual(upgrade,{applied:18,total:51});assert.deepEqual(await migrate(db),{applied:0,total:51});
  const a=sessions[1],list=await json(a,'/workbench/todos'),row=list.find(r=>r.id===legacyId.id);
  assert.equal(row.plannedOn,null);assert.equal(row.dueAt,null);assert.equal(row.completedAt,null);assert.equal(row.version,1);
  assert.equal((await json(a,'/workbench/todos','POST',legacy)).id,legacyId.id);

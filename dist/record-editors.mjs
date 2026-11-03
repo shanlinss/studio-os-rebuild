@@ -1,3 +1,4 @@
+import {createInventoryAccessEditors} from './inventory-access-editors.mjs';
 import {createPersonnelEditors} from './personnel-editors.mjs';
 import {createPayrollConfirmationEditors} from './payroll-confirmation-editors.mjs';
 import {createPayrollEditors} from './payroll-editors.mjs';
@@ -121,10 +122,11 @@ export function createRecordEditors({api,h,onSaved,notify}){
  const exceptionEditors=createExceptionEditors({api,h,mount,area,select});
  const leaveEditors=createLeaveEditors({api,h,mount,input,area});
  const attendanceEditors=createAttendanceEditors({api,h,mount,input,area,select});
+ const inventoryAccessEditors=createInventoryAccessEditors({api,h,mount,area,select});
  const accountLifecycleEditors=createAccountLifecycleEditors({api,h,mount,input,area,select});
  const warehouseTransferEditors=createWarehouseTransferEditors({api,h,mount,input,area,select});
  const warehouseEditors=createWarehouseEditors({api,h,mount,input,area,select});
  const shootingEditors=createShootingEditors({api,h,mount,input,area,select});
- return {material,product,publication,snapshot,todo,experiment,dispatch,review,conclusion,...shootingEditors,...operations,...warehouseEditors,...warehouseTransferEditors,...accountLifecycleEditors,...attendanceEditors,...leaveEditors,...exceptionEditors,...monthlyEditors,...closureEditors,...payrollEditors,...payrollConfirmationEditors,...personnelEditors};
+ return {material,product,publication,snapshot,todo,experiment,dispatch,review,conclusion,...shootingEditors,...operations,...warehouseEditors,...warehouseTransferEditors,...accountLifecycleEditors,...inventoryAccessEditors,...attendanceEditors,...leaveEditors,...exceptionEditors,...monthlyEditors,...closureEditors,...payrollEditors,...payrollConfirmationEditors,...personnelEditors};
 
 }

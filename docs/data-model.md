@@ -99,3 +99,7 @@ id、variant、observedAt（北京时间）、window、url、note、metrics（na
 ## 人员与资源管理授权首轮更新（2026-11-03）
 
 050仅扩展原accounts.admin_permissions合法集合与既有管理员兼容赋值，不新增身份/业务对象或平行授权表。原成员、设备、样品、库存、店铺、运营账号及考勤服务在管理写事务核对实际权限，读取区分公开业务投影和管理字段。店铺范围与归属库存后续设计，不冒充本轮已建模。
+
+## 库存范围配置（2026-11-03）
+
+051新增inventory_access_grants（引用原accounts/stores，生成scope_key区分公共与明确店铺，can_move表示正常数量登记配置）、inventory_access_events和inventory_access_receipts（追加式保护）。账号版本和studio-account-access锁沿用原系统，授权/撤会话/留痕/回执同事务。没有新增余额或更改原仓库数量；未知归属不等于公共授权，员工数量接口仍未开放。
