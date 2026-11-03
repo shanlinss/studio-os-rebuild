@@ -3,12 +3,14 @@ import type {Identity} from './auth';
 import type {StudioDatabase} from './database';
 import type {TransactionSql} from 'postgres';
 import {objectInput,uuid,version,longText} from './validation';
-export const permissionNames=['finance','account_security','payroll'] as const;
+export const permissionNames=['finance','account_security','payroll','personnel','resources'] as const;
 export type AdminPermission=typeof permissionNames[number];
 export function hasPermission(who:Identity|undefined,p:AdminPermission){return who?.role==='admin'&&(who.superadmin===true||who.permissions?.includes(p)===true);}
 export function requirePermission(who:Identity|undefined,p:AdminPermission){if(!who)throw new UnauthorizedException();if(!hasPermission(who,p))throw new ForbiddenException();}
 export function databaseIdentity(row:any):Identity{return {id:row.id,username:row.username,role:row.role,superadmin:row.superadmin===true,permissions:row.role==='admin'?(row.admin_permissions||[]):[]};}
 export async function livePermission(tx:TransactionSql,actor:string,p:AdminPermission){const [row]=await tx`SELECT id,username,role,active,superadmin,admin_permissions FROM studio_os.accounts WHERE id=${actor} FOR SHARE`;if(!row?.active)throw new UnauthorizedException();const who=databaseIdentity(row);requirePermission(who,p);return who;}
+export async function freshIdentity(db:StudioDatabase,who:Identity):Promise<Identity>{if(!who)throw new UnauthorizedException();const [row]=await db.client`SELECT id,username,role,active,superadmin,admin_permissions FROM studio_os.accounts WHERE id=${who.id}`;if(!row?.active)throw new UnauthorizedException();return databaseIdentity(row);}
+export async function currentPermission(db:StudioDatabase,who:Identity,p:AdminPermission){const current=await freshIdentity(db,who);requirePermission(current,p);return current;}
 export async function bootstrapSuperadmin(db:StudioDatabase,username:string,reason:string){
  if(!/^[a-z0-9][a-z0-9_.-]{2,63}$/.test(username)||!reason.trim()||reason.length>1900)throw new BadRequestException();
  return db.client.begin(async tx=>{

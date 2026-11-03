@@ -61,7 +61,7 @@ export function createPreviewServer({ root = defaultRoot, upstreamPort = 13102, 
           try{
             let data=JSON.parse(Buffer.concat(chunks).toString('utf8'));
             // Read-only client does not receive mutation tokens or Set-Cookie headers.
-            if(url.pathname==='/api/session'&&up.statusCode===200){const user=data.user;data={user:user&&{id:user.id,username:user.username,role:user.role,...(typeof user.superadmin==='boolean'?{superadmin:user.superadmin}:{}),...(Array.isArray(user.permissions)&&user.permissions.every(p=>['finance','account_security','payroll'].includes(p))?{permissions:user.permissions}:{})}};}
+            if(url.pathname==='/api/session'&&up.statusCode===200){const user=data.user;data={user:user&&{id:user.id,username:user.username,role:user.role,...(typeof user.superadmin==='boolean'?{superadmin:user.superadmin}:{}),...(Array.isArray(user.permissions)&&user.permissions.every(p=>['finance','account_security','payroll','personnel','resources'].includes(p))?{permissions:user.permissions}:{})}};}
             finish(up.statusCode||502,data);
           }catch{finish(502,{message:'Invalid JSON response'});}
         });

@@ -28,7 +28,7 @@ const record = v => v!==null&&typeof v==='object'&&!Array.isArray(v);
 const string = v => typeof v==='string';
 const number = v => typeof v==='number'&&Number.isFinite(v);
 function list(value){if(!Array.isArray(value))throw new ContractError();return value;}
-function identity(v){if(!record(v)||!string(v.id)||!string(v.username)||!['admin','employee'].includes(v.role))throw new ContractError();const out={id:v.id,username:v.username,role:v.role};if(Object.hasOwn(v,'superadmin')){if(typeof v.superadmin!=='boolean')throw new ContractError();out.superadmin=v.superadmin;}if(Object.hasOwn(v,'permissions')){if(!Array.isArray(v.permissions)||v.permissions.some(p=>!['finance','account_security','payroll'].includes(p)))throw new ContractError();out.permissions=[...v.permissions];}return out;}
+function identity(v){if(!record(v)||!string(v.id)||!string(v.username)||!['admin','employee'].includes(v.role))throw new ContractError();const out={id:v.id,username:v.username,role:v.role};if(Object.hasOwn(v,'superadmin')){if(typeof v.superadmin!=='boolean')throw new ContractError();out.superadmin=v.superadmin;}if(Object.hasOwn(v,'permissions')){if(!Array.isArray(v.permissions)||v.permissions.some(p=>!['finance','account_security','payroll','personnel','resources'].includes(p)))throw new ContractError();out.permissions=[...v.permissions];}return out;}
 function base(v){if(!record(v)||!string(v.id)||!string(v.title))throw new ContractError();return v;}
 function endpointId(id){if(!/^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/.test(id))throw new ContractError('记录标识格式无效。');return id;}
 export function materialModel(raw){

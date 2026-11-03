@@ -28,11 +28,11 @@ before(async()=>{
  }
  const {requestKey,...row}=legacy,hash=createHash('sha256').update(JSON.stringify(row)).digest('hex');
  [legacyId]=await db.client`INSERT INTO studio_os.personal_todos(owner_id,request_key,request_hash,title,task_type,priority,status,notes) VALUES(${accounts[1]},${requestKey},${hash},${row.title},${row.taskType},${row.priority},${row.status},${row.notes}) RETURNING id`;
- upgrade=await migrate(db);assert.equal((await db.client`SELECT count(*)::int AS n FROM studio_os.accounts WHERE superadmin`)[0].n,0);assert.deepEqual((await db.client`SELECT admin_permissions FROM studio_os.accounts WHERE id=${accounts[0]}`)[0].admin_permissions,['finance','account_security']);app=await createStudioApp(db,path.resolve('dist'),{diagnosticSink:()=>{}});await app.listen(0,'127.0.0.1');base=await app.getUrl();
+ upgrade=await migrate(db);assert.equal((await db.client`SELECT count(*)::int AS n FROM studio_os.accounts WHERE superadmin`)[0].n,0);assert.deepEqual((await db.client`SELECT admin_permissions FROM studio_os.accounts WHERE id=${accounts[0]}`)[0].admin_permissions,['finance','account_security','personnel','resources']);app=await createStudioApp(db,path.resolve('dist'),{diagnosticSink:()=>{}});await app.listen(0,'127.0.0.1');base=await app.getUrl();
 });
 after(async()=>{if(app)await app.close();if(local)await local.stop();});
 test('append-only migration preserves 33 existing checksums, old request replays and unknown historical dates',async()=>{
- assert.deepEqual(upgrade,{applied:16,total:49});assert.deepEqual(await migrate(db),{applied:0,total:49});
+ assert.deepEqual(upgrade,{applied:17,total:50});assert.deepEqual(await migrate(db),{applied:0,total:50});
  const a=sessions[1],list=await json(a,'/workbench/todos'),row=list.find(r=>r.id===legacyId.id);
  assert.equal(row.plannedOn,null);assert.equal(row.dueAt,null);assert.equal(row.completedAt,null);assert.equal(row.version,1);
  assert.equal((await json(a,'/workbench/todos','POST',legacy)).id,legacyId.id);

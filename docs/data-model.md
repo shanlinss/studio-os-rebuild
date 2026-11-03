@@ -95,3 +95,7 @@ id、variant、observedAt（北京时间）、window、url、note、metrics（na
 ## 人员与工资适用依据更新（2026-11-03）
 
 049追加原members.end_date（最后在职日含当天）、原identity_events不可改写保护及employment_date_receipts。admin_payroll_reviews保存明确当月适用快照及版本，回执另存。原payroll_drafts.closure_id可空，但basis_kind=attendance必须原closure_id且无admin_review_id；admin-exempt必须admin_review_id且无closure_id。复用原工资草稿，不造考勤或平行成员表。
+
+## 人员与资源管理授权首轮更新（2026-11-03）
+
+050仅扩展原accounts.admin_permissions合法集合与既有管理员兼容赋值，不新增身份/业务对象或平行授权表。原成员、设备、样品、库存、店铺、运营账号及考勤服务在管理写事务核对实际权限，读取区分公开业务投影和管理字段。店铺范围与归属库存后续设计，不冒充本轮已建模。

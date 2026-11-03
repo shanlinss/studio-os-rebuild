@@ -1,3 +1,4 @@
+import {livePermission,currentPermission} from './permissions';
 import type {TransactionSql} from 'postgres';
 import {BadRequestException,ConflictException,ForbiddenException,NotFoundException,UnauthorizedException} from '@nestjs/common';
 import {createHash} from 'node:crypto';
@@ -19,7 +20,7 @@ export class AttendanceMonthly {
  async saveCalendar(who:Identity,day:string,value:unknown){
   requireAdministrator(who);date(day);const b=objectInput(value,['requestKey','expectedVersion','mode','note']),key=uuid(b.requestKey),note=longText(b.note,2000);if(!['work','rest','default'].includes(String(b.mode))||typeof b.expectedVersion!=='number'||!Number.isSafeInteger(b.expectedVersion)||b.expectedVersion<0||b.expectedVersion>=2147483647)throw new BadRequestException();const mode=String(b.mode),hash=createHash('sha256').update(JSON.stringify({day,mode,note,expected:b.expectedVersion})).digest('hex');
   return this.db.client.begin(async tx=>{
-   const [actor]=await tx`SELECT role,active FROM studio_os.accounts WHERE id=${who.id} FOR SHARE`;if(!actor?.active)throw new UnauthorizedException();if(actor.role!=='admin')throw new ForbiddenException();
+   const [actor]=await tx`SELECT role,active FROM studio_os.accounts WHERE id=${who.id} FOR SHARE`;if(!actor?.active)throw new UnauthorizedException();if(actor.role!=='admin')throw new ForbiddenException();await livePermission(tx,who.id,'personnel');
    await tx`SELECT pg_advisory_xact_lock(hashtextextended(${'calendar-request:'+who.id+':'+key},0))`;const [old]=await tx`SELECT request_hash,result FROM studio_os.attendance_calendar_receipts WHERE actor_id=${who.id} AND request_key=${key}`;if(old){if(old.request_hash!==hash)throw new ConflictException();return old.result;}
    await tx`SELECT pg_advisory_xact_lock(hashtextextended(${'attendance-calendar:'+day},0))`;const [before]=await tx`SELECT * FROM studio_os.attendance_calendar WHERE work_date=${day}::date FOR UPDATE`;if((before?.version||0)!==b.expectedVersion)throw new ConflictException('工作日历已变化，请重新读取');
    const [after]=await tx`INSERT INTO studio_os.attendance_calendar(work_date,mode,note) VALUES(${day}::date,${mode},${note}) ON CONFLICT(work_date) DO UPDATE SET mode=excluded.mode,note=excluded.note,version=attendance_calendar.version+1,updated_at=clock_timestamp() RETURNING *`;
@@ -28,9 +29,9 @@ export class AttendanceMonthly {
    const result={date:day,version:after.version};await tx`INSERT INTO studio_os.attendance_calendar_receipts(actor_id,request_key,request_hash,result) VALUES(${who.id},${key},${hash},${JSON.stringify(result)}::jsonb)`;return result;
   });
  }
- async receipt(who:Identity,key:string){requireAdministrator(who);uuid(key);const [r]=await this.db.client`SELECT result FROM studio_os.attendance_calendar_receipts WHERE actor_id=${who.id} AND request_key=${key}`;if(!r)throw new NotFoundException();return r.result;}
+ async receipt(who:Identity,key:string){await currentPermission(this.db,who,'personnel');uuid(key);const [r]=await this.db.client`SELECT result FROM studio_os.attendance_calendar_receipts WHERE actor_id=${who.id} AND request_key=${key}`;if(!r)throw new NotFoundException();return r.result;}
  async calendarHistory(who:Identity,day:string,value:unknown){requireContributor(who);date(day);const b=objectInput(value,['offset']),offset=b.offset===undefined?0:Number(b.offset);if(!Number.isSafeInteger(offset)||offset<0||offset>2147483647)throw new BadRequestException();return this.db.client.begin(async tx=>{await tx`SET TRANSACTION ISOLATION LEVEL REPEATABLE READ READ ONLY`;const rows=await tx`SELECT *,work_date::text AS work_date FROM studio_os.attendance_calendar_events WHERE work_date=${day}::date ORDER BY created_at,id LIMIT 50 OFFSET ${offset}`,[n]=await tx`SELECT count(*)::int AS n FROM studio_os.attendance_calendar_events WHERE work_date=${day}::date`;return {rows:rows.map(publicValue),total:n.n,offset,limit:50};});}
- async monthly(who:Identity,value:unknown){return this.db.client.begin(async tx=>{await tx`SET TRANSACTION ISOLATION LEVEL REPEATABLE READ READ ONLY`;return this.read(tx,who,value);});}
+ async monthly(who:Identity,value:unknown){if(who.role==='admin')who=await currentPermission(this.db,who,'personnel');return this.db.client.begin(async tx=>{await tx`SET TRANSACTION ISOLATION LEVEL REPEATABLE READ READ ONLY`;return this.read(tx,who,value);});}
  async read(tx:TransactionSql,who:Identity,value:unknown,includeSources=false){
   requireContributor(who);const q=objectInput(value,['month','memberId']),m=attendanceMonth(q.month),memberId=q.memberId===undefined?null:uuid(q.memberId);if(who.role!=='admin'&&memberId)throw new ForbiddenException();
    // Only minimal attendance identities, never the admin account/security directory.

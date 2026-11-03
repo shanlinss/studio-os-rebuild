@@ -1,3 +1,4 @@
+import {livePermission,currentPermission} from './permissions';
 import {
   BadRequestException,
   ConflictException,
@@ -68,6 +69,7 @@ export class Stores {
       throw new BadRequestException();
     const direction = b.direction;
     return this.db.client.begin(async (tx) => {
+      await livePermission(tx,identity.id,'resources');
       const [actor] =
         await tx`SELECT id FROM studio_os.accounts WHERE id=${identity.id} AND role='admin' AND active FOR SHARE`;
       if (!actor) throw new ForbiddenException();
@@ -119,6 +121,7 @@ export class Stores {
     const name = nameOf(input(value).name);
     try {
       return await this.db.client.begin(async (tx) => {
+        await livePermission(tx,actorId,'resources');
         const [row] =
           await tx`INSERT INTO studio_os.stores (name) VALUES (${name}) RETURNING id, name, active, version`;
         await tx`INSERT INTO studio_os.store_events (store_id, actor_id, action, after_value)
@@ -145,6 +148,7 @@ export class Stores {
     const name = patch.name !== undefined ? nameOf(patch.name) : undefined;
     try {
       return await this.db.client.begin(async (tx) => {
+        await livePermission(tx,actorId,'resources');
         const [before] =
           await tx`SELECT id, name, active, version FROM studio_os.stores WHERE id = ${id} FOR UPDATE`;
         if (!before) throw new NotFoundException();

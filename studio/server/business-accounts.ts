@@ -1,3 +1,5 @@
+import type {Identity} from './auth';
+import {livePermission,currentPermission,freshIdentity,hasPermission} from './permissions';
 import {
   BadRequestException,
   ConflictException,
@@ -16,9 +18,10 @@ import {
 } from './validation';
 export class BusinessAccounts {
   constructor(private readonly db: StudioDatabase) {}
-  list() {
+  async list(who:Identity) {
+    who=await freshIdentity(this.db,who);if(who.role!=='admin')throw new ForbiddenException();const privateFields=hasPermission(who,'resources');
     return this.db
-      .client`SELECT b.id, b.name, b.profile_url AS "profileUrl", b.bound_phone AS "boundPhone", b.actual_phone AS "actualPhone", b.remark, b.responsible_member_id AS "responsibleMemberId", b.active, b.version, m.display_name AS "responsibleName", m.active AS "memberActive" FROM studio_os.business_accounts b JOIN studio_os.members m ON m.id = b.responsible_member_id ORDER BY b.name,b.id`;
+      .client`SELECT b.id, b.name, b.profile_url AS "profileUrl", CASE WHEN ${privateFields} THEN b.bound_phone ELSE '' END AS "boundPhone", CASE WHEN ${privateFields} THEN b.actual_phone ELSE '' END AS "actualPhone", CASE WHEN ${privateFields} THEN b.remark ELSE '' END AS remark, b.responsible_member_id AS "responsibleMemberId", b.active, b.version, m.display_name AS "responsibleName", m.active AS "memberActive" FROM studio_os.business_accounts b JOIN studio_os.members m ON m.id = b.responsible_member_id ORDER BY b.name,b.id`;
   }
   async save(value: unknown, actor: string, id?: string) {
     const body = objectInput(
@@ -81,6 +84,7 @@ export class BusinessAccounts {
       remark = detail('remark', 2000);
     try {
       return await this.db.client.begin(async (tx) => {
+        await livePermission(tx,actor,'resources');
         const [operator] =
           await tx`SELECT role,active FROM studio_os.accounts WHERE id=${actor} FOR SHARE`;
         if (!operator?.active) throw new UnauthorizedException();

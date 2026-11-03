@@ -1,3 +1,4 @@
+import {livePermission,currentPermission,freshIdentity,hasPermission} from './permissions';
 import {publicValue,lockOwner,audit} from './attendance-support';
 import { BadRequestException, ConflictException, NotFoundException, ForbiddenException, UnauthorizedException } from '@nestjs/common';
 import { createHash } from 'node:crypto';
@@ -54,7 +55,7 @@ export class Attendance {
     const key = uuid(b.requestKey), canonical = Object.fromEntries(Object.keys(b).sort().map(k => [k, b[k]]));
     const hash = createHash('sha256').update(JSON.stringify({ action, body: canonical })).digest('hex');
     return this.db.client.begin(async tx => {
-      const [actor]=await tx`SELECT active,role FROM studio_os.accounts WHERE id=${identity.id} FOR SHARE`;if(!actor?.active)throw new UnauthorizedException();if(decision?actor.role!=='admin':actor.role!=='employee')throw new ForbiddenException();
+      const [actor]=await tx`SELECT active,role FROM studio_os.accounts WHERE id=${identity.id} FOR SHARE`;if(!actor?.active)throw new UnauthorizedException();if(decision?actor.role!=='admin':actor.role!=='employee')throw new ForbiddenException();if(decision)await livePermission(tx,identity.id,'personnel');
       await tx`SELECT pg_advisory_xact_lock(hashtextextended(${'attendance-key:' + identity.id + ':' + key},0))`;
       const [old] = await tx`SELECT action,request_hash,result FROM studio_os.attendance_receipts WHERE actor_id=${identity.id} AND request_key=${key}`;
       if (old) {
@@ -67,9 +68,10 @@ export class Attendance {
     });
   }
   async receipt(identity: Identity, key: string) {
+    identity=await freshIdentity(this.db,identity);
     requireContributor(identity); uuid(key);
     const [row] = await this.db.client`SELECT action,result FROM studio_os.attendance_receipts WHERE actor_id=${identity.id} AND request_key=${key}`;
-    if (!row || (row.action.startsWith('decision:') && identity.role !== 'admin')) throw new NotFoundException();
+    if (!row || (row.action.startsWith('decision:') && !hasPermission(identity,'personnel'))) throw new NotFoundException();
     return row.result;
   }
   async state(identity: Identity) {
@@ -86,7 +88,7 @@ export class Attendance {
     const q = objectInput(query, ['view','memberId','from','to','offset',...(corrections ? ['periodId','status'] : [])]);
     if (q.view !== undefined && !['own','team'].includes(String(q.view))) throw new BadRequestException();
     const team = q.view === 'team';
-    if (team) requireAdministrator(identity);
+    if(team&&!hasPermission(identity,'personnel'))throw new ForbiddenException();
     if (!team && q.memberId !== undefined) throw new BadRequestException();
     const memberId = q.memberId ? uuid(q.memberId) : null, from = q.from ? calendar(q.from) : null, to = q.to ? calendar(q.to) : null;
     if (from && to && from > to) throw new BadRequestException();
@@ -96,6 +98,7 @@ export class Attendance {
     return { team, memberId, from, to, offset,status, periodId: q.periodId ? uuid(q.periodId) : null };
   }
   async list(identity: Identity, query: Record<string, unknown>, corrections = false) {
+    identity=await freshIdentity(this.db,identity);
     const { team, memberId, from, to, offset, periodId,status } = this.filters(identity, query, corrections);
     return this.db.client.begin(async tx=>{
       await tx`SET TRANSACTION ISOLATION LEVEL REPEATABLE READ READ ONLY`;
@@ -112,10 +115,11 @@ export class Attendance {
     });
   }
   async detail(identity:Identity,id:string,query:unknown,correction=false){
+    identity=await freshIdentity(this.db,identity);
     requireContributor(identity);uuid(id);objectInput(query,[]);
     return this.db.client.begin(async tx=>{
       await tx`SET TRANSACTION ISOLATION LEVEL REPEATABLE READ READ ONLY`;
-      const [row]=correction?await tx`SELECT c.*,m.display_name AS "memberName" FROM studio_os.attendance_corrections c JOIN studio_os.members m ON m.id=c.member_id WHERE c.id=${id} AND (${identity.role==='admin'} OR c.owner_id=${identity.id})`:await tx`SELECT p.*,p.work_date::text AS work_date,m.display_name AS "memberName" FROM studio_os.attendance_periods p JOIN studio_os.members m ON m.id=p.member_id WHERE p.id=${id} AND (${identity.role==='admin'} OR p.owner_id=${identity.id})`;
+      const [row]=correction?await tx`SELECT c.*,m.display_name AS "memberName" FROM studio_os.attendance_corrections c JOIN studio_os.members m ON m.id=c.member_id WHERE c.id=${id} AND (${hasPermission(identity,'personnel')} OR c.owner_id=${identity.id})`:await tx`SELECT p.*,p.work_date::text AS work_date,m.display_name AS "memberName" FROM studio_os.attendance_periods p JOIN studio_os.members m ON m.id=p.member_id WHERE p.id=${id} AND (${hasPermission(identity,'personnel')} OR p.owner_id=${identity.id})`;
       if(!row)throw new NotFoundException();
       const [period]=correction&&row.period_id?await tx`SELECT *,work_date::text AS work_date FROM studio_os.attendance_periods WHERE id=${row.period_id} AND owner_id=${row.owner_id}`:[];
       let approvalBlocker:string|null=null;
@@ -128,12 +132,13 @@ export class Attendance {
     });
   }
   async history(identity: Identity, id: string, query: Record<string, unknown>, correction = false) {
+    identity=await freshIdentity(this.db,identity);
     requireContributor(identity); uuid(id); objectInput(query, ['offset']);
     const offset = query.offset === undefined ? 0 : Number(query.offset);
     if (!Number.isSafeInteger(offset) || offset < 0 || offset > 2147483647) throw new BadRequestException();
     return this.db.client.begin(async tx=>{
       await tx`SET TRANSACTION ISOLATION LEVEL REPEATABLE READ READ ONLY`;
-    const [p] = correction ? await tx`SELECT id FROM studio_os.attendance_corrections WHERE id=${id} AND (${identity.role === 'admin'} OR owner_id=${identity.id})` : await tx`SELECT id FROM studio_os.attendance_periods WHERE id=${id} AND (${identity.role === 'admin'} OR owner_id=${identity.id})`;
+    const [p] = correction ? await tx`SELECT id FROM studio_os.attendance_corrections WHERE id=${id} AND (${hasPermission(identity,'personnel')} OR owner_id=${identity.id})` : await tx`SELECT id FROM studio_os.attendance_periods WHERE id=${id} AND (${hasPermission(identity,'personnel')} OR owner_id=${identity.id})`;
     if (!p) throw new NotFoundException();
     const where = correction ? tx`correction_id=${id}` : tx`(period_id=${id} OR correction_id IN (SELECT id FROM studio_os.attendance_corrections WHERE period_id=${id}))`;
     const rows = await tx`SELECT id,actor_id,actor_name,action,before_value,after_value,created_at FROM studio_os.attendance_events WHERE ${where} ORDER BY created_at,id LIMIT 50 OFFSET ${offset}`;

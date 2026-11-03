@@ -439,8 +439,8 @@ export async function createStudioApp(
     @Get('admin/members/:id/history') employmentHistory(@Req() r:AuthRequest,@Param('id') id:string){return employmentDates.history(r.identity!,id,r.query);}
     @Get('admin/employment-receipts/:key') employmentReceipt(@Req() r:AuthRequest,@Param('key') key:string){return employmentDates.receipt(r.identity!,key);}
     @Get('admin/members')
-    listMembers() {
-      return members.list();
+    listMembers(@Req() req:AuthRequest) {
+      return members.list(req.identity!);
     }
     @Post('admin/members')
     createMember(@Req() req: AuthRequest, @Body() body: unknown) {
@@ -455,8 +455,8 @@ export async function createStudioApp(
       return members.update(id, body, req.identity!.id);
     }
     @Get('admin/business-accounts')
-    listBusinessAccounts() {
-      return businessAccounts.list();
+    listBusinessAccounts(@Req() r:AuthRequest) {
+      return businessAccounts.list(r.identity!);
     }
     @Post('admin/business-accounts')
     createBusinessAccount(@Req() req: AuthRequest, @Body() body: unknown) {
@@ -1651,6 +1651,8 @@ export async function createStudioApp(
       }
       if (req.method === 'POST' && req.path === '/api/login') return true;
       await auth.authenticate(req);
+      if(req.path.startsWith('/api/admin/members')&&req.method!=='GET')requirePermission(req.identity,'personnel');
+      if((/^\/api\/admin\/members\/[^/]+\/history$/.test(req.path))||req.path.startsWith('/api/admin/employment-receipts/'))requirePermission(req.identity,'personnel');
       if(req.path.startsWith('/api/admin/members')&&req.method!=='GET'&&req.body&&Object.hasOwn(req.body,'loginAccountId'))requirePermission(req.identity,'account_security');
       if(req.path==='/api/finance'||req.path.startsWith('/api/finance/'))requirePermission(req.identity,'finance');
       if(req.path==='/api/admin/accounts'||req.path.startsWith('/api/admin/accounts/')||req.path.startsWith('/api/admin/account-operations/'))requirePermission(req.identity,'account_security');
@@ -1674,7 +1676,7 @@ export async function createStudioApp(
         return true;
       }
       if(req.path.startsWith('/api/warehouse/')){
-        requireAdministrator(req.identity);
+        requirePermission(req.identity,'resources');
         const route=req.path.slice('/api/warehouse/'.length),allowed=(req.method==='GET' && /^(items|items\/[^/]+(?:\/(?:movements(?:\/[^/]+)?|events|transfers|sample-targets))?|receipts\/[^/]+)$/.test(route)) ||
           (req.method==='POST' && /^(items|items\/[^/]+\/(?:movements|to-samples))$/.test(route)) || (req.method==='PATCH' && /^items\/[^/]+$/.test(route));
         if(!allowed)throw new ForbiddenException();if(req.method!=='GET')auth.csrf(req);return true;
@@ -1686,7 +1688,7 @@ export async function createStudioApp(
           (req.method==='POST' && /^(catalog|catalog\/[^/]+\/(?:borrow|state)|loans\/[^/]+\/return)$/.test(route)) ||
           (req.method==='PATCH' && /^(catalog\/[^/]+|loans\/[^/]+\/location)$/.test(route));
         if(!allowed)throw new ForbiddenException();
-        if((req.method==='POST' && (route==='catalog'||route.endsWith('/state')))||(req.method==='PATCH' && /^catalog\/[^/]+$/.test(route))||route.endsWith('/history'))requireAdministrator(req.identity);
+        if((req.method==='POST' && (route==='catalog'||route.endsWith('/state')))||(req.method==='PATCH' && /^catalog\/[^/]+$/.test(route))||route.endsWith('/history'))requirePermission(req.identity,'resources');
         if(req.method!=='GET')auth.csrf(req);
         return true;
       }
@@ -1697,7 +1699,7 @@ export async function createStudioApp(
           (req.method === 'POST' && /^(catalog|catalog\/[^/]+\/(?:stock-in|stocktake|borrow)|loans\/[^/]+\/return)$/.test(route)) ||
           (req.method === 'PATCH' && /^(catalog\/[^/]+|loans\/[^/]+\/location)$/.test(route));
         if (!allowed) throw new ForbiddenException();
-        if (/^catalog\/[^/]+\/transfers$/.test(route) || (req.method !== 'GET' && route === 'catalog') || (req.method === 'PATCH' && /^catalog\/[^/]+$/.test(route)) || /\/(stock-in|stocktake)$/.test(route) || /^catalog\/[^/]+\/history$/.test(route)) requireAdministrator(req.identity);
+        if (/^catalog\/[^/]+\/transfers$/.test(route) || (req.method !== 'GET' && route === 'catalog') || (req.method === 'PATCH' && /^catalog\/[^/]+$/.test(route)) || /\/(stock-in|stocktake)$/.test(route) || /^catalog\/[^/]+\/history$/.test(route)) requirePermission(req.identity,'resources');
         if (req.method !== 'GET') auth.csrf(req);
         return true;
       }
@@ -1705,6 +1707,7 @@ export async function createStudioApp(
       if(req.path.startsWith('/api/payroll/')){
         requirePermission(req.identity,'payroll');const route=req.path.slice('/api/payroll/'.length);if(!((req.method==='GET'&&/^(state|salaries|drafts|admin-reviews|admin-review-receipts\/[^/]+|confirmations(?:\/[^/]+)?|exportable|exports(?:\/[^/]+)?|(?:receipts|confirmation-receipts|export-receipts)\/[^/]+)$/.test(route))||(req.method==='POST'&&/^(salaries|drafts|admin-reviews|confirmations|exports)$/.test(route))))throw new ForbiddenException();if(req.method!=='GET')auth.csrf(req);return true;
       }
+      if(req.method!=='GET'&&(/^\/api\/admin\/(stores|business-accounts)(?:\/[^/]+)?$/.test(req.path)||/^\/api\/admin\/material-folders\/[^/]+\/order$/.test(req.path)))requirePermission(req.identity,'resources');
       if (req.path.startsWith('/api/attendance/')) {
         requireContributor(req.identity);
         const route = req.path.slice('/api/attendance/'.length);
@@ -1714,11 +1717,11 @@ export async function createStudioApp(
         const exceptionRead=req.method==='GET'&&/^(exceptions|exception-receipts\/[^/]+|periods\/[^/]+\/exceptions(?:\/history)?)$/.test(route),exceptionWrite=req.method==='POST'&&/^periods\/[^/]+\/exceptions$/.test(route);
         const calendarRead=req.method==='GET'&&/^(monthly|calendar|calendar-receipts\/[^/]+|calendar\/[^/]+\/history)$/.test(route),calendarWrite=req.method==='POST'&&/^calendar\/[^/]+$/.test(route);
         const closureRead=req.method==='GET'&&/^(month-closures(?:\/[^/]+)?|month-closure-receipts\/[^/]+)$/.test(route),closureWrite=req.method==='POST'&&route==='month-closures';
-        if(closureWrite)requireAdministrator(req.identity);
-        if(calendarWrite)requireAdministrator(req.identity);
+        if(closureWrite)requirePermission(req.identity,'personnel');
+        if(calendarWrite)requirePermission(req.identity,'personnel');
         if (!allowed&&!exceptionRead&&!exceptionWrite&&!calendarRead&&!calendarWrite&&!closureRead&&!closureWrite) throw new ForbiddenException();
-        if(exceptionWrite)requireAdministrator(req.identity);
-        if (route.endsWith('/decision')) requireAdministrator(req.identity);
+        if(exceptionWrite)requirePermission(req.identity,'personnel');
+        if (route.endsWith('/decision')) requirePermission(req.identity,'personnel');
         if (req.method !== 'GET') auth.csrf(req);
         return true;
       }

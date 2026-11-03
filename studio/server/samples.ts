@@ -1,3 +1,4 @@
+import {livePermission,currentPermission,freshIdentity,hasPermission} from './permissions';
 import { BadRequestException, ConflictException, ForbiddenException, NotFoundException } from '@nestjs/common';
 import { createHash } from 'node:crypto';
 import type { TransactionSql } from 'postgres';
@@ -59,6 +60,7 @@ export class ShootingSamples {
     requireContributor(who); const key = uuid(b.requestKey), canonical = Object.fromEntries(Object.keys(b).sort().map(k => [k,b[k]]));
     const hash = createHash('sha256').update(JSON.stringify({action,body:canonical})).digest('hex');
     return this.db.client.begin(async tx => {
+      if(action.startsWith('admin:'))await livePermission(tx,who.id,'resources');
       await tx`SELECT pg_advisory_xact_lock(hashtextextended(${'sample-key:'+who.id+':'+key},0))`;
       const [old] = await tx`SELECT action,request_hash,result FROM studio_os.shooting_sample_receipts WHERE actor_id=${who.id} AND request_key=${key}`;
       if (old) { if (old.action !== action || old.request_hash !== hash) throw new ConflictException('请求键已用于其他内容'); return old.result; }
@@ -70,7 +72,7 @@ export class ShootingSamples {
   async receipt(who: Identity, key: string) {
     requireContributor(who); uuid(key);
     const [r] = await this.db.client`SELECT action,result FROM studio_os.shooting_sample_receipts WHERE actor_id=${who.id} AND request_key=${key}`;
-    if (!r || (r.action.startsWith('admin:') && who.role !== 'admin')) throw new NotFoundException(); return r.result;
+    if (!r || (r.action.startsWith('admin:') && !hasPermission(await freshIdentity(this.db,who),'resources'))) throw new NotFoundException(); return r.result;
   }
   async state(who: Identity) {
     requireContributor(who);
@@ -84,21 +86,23 @@ export class ShootingSamples {
     if (!Number.isSafeInteger(offset) || offset < 0 || offset > MAX) throw new BadRequestException();
     const team = b.view === 'team';
     if (b.view !== undefined && !['own','team'].includes(String(b.view))) throw new BadRequestException();
-    if (team || b.active === 'all') requireAdministrator(who);
+    if (team || b.active === 'all') {if(!hasPermission(who,'resources'))throw new ForbiddenException();}
     if (!team && b.memberId !== undefined) throw new BadRequestException();
     const status = b.status === undefined ? 'all' : String(b.status);
     if (!['all','open','returned'].includes(status) || (b.active !== undefined && !['active','all'].includes(String(b.active)))) throw new BadRequestException();
     return {offset,team,memberId:optionalId(b.memberId),sampleId:optionalId(b.sampleId),status,q:b.q ? shortText(b.q,100) : '',all:b.active === 'all'};
   }
   async catalog(who: Identity, value: unknown) {
+    who=await freshIdentity(this.db,who);
     const q = this.query(who,value);
     const where = this.db.client`(${q.all} OR s.active) AND strpos(lower(concat_ws(' ',s.name,p.name,s.product_label,s.warehouse_location)),lower(${q.q}))>0`;
-    const projection = who.role === 'admin' ? this.db.client`s.*,coalesce(p.name,s.product_label) AS "productName",m.display_name AS "keeperName",(SELECT coalesce(sum(l.quantity-l.returned_quantity),0)::text FROM studio_os.shooting_sample_loans l WHERE l.sample_id=s.id) AS "outstandingQuantity"` : this.db.client`s.id,s.name,s.product_id,coalesce(p.name,s.product_label) AS "productName",s.warehouse_location,m.display_name AS "keeperName",s.available_quantity,s.version,s.active`;
+    const projection = hasPermission(who,'resources') ? this.db.client`s.*,coalesce(p.name,s.product_label) AS "productName",m.display_name AS "keeperName",(SELECT coalesce(sum(l.quantity-l.returned_quantity),0)::text FROM studio_os.shooting_sample_loans l WHERE l.sample_id=s.id) AS "outstandingQuantity"` : this.db.client`s.id,s.name,s.product_id,coalesce(p.name,s.product_label) AS "productName",s.warehouse_location,m.display_name AS "keeperName",s.available_quantity,s.version,s.active`;
     const rows = await this.db.client`SELECT ${projection} FROM studio_os.shooting_samples s LEFT JOIN studio_os.products p ON p.id=s.product_id LEFT JOIN studio_os.members m ON m.id=s.keeper_member_id WHERE ${where} ORDER BY s.created_at DESC,s.id LIMIT 50 OFFSET ${q.offset}`;
     const [n] = await this.db.client`SELECT count(*) FROM studio_os.shooting_samples s LEFT JOIN studio_os.products p ON p.id=s.product_id WHERE ${where}`;
     return {rows:rows.map(normalized),total:Number(n.count),offset:q.offset,limit:50};
   }
   async loans(who: Identity, value: unknown) {
+    who=await freshIdentity(this.db,who);
     const q = this.query(who,value,true);
     const where = this.db.client`(${q.team} OR l.owner_id=${who.id}) AND (${q.memberId}::uuid IS NULL OR l.member_id=${q.memberId}) AND (${q.sampleId}::uuid IS NULL OR l.sample_id=${q.sampleId}) AND (${q.status}='all' OR (${q.status}='open' AND l.returned_quantity<l.quantity) OR (${q.status}='returned' AND l.returned_quantity=l.quantity))`;
     const rows = await this.db.client`SELECT l.*,s.name AS "sampleName",s.active AS "sampleActive",s.warehouse_location AS "warehouseLocation",m.display_name AS "borrowerName" FROM studio_os.shooting_sample_loans l JOIN studio_os.shooting_samples s ON s.id=l.sample_id JOIN studio_os.members m ON m.id=l.member_id WHERE ${where} ORDER BY l.created_at DESC,l.id LIMIT 50 OFFSET ${q.offset}`;
@@ -106,15 +110,16 @@ export class ShootingSamples {
     return {rows:rows.map(normalized),total:Number(n.count),offset:q.offset,limit:50};
   }
   async history(who: Identity, id: string, value: unknown, loan = false) {
+    who=await freshIdentity(this.db,who);
     requireContributor(who); uuid(id); const b = objectInput(value,['offset']); const offset = b.offset === undefined ? 0 : Number(b.offset);
     if (!Number.isSafeInteger(offset) || offset < 0 || offset > MAX) throw new BadRequestException();
-    if (!loan) requireAdministrator(who);
-    const rows = loan ? await this.db.client`SELECT id FROM studio_os.shooting_sample_loans WHERE id=${id} AND (${who.role === 'admin'} OR owner_id=${who.id})` : await this.db.client`SELECT id FROM studio_os.shooting_samples WHERE id=${id}`;
+    if (!loan&&!hasPermission(who,'resources'))throw new ForbiddenException();
+    const rows = loan ? await this.db.client`SELECT id FROM studio_os.shooting_sample_loans WHERE id=${id} AND (${hasPermission(who,'resources')} OR owner_id=${who.id})` : await this.db.client`SELECT id FROM studio_os.shooting_samples WHERE id=${id}`;
     if (!rows.length) throw new NotFoundException();
     const where = loan ? this.db.client`loan_id=${id}` : this.db.client`sample_id=${id}`;
     const events = await this.db.client`SELECT id,actor_id,actor_name,action,quantity_delta,before_value,after_value,note,created_at FROM studio_os.shooting_sample_events WHERE ${where} ORDER BY created_at,id LIMIT 50 OFFSET ${offset}`;
     const [n] = await this.db.client`SELECT count(*) FROM studio_os.shooting_sample_events WHERE ${where}`;
-    const visible = who.role === 'admin' ? events : events.map(e => ({...e, before_value: e.before_value ? {loan:e.before_value.loan} : null, after_value:{loan:e.after_value.loan}}));
+    const visible = hasPermission(who,'resources') ? events : events.map(e => ({...e, before_value: e.before_value ? {loan:e.before_value.loan} : null, after_value:{loan:e.after_value.loan}}));
     return {rows:visible.map(normalized),total:Number(n.count),offset,limit:50};
   }
   async save(who: Identity, value: unknown, id?: string) {

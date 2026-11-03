@@ -1,3 +1,4 @@
+import {livePermission,currentPermission,freshIdentity,hasPermission} from './permissions';
 import {BadRequestException,ConflictException,ForbiddenException,NotFoundException,UnauthorizedException} from '@nestjs/common';
 import {createHash,randomUUID} from 'node:crypto';
 import {registerSampleRecord,stockInSampleRecord} from './samples';
@@ -17,20 +18,20 @@ export class Warehouse {
  private async write(who:Identity,action:string,b:Record<string,unknown>,fn:(tx:TransactionSql)=>Promise<{id:string,movementId?:string,transferId?:string,sampleId?:string,sampleEventId?:string}>){
   requireAdministrator(who);const key=uuid(b.requestKey),body=canonical(b),hash=createHash('sha256').update(JSON.stringify({action,body})).digest('hex');
   try{return await this.db.client.begin(async tx=>{
-   const [actor]=await tx`SELECT active,role FROM studio_os.accounts WHERE id=${who.id} FOR SHARE`;if(!actor?.active)throw new UnauthorizedException();if(actor.role!=='admin')throw new ForbiddenException();
+   const [actor]=await tx`SELECT active,role FROM studio_os.accounts WHERE id=${who.id} FOR SHARE`;if(!actor?.active)throw new UnauthorizedException();await livePermission(tx,who.id,'resources');
    await tx`SELECT pg_advisory_xact_lock(hashtextextended(${'warehouse:'+who.id+':'+key},0))`;
    const [old]=await tx`SELECT action,request_hash,result FROM studio_os.warehouse_receipts WHERE actor_id=${who.id} AND request_key=${key}`;
    if(old){if(old.action!==action||old.request_hash!==hash)throw new ConflictException('请求标识已用于其他内容');return old.result;}
    const result=await fn(tx);await tx`INSERT INTO studio_os.warehouse_receipts(actor_id,request_key,action,request_hash,result) VALUES(${who.id},${key},${action},${hash},${JSON.stringify(result)}::jsonb)`;return result;
   });}catch(e){if((e as {code?:string}).code==='23505')throw new ConflictException('库存编码重复');throw e;}
  }
- async receipt(who:Identity,key:string){requireAdministrator(who);uuid(key);const [r]=await this.db.client`SELECT result FROM studio_os.warehouse_receipts WHERE actor_id=${who.id} AND request_key=${key}`;if(!r)throw new NotFoundException();return r.result;}
+ async receipt(who:Identity,key:string){await currentPermission(this.db,who,'resources');requireAdministrator(who);uuid(key);const [r]=await this.db.client`SELECT result FROM studio_os.warehouse_receipts WHERE actor_id=${who.id} AND request_key=${key}`;if(!r)throw new NotFoundException();return r.result;}
  private query(who:Identity,value:unknown,history=false){
   requireAdministrator(who);const b=objectInput(value,history?['offset']:['q','kind','active','offset']),offset=b.offset===undefined?0:Number(b.offset);
   if(!Number.isSafeInteger(offset)||offset<0||offset>MAX)throw new BadRequestException();const kind=b.kind===undefined?'all':String(b.kind),active=b.active===undefined?'active':String(b.active);
   if(!['all','product','packaging'].includes(kind)||!['active','inactive','all'].includes(active))throw new BadRequestException();return {offset,kind,active,q:b.q?shortText(b.q,100):''};
  }
- async catalog(who:Identity,value:unknown){
+ async catalog(who:Identity,value:unknown){await currentPermission(this.db,who,'resources');
   const q=this.query(who,value);
   return this.db.client.begin(async tx=>{
    await tx`SET TRANSACTION ISOLATION LEVEL REPEATABLE READ READ ONLY`;
@@ -41,7 +42,7 @@ export class Warehouse {
    return {rows,total:count.n,offset:q.offset,limit:50,summary};
   });
  }
- async detail(who:Identity,id:string){requireAdministrator(who);uuid(id);const [r]=await this.db.client`SELECT ${this.db.client.unsafe(projection)} FROM studio_os.warehouse_items w LEFT JOIN studio_os.products p ON p.id=w.product_id WHERE w.id=${id}`;if(!r)throw new NotFoundException();return r;}
+ async detail(who:Identity,id:string){await currentPermission(this.db,who,'resources');requireAdministrator(who);uuid(id);const [r]=await this.db.client`SELECT ${this.db.client.unsafe(projection)} FROM studio_os.warehouse_items w LEFT JOIN studio_os.products p ON p.id=w.product_id WHERE w.id=${id}`;if(!r)throw new NotFoundException();return r;}
  async save(who:Identity,value:unknown,id?:string){
   requireAdministrator(who);if(id)uuid(id);const b=objectInput(value,['requestKey','itemCode','kind','productId','name','specification','unit','location','notes',...(id?['active','expectedVersion']:[])]);
   if(['requestKey','itemCode','kind','productId','name','specification','unit','location','notes',...(id?['active','expectedVersion']:[])].some(k=>!Object.hasOwn(b,k))||typeof b.kind!=='string'||typeof b.unit!=='string')throw new BadRequestException('库存资料不完整');
@@ -71,7 +72,7 @@ export class Warehouse {
    await tx`UPDATE studio_os.warehouse_items SET opening_confirmed=true,quantity=${after},version=version+1,updated_at=now() WHERE id=${id}`;return {id,movementId:movement.id};
   });
  }
- async sampleTargets(who:Identity,id:string,value:unknown){
+ async sampleTargets(who:Identity,id:string,value:unknown){await currentPermission(this.db,who,'resources');
   requireAdministrator(who);uuid(id);const b=objectInput(value,['q','offset']),offset=b.offset===undefined?0:Number(b.offset),q=b.q?shortText(b.q,100):'';
   if(!Number.isSafeInteger(offset)||offset<0||offset>MAX)throw new BadRequestException();
   return this.db.client.begin(async tx=>{
@@ -113,7 +114,7 @@ export class Warehouse {
    return {id,movementId:String(movement.id),transferId,sampleId:String(sampleRow.id),sampleEventId:added.eventId};
   });
  }
- async transfers(who:Identity,id:string,value:unknown,bySample=false){
+ async transfers(who:Identity,id:string,value:unknown,bySample=false){await currentPermission(this.db,who,'resources');
   const q=this.query(who,value,true);uuid(id);
   return this.db.client.begin(async tx=>{
    await tx`SET TRANSACTION ISOLATION LEVEL REPEATABLE READ READ ONLY`;
@@ -123,7 +124,7 @@ export class Warehouse {
    const [count]=await tx`SELECT count(*)::int AS n FROM studio_os.warehouse_sample_transfers t WHERE ${where}`;return {rows,total:count.n,offset:q.offset,limit:50};
   });
  }
- async movements(who:Identity,id:string,value:unknown){
+ async movements(who:Identity,id:string,value:unknown){await currentPermission(this.db,who,'resources');
   const q=this.query(who,value,true);uuid(id);if(!(await this.db.client`SELECT id FROM studio_os.warehouse_items WHERE id=${id}`).length)throw new NotFoundException();
   return this.db.client.begin(async tx=>{
    await tx`SET TRANSACTION ISOLATION LEVEL REPEATABLE READ READ ONLY`;
@@ -131,8 +132,8 @@ export class Warehouse {
    const [n]=await tx`SELECT count(*)::int AS n FROM studio_os.warehouse_movements WHERE item_id=${id}`;return {rows,total:n.n,offset:q.offset,limit:50};
   });
  }
- async movement(who:Identity,id:string,movement:string){requireAdministrator(who);uuid(id);uuid(movement);const [r]=await this.db.client`SELECT ${this.db.client.unsafe(movementProjection)} FROM studio_os.warehouse_movements m LEFT JOIN studio_os.warehouse_sample_transfers t ON t.movement_id=m.id JOIN studio_os.accounts a ON a.id=m.actor_id LEFT JOIN studio_os.members n ON n.login_account_id=a.id WHERE m.item_id=${id} AND m.id=${movement}`;if(!r)throw new NotFoundException();return r;}
- async events(who:Identity,id:string,value:unknown){
+ async movement(who:Identity,id:string,movement:string){await currentPermission(this.db,who,'resources');requireAdministrator(who);uuid(id);uuid(movement);const [r]=await this.db.client`SELECT ${this.db.client.unsafe(movementProjection)} FROM studio_os.warehouse_movements m LEFT JOIN studio_os.warehouse_sample_transfers t ON t.movement_id=m.id JOIN studio_os.accounts a ON a.id=m.actor_id LEFT JOIN studio_os.members n ON n.login_account_id=a.id WHERE m.item_id=${id} AND m.id=${movement}`;if(!r)throw new NotFoundException();return r;}
+ async events(who:Identity,id:string,value:unknown){await currentPermission(this.db,who,'resources');
   const q=this.query(who,value,true);uuid(id);if(!(await this.db.client`SELECT id FROM studio_os.warehouse_items WHERE id=${id}`).length)throw new NotFoundException();
   const rows=await this.db.client`SELECT e.id,e.action,e.before_value AS "beforeValue",e.after_value AS "afterValue",e.created_at AS "createdAt",coalesce(m.display_name,a.username) AS actor FROM studio_os.warehouse_item_events e JOIN studio_os.accounts a ON a.id=e.actor_id LEFT JOIN studio_os.members m ON m.login_account_id=a.id WHERE e.item_id=${id} ORDER BY e.created_at DESC,e.id LIMIT 50 OFFSET ${q.offset}`;
   const [n]=await this.db.client`SELECT count(*)::int AS n FROM studio_os.warehouse_item_events WHERE item_id=${id}`;return {rows,total:n.n,offset:q.offset,limit:50};

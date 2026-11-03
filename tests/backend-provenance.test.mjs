@@ -5,6 +5,6 @@ import {createHash} from 'node:crypto';
 test('all 33 imported migration checksums and unmodified backend source match the source manifest',async()=>{
  const manifest=JSON.parse(await readFile(new URL('../docs/backend-source-manifest.json',import.meta.url),'utf8'));
  assert.equal(manifest.files.filter(f=>f.path.startsWith('studio/migrations/')).length,33);
- const intentional=new Set(['studio/server/personal-todos.ts','studio/server/workflow.ts','studio/server/lab.ts','studio/server/app.ts','studio/server/shooting.ts','studio/server/knowledge.ts','studio/server/finance.ts','studio/server/readiness.ts','studio/server/samples.ts','studio/server/auth.ts','studio/server/navigation.ts','studio/server/registry.ts','studio/server/attendance.ts']);
+ const intentional=new Set(['studio/server/personal-todos.ts','studio/server/workflow.ts','studio/server/lab.ts','studio/server/app.ts','studio/server/shooting.ts','studio/server/knowledge.ts','studio/server/finance.ts','studio/server/readiness.ts','studio/server/samples.ts','studio/server/auth.ts','studio/server/navigation.ts','studio/server/registry.ts','studio/server/attendance.ts','studio/server/stores.ts','studio/server/business-accounts.ts']);
  for(const file of manifest.files){if(intentional.has(file.path))continue;assert.equal(createHash('sha256').update(await readFile(new URL('../'+file.path,import.meta.url))).digest('hex'),file.sha256,file.path+' must retain the imported source bytes');}
 });

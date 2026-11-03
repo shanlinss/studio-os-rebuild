@@ -1,3 +1,4 @@
+import {hasSensitive} from './admin-permissions.mjs';
 import {ContractError} from './cloud-contract.mjs';
 import {beijingCorrectionInput,correctionTimestamp,approvalBlockers} from './attendance-contract.mjs';
 export function createAttendanceEditors({api,h,mount,input,area,select}){
@@ -13,7 +14,7 @@ export function createAttendanceEditors({api,h,mount,input,area,select}){
   },{kind:'attendance'},()=>api.attendanceReceipt(key,action,id));
  }
  async function attendanceDecision(id,decision){
-  const user=await api.session();if(user.role!=='admin')throw new ContractError('仅管理员可审核。');
+  const user=await api.session();if(!hasSensitive(user,'personnel'))throw new ContractError('仅管理员可审核。');
   const d=await api.attendanceDetail(id,true),r=d.record;if(r.status!=='pending')throw new ContractError('该申请已处理，请重新读取。');
   if(decision==='approved'&&d.approvalBlocker)throw new ContractError(approvalBlockers[d.approvalBlocker]||'请先核对原记录。');
   if(decision==='approved'&&d.period&&d.period.version!==r.period_version)throw new ContractError('原考勤已经变化，请让员工重新核对并修改待审核申请；也可驳回并说明。');

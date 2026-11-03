@@ -1,7 +1,8 @@
+import {hasSensitive} from './admin-permissions.mjs';
 import {warehouseKinds,movementLabels} from './warehouse-contract.mjs';
 
 export function createWarehouseViews({api,h,heading,showPanel,localTime,writable,getUser}){
- const $=s=>document.querySelector(s),canWrite=()=>writable&&getUser()?.role==='admin';
+ const $=s=>document.querySelector(s),canWrite=()=>writable&&hasSensitive(getUser(),'resources');
  let parent,request,offset=0,serial=0,timer;
  const quantity=r=>r.openingConfirmed?`${r.quantity} ${r.unit}`:'待登记期初';
  const action=(type,label,id)=>`<button class="${type==='opening'?'primary':'secondary'}" data-warehouse-action="${type}" data-warehouse-id="${h(id)}">${h(label)}</button>`;

@@ -1,4 +1,4 @@
-import {sensitivePermissions} from './admin-permissions.mjs';
+import {sensitivePermissions,hasSensitive} from './admin-permissions.mjs';
 import {ContractError,chinaDate} from './cloud-contract.mjs';
 import {money,cents} from './management-model.mjs';
 
@@ -17,6 +17,7 @@ export function createOperationsEditors({api,h,mount,input,area,select}){
   mount('关联产品',select('productId','实验对应产品',root.linkedProductId||'',options)+'<p class="muted">只修改产品关联，保留已有轮次、素材、任务和数据。</p>',f=>api.experimentProduct(id,f.get('productId')||null,root.version),{kind:'test',id});
  }
  async function directory(kind,id){
+  if(!hasSensitive(await api.session(),kind==='member'?'personnel':'resources'))throw new ContractError('当前账号未获得这项维护授权。');
   const rows=await (kind==='member'?api.members():kind==='account'?api.businessAccounts():api.stores());const row=id?rows.find(r=>r.id===id):null;if(id&&!row)throw new ContractError('原资料不可见，请刷新后重试。');let body;
   if(kind==='member')body=input('displayName','成员姓名',row?.displayName,'required maxlength="100"')+input('jobTitle','岗位',row?.jobTitle,'maxlength="100"')+input('startDate','入职日期',row?.startDate,row?'type="date" readonly':'type="date"')+input('employmentStatus','在职状态',row?.employmentStatus,'maxlength="40"')+'<p class="muted">已有登录关联保持原样；新增成员先建立档案。业务停用与登录账号状态分别管理。</p>';
   else if(kind==='account'){

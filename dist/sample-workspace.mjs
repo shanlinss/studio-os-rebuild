@@ -1,7 +1,8 @@
+import {hasSensitive} from './admin-permissions.mjs';
 export function createSampleWorkspace({api,h,writable,getUser,notify,localTime}){
  const dialog=document.createElement('dialog');dialog.className='editor wide-editor';dialog.setAttribute('aria-label','样品借用与归还');document.body.append(dialog);
  let controller,request,serial=0,state,rows=[],tab='catalog',offset=0,context=null,saving=false,dirty=false,editing=false,timer,historyId;
- const $=s=>dialog.querySelector(s),admin=()=>getUser()?.role==='admin';
+ const $=s=>dialog.querySelector(s),admin=()=>hasSensitive(getUser(),'resources');
  const input=(name,label,value='',attrs='')=>`<label>${h(label)}<input name="${name}" value="${h(value??'')}" ${attrs}></label>`;
  const select=(name,label,value,options)=>`<label>${h(label)}<select name="${name}">${options.map(([id,title])=>`<option value="${h(id)}" ${id===value?'selected':''}>${h(title)}</option>`).join('')}</select></label>`;
  const note=()=>'<label>备注<textarea name="note" maxlength="2000" rows="2"></textarea></label>';

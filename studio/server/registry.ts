@@ -1,8 +1,9 @@
-import {livePermission} from './permissions';
+import type {Identity} from './auth';
+import {livePermission,hasPermission,freshIdentity} from './permissions';
 import {
   BadRequestException,
   ConflictException,
-  NotFoundException,
+  NotFoundException, ForbiddenException,
 } from '@nestjs/common';
 import type { StudioDatabase } from './database';
 import { objectInput, shortText, uuid, version } from './validation';
@@ -27,10 +28,11 @@ function basicFacts(body: Record<string, unknown>) {
 }
 export class Members {
   constructor(private readonly db: StudioDatabase) {}
-  list() {
+  async list(who:Identity) {
+    who=await freshIdentity(this.db,who);if(who.role!=='admin')throw new ForbiddenException();const personnel=hasPermission(who,'personnel'),security=personnel||hasPermission(who,'account_security');
     return this.db
-      .client`SELECT m.id, m.display_name AS "displayName", m.login_account_id AS "loginAccountId", m.active, m.version, m.job_title AS "jobTitle", m.start_date::text AS "startDate", m.end_date::text AS "endDate", m.employment_status AS "employmentStatus",
-      a.username, a.role, a.active AS "loginActive" FROM studio_os.members m LEFT JOIN studio_os.accounts a ON a.id = m.login_account_id ORDER BY m.display_name, m.id`;
+      .client`SELECT m.id, m.display_name AS "displayName", CASE WHEN ${security} THEN m.login_account_id ELSE NULL END AS "loginAccountId", m.active, m.version, CASE WHEN ${personnel} THEN m.job_title END AS "jobTitle", CASE WHEN ${personnel} THEN m.start_date::text END AS "startDate", CASE WHEN ${personnel} THEN m.end_date::text END AS "endDate", CASE WHEN ${personnel} THEN m.employment_status END AS "employmentStatus",
+      CASE WHEN ${security} THEN a.username END AS username, CASE WHEN ${security} THEN a.role END AS role, CASE WHEN ${security} THEN a.active END AS "loginActive" FROM studio_os.members m LEFT JOIN studio_os.accounts a ON a.id = m.login_account_id ORDER BY m.display_name, m.id`;
   }
   async ownProfile(actor: string, query: unknown) {
     objectInput(query, []);
@@ -48,6 +50,7 @@ export class Members {
         : uuid(body.loginAccountId);
     try {
       return await this.db.client.begin(async (tx) => {
+        await livePermission(tx,actor,'personnel');
         if(login)await livePermission(tx,actor,'account_security');
         if (login) {
           const [account] =
@@ -91,6 +94,7 @@ export class Members {
       body.loginAccountId !== undefined ? uuid(body.loginAccountId) : undefined;
     try {
       return await this.db.client.begin(async (tx) => {
+        await livePermission(tx,actor,'personnel');
         if(login)await livePermission(tx,actor,'account_security');
         const [before] =
           await tx`SELECT id, display_name AS "displayName", login_account_id AS "loginAccountId", active, version, job_title AS "jobTitle", start_date::text AS "startDate", end_date::text AS "endDate", employment_status AS "employmentStatus" FROM studio_os.members WHERE id = ${id} FOR UPDATE`;
