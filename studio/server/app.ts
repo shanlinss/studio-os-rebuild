@@ -1,3 +1,4 @@
+import {AccountPermissions,requirePermission} from './permissions';
 import {Warehouse} from './warehouse';
 import {Equipment} from './equipment';
 import {AccountLifecycle} from './account-lifecycle';
@@ -86,6 +87,7 @@ export async function createStudioApp(
   const observations = new OperationalObservations(database);
   const knowledge = new Knowledge(database);
   const accountAccess = new AccountAccess(database);
+  const accountPermissions = new AccountPermissions(database);
   const accountLifecycle = new AccountLifecycle(database);
   const equipment = new Equipment(database);
   const warehouse = new Warehouse(database);
@@ -1546,6 +1548,8 @@ export async function createStudioApp(
     accountPasswordReset(@Req() r: AuthRequest,@Param('id') id:string,@Body() body:unknown) { return accountLifecycle.save(r.identity!,body,id); }
     @Get('admin/account-operations/:key')
     accountOperation(@Req() r: AuthRequest,@Param('key') key:string) { return accountLifecycle.receipt(r.identity!,key); }
+    @Patch('admin/accounts/:id/permissions')
+    accountPermissionsEdit(@Req() r:AuthRequest,@Param('id') id:string,@Body() b:unknown){return accountPermissions.update(r.identity!,id,b);}
     @Patch('admin/accounts/:id')
     accountEdit(@Req() r: AuthRequest,@Param('id') id: string,@Body() body: unknown) { return accountAccess.update(r.identity!,id,body); }
     @Get('admin/accounts/:id/history')
@@ -1579,6 +1583,10 @@ export async function createStudioApp(
       }
       if (req.method === 'POST' && req.path === '/api/login') return true;
       await auth.authenticate(req);
+      if(req.path.startsWith('/api/admin/members')&&req.method!=='GET'&&req.body&&Object.hasOwn(req.body,'loginAccountId'))requirePermission(req.identity,'account_security');
+      if(req.path==='/api/finance'||req.path.startsWith('/api/finance/'))requirePermission(req.identity,'finance');
+      if(req.path==='/api/admin/accounts'||req.path.startsWith('/api/admin/accounts/')||req.path.startsWith('/api/admin/account-operations/'))requirePermission(req.identity,'account_security');
+      if(req.method==='PATCH'&&/^\/api\/admin\/accounts\/[^/]+\/permissions$/.test(req.path)){auth.csrf(req);return true;}
       if (
         req.method === 'GET' &&
         ['/api/session', '/api/navigation'].includes(req.path)

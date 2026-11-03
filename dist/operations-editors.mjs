@@ -1,3 +1,4 @@
+import {sensitivePermissions} from './admin-permissions.mjs';
 import {ContractError,chinaDate} from './cloud-contract.mjs';
 import {money,cents} from './management-model.mjs';
 
@@ -34,8 +35,12 @@ export function createOperationsEditors({api,h,mount,input,area,select}){
   mount('关联成员登录账号',`<p>${h(row.displayName)}</p>`+select('loginAccountId','已有登录账号','',[['','请选择'],...available.map(a=>[a.id,a.username+' · '+(a.role==='admin'?'管理员':'员工')])])+'<p class="muted">关联后，该账号按原权限访问此成员的工作。已有绑定不会被替换，也不修改账号角色或密码。</p>',f=>api.linkMemberLogin(id,f.get('loginAccountId'),row.version),{kind:'directory'});
  }
  async function accountAccess(id){
-  const row=(await api.loginAccounts()).find(a=>a.id===id);if(!row)throw new ContractError('原登录账号暂不可见。');
-  mount('维护登录权限',`<p>${h(row.username)}</p>`+select('role','账号角色',row.role,[['employee','员工'],['admin','管理员']])+stateSelect(row)+'<p class="muted">权限或状态变化后，该账号需要重新登录。此处不修改密码或成员绑定。</p>',f=>api.updateAccountAccess(id,{role:f.get('role'),active:f.get('active')==='true'},row.version),{kind:'directory'});
+  const current=await api.session(),row=(await api.loginAccounts()).find(a=>a.id===id);if(!row)throw new ContractError('原登录账号暂不可见。');
+  mount('维护登录权限',`<p>${h(row.username)}</p>`+select('role','账号角色',row.role,(current.superadmin?[['employee','员工'],['admin','管理员']]:[['employee','员工']]))+stateSelect(row)+'<p class="muted">权限或状态变化后，该账号需要重新登录。此处不修改密码或成员绑定。</p>',f=>api.updateAccountAccess(id,{role:f.get('role'),active:f.get('active')==='true'},row.version),{kind:'directory'});
+ }
+ async function accountPermissions(id){
+  const [current,rows]=await Promise.all([api.session(),api.loginAccounts()]);const row=rows.find(a=>a.id===id);if(!current.superadmin||!row||row.role!=='admin'||!row.active||row.id===current.id)throw new ContractError('只能由超级管理员调整其他有效管理员的授权。');
+  mount('管理员敏感授权',`<p>${h(row.username)}</p><fieldset class="material-picker"><legend>独立授权</legend>${Object.entries(sensitivePermissions).map(([key,label])=>`<label><input type="checkbox" name="permissions" value="${key}" ${(row.permissions||[]).includes(key)?'checked':''}>${h(label)}</label>`).join('')}<label><input type="checkbox" name="superadmin" ${row.superadmin?'checked':''}>超级管理员（拥有全部已实现管理权限及授权能力）</label></fieldset>`+area('reason','授权变更原因（必填）')+'<p class="muted">保存后目标账号的已有登录失效。人员、资源及业务数据范围的细分授权仍待补充。</p>',f=>api.updateAccountPermissions(id,{permissions:f.getAll('permissions'),superadmin:f.get('superadmin')==='on',reason:f.get('reason')},row.version),{kind:'directory'});
  }
  async function equipment(action,id,shootingId=null){
   let row=null,body='',operation=action;const key=crypto.randomUUID();
@@ -82,5 +87,5 @@ export function createOperationsEditors({api,h,mount,input,area,select}){
   const data=await api.finance(),row=data.settlements.find(s=>s.id===id);if(!row||cents(row.remainingCents)===0n)throw new ContractError('这张结算没有待登记的报销余额。');const key=crypto.randomUUID();
   mount('登记已发生的报销',`<p>${h(row.payerName)} · 当前尚未结清 ${h(money(row.remainingCents))}</p>`+input('amount','本次实际报销金额（元）','','required inputmode="decimal"')+input('paidDate','实际报销日期',chinaDate(),'required type="date"')+area('note','报销说明')+'<p class="muted">仅记录已经发生的报销，支持部分报销。本操作不执行银行付款。</p>',f=>api.recordPayment({settlementId:id,requestKey:key,amount:f.get('amount').trim(),paidDate:f.get('paidDate'),note:f.get('note')},row.version),{kind:'finance'},async()=>{const fresh=await api.finance();return fresh.payments.find(p=>p.requestKey===key)||null;});
  }
- return {nextRound,experimentProduct,directory,memberLogin,accountAccess,equipment,expense,category,removeExpenseReceipt,settlement,payment};
+ return {nextRound,experimentProduct,directory,memberLogin,accountAccess,accountPermissions,equipment,expense,category,removeExpenseReceipt,settlement,payment};
 }

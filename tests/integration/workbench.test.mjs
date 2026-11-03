@@ -24,15 +24,15 @@ before(async()=>{
  for(const [i,role]of ['admin','employee','employee'].entries()){
   const username='isolated_'+randomBytes(6).toString('hex'),password=randomBytes(24).toString('hex');
   const [u]=await db.client`INSERT INTO studio_os.accounts(username,password_hash,role) VALUES(${username},${await hashPassword(password)},${role}) RETURNING id`;
-  accounts.push(u.id);sessions.push(await auth.login(username,password,'local-test-'+i));
+  accounts.push(u.id);const token=randomBytes(32).toString('hex'),csrf=randomBytes(32).toString('hex');await db.client`INSERT INTO studio_os.sessions(token_hash,account_id,csrf_token,expires_at) VALUES(${createHash('sha256').update(token).digest('hex')},${u.id},${csrf},now()+interval '8 hours')`;sessions.push({token,csrf,user:{id:u.id,username,role}});
  }
  const {requestKey,...row}=legacy,hash=createHash('sha256').update(JSON.stringify(row)).digest('hex');
  [legacyId]=await db.client`INSERT INTO studio_os.personal_todos(owner_id,request_key,request_hash,title,task_type,priority,status,notes) VALUES(${accounts[1]},${requestKey},${hash},${row.title},${row.taskType},${row.priority},${row.status},${row.notes}) RETURNING id`;
- upgrade=await migrate(db);app=await createStudioApp(db,path.resolve('dist'),{diagnosticSink:()=>{}});await app.listen(0,'127.0.0.1');base=await app.getUrl();
+ upgrade=await migrate(db);assert.equal((await db.client`SELECT count(*)::int AS n FROM studio_os.accounts WHERE superadmin`)[0].n,0);assert.deepEqual((await db.client`SELECT admin_permissions FROM studio_os.accounts WHERE id=${accounts[0]}`)[0].admin_permissions,['finance','account_security']);app=await createStudioApp(db,path.resolve('dist'),{diagnosticSink:()=>{}});await app.listen(0,'127.0.0.1');base=await app.getUrl();
 });
 after(async()=>{if(app)await app.close();if(local)await local.stop();});
 test('append-only migration preserves 33 existing checksums, old request replays and unknown historical dates',async()=>{
- assert.deepEqual(upgrade,{applied:7,total:40});assert.deepEqual(await migrate(db),{applied:0,total:40});
+ assert.deepEqual(upgrade,{applied:8,total:41});assert.deepEqual(await migrate(db),{applied:0,total:41});
  const a=sessions[1],list=await json(a,'/workbench/todos'),row=list.find(r=>r.id===legacyId.id);
  assert.equal(row.plannedOn,null);assert.equal(row.dueAt,null);assert.equal(row.completedAt,null);assert.equal(row.version,1);
  assert.equal((await json(a,'/workbench/todos','POST',legacy)).id,legacyId.id);

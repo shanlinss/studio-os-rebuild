@@ -96,7 +96,7 @@ export async function checkReadiness(
     await tx`SELECT id,settlement_id,payer_id,amount_cents,paid_date,note,request_key,request_hash FROM expense_reimbursements LIMIT 0`;
     await tx`SELECT entity_type,entity_id,actor_id,action,detail FROM expense_events LIMIT 0`;
     // Test the actual columns required by authentication, not only table names.
-    await tx`SELECT id, username, password_hash, role, active, version FROM accounts LIMIT 0`;
+    await tx`SELECT id, username, password_hash, role, active, version, superadmin, admin_permissions FROM accounts LIMIT 0`;
     await tx`SELECT id,asset_tag,name,keeper_member_id,location,status,version FROM equipment_assets LIMIT 0`;
     await tx`SELECT id,equipment_id,owner_id,returned_at,return_condition,return_location,version FROM equipment_loans LIMIT 0`;
     await tx`SELECT id,equipment_id,actor_id,action,before_value,after_value FROM equipment_events LIMIT 0`;
@@ -110,6 +110,7 @@ export async function checkReadiness(
     await tx`SELECT token_hash, account_id, csrf_token, expires_at FROM sessions LIMIT 0`;
     await tx`SELECT id,account_id,actor_id,before_value,after_value,created_at FROM account_access_events LIMIT 0`;
     await tx`SELECT actor_id,account_id,request_key,action,metadata_hash,reason,before_value,after_value,result FROM account_lifecycle_events LIMIT 0`;
+    await tx`SELECT account_id,actor_id,reason,before_value,after_value FROM account_permission_events LIMIT 0`;
     await tx`SELECT key, attempts, reset_at FROM login_limits LIMIT 0`;
     await tx`SELECT id, name, active, version, created_at, updated_at FROM stores LIMIT 0`;
     await tx`SELECT store_id, actor_id, action, before_value, after_value FROM store_events LIMIT 0`;

@@ -16,7 +16,7 @@ before(async()=>{
  local=await startLocalDatabase();db=local.db;await migrate(db);const auth=new Authentication(db);
  for(const [i,role] of ['admin','employee','admin'].entries()){
   const username='warehouse_'+randomBytes(6).toString('hex'),password=randomBytes(24).toString('hex');const [u]=await db.client`INSERT INTO studio_os.accounts(username,password_hash,role) VALUES(${username},${await hashPassword(password)},${role}) RETURNING id`;
-  await db.client`INSERT INTO studio_os.members(display_name,login_account_id) VALUES(${'仓库隔离成员 '+i},${u.id})`;sessions.push(await auth.login(username,password,'warehouse-local-'+i));
+  await db.client`INSERT INTO studio_os.members(display_name,login_account_id) VALUES(${'仓库隔离成员 '+i},${u.id})`;if(role==='admin')await db.client`UPDATE studio_os.accounts SET superadmin=true WHERE id=${u.id}`;sessions.push(await auth.login(username,password,'warehouse-local-'+i));
  }
  app=await createStudioApp(db,undefined,{diagnosticSink:()=>{}});await app.listen(0,'127.0.0.1');base=await app.getUrl();
  for(const s of sessions){const api=createCloudApi((path,options)=>{const headers=new Headers(options?.headers);headers.set('Cookie','studio_session='+s.token);headers.set('Origin',base);return fetch(base+path,{...options,headers});},{allowWrites:true});await api.session();clients.push(api);}

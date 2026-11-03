@@ -1,3 +1,4 @@
+import {hasPermission,requirePermission} from './permissions';
 import {
   ForbiddenException,
   NotFoundException,
@@ -101,6 +102,7 @@ function knownIdentity(
 }
 function accessibleSection(identity: Identity | undefined, id: string) {
   knownIdentity(identity);
+  if(id==='finance')requirePermission(identity,'finance');
   const section = sections.find((section) => section.id === id);
   if (!section) throw new NotFoundException();
   if (section.management && identity.role !== 'admin')
@@ -110,7 +112,7 @@ function accessibleSection(identity: Identity | undefined, id: string) {
 export function navigationFor(identity: Identity | undefined) {
   knownIdentity(identity);
   return sections
-    .filter((section) => !section.management || identity.role === 'admin')
+    .filter((section) => (!section.management || identity.role === 'admin')&&(section.id!=='finance'||hasPermission(identity,'finance')))
     .map(({ id, title }) => ({ id, title }));
 }
 export function sectionFor(identity: Identity | undefined, id: string) {
@@ -122,7 +124,7 @@ export function sectionFor(identity: Identity | undefined, id: string) {
     secondary: section.pages
       .filter((page) => !page.management || identity!.role === 'admin')
       .map(({ id, title, state }) => ({ id, title, ...(state ? { state } : {}) })),
-    groups: section.groups ?? [],
+    groups: (section.groups ?? []).filter(g=>g!=='用户与角色权限'||hasPermission(identity,'account_security')),
   };
 }
 export function pageFor(

@@ -15,8 +15,9 @@ let app,webRoot,stopping=false;
 const stop=async()=>{if(stopping)return;stopping=true;if(app)await app.close();await local.stop();if(webRoot)await rm(webRoot,{recursive:true,force:true});};
 try{
  await migrate(db);
- for(const [username,name,role]of [['local_admin','隔离管理员','admin'],['local_employee_a','隔离员工 A','employee'],['local_employee_b','隔离员工 B','employee']]){
+ for(const [username,name,role]of [['local_admin','隔离管理员','admin'],['local_manager','隔离业务管理员','admin'],['local_employee_a','隔离员工 A','employee'],['local_employee_b','隔离员工 B','employee']]){
   const [u]=await db.client`INSERT INTO studio_os.accounts(username,password_hash,role) VALUES(${username},${await hashPassword(localTestPassword)},${role}) RETURNING id`;
+  if(username==='local_admin')await db.client`UPDATE studio_os.accounts SET superadmin=true WHERE id=${u.id}`;
   const [m]=await db.client`INSERT INTO studio_os.members(display_name,login_account_id) VALUES(${name},${u.id}) RETURNING id`;
   await db.client`INSERT INTO studio_os.business_accounts(name,responsible_member_id) VALUES(${'隔离账号 · '+name},${m.id})`;
   if(role==='admin')await new Materials(db).save({id:u.id,username,role},{title:'隔离参考素材：封面表达',sourceUrl:'https://example.com/reference',metadata:{notes:'仅供本机验证，不是真实业务资料。',tags:['隔离验证']},storeIds:[]});
@@ -26,6 +27,6 @@ try{
  const index=path.join(webRoot,'index.html');await writeFile(index,(await readFile(index,'utf8')).replace('name="studio-data-mode" content="prototype"','name="studio-data-mode" content="cloud-connected"'));
  app=await createStudioApp(db,webRoot,{diagnosticSink:()=>{}});await app.listen(4178,'127.0.0.1');
  console.log('Disposable integrated preview: http://127.0.0.1:4178/');
- console.log('Test-only login: local_admin / local_employee_a / local_employee_b; password is the public localTestPassword in dev/integrated-preview.mjs.');
+ console.log('Test-only login: local_admin / local_manager / local_employee_a / local_employee_b; password is the public localTestPassword in dev/integrated-preview.mjs.');
  for(const signal of ['SIGINT','SIGTERM'])process.once(signal,()=>{void stop().catch(()=>{process.exitCode=1;});});
 }catch(error){await stop();throw error;}

@@ -1,3 +1,4 @@
+import {livePermission} from './permissions';
 import {
   BadRequestException,
   ConflictException,
@@ -47,6 +48,7 @@ export class Members {
         : uuid(body.loginAccountId);
     try {
       return await this.db.client.begin(async (tx) => {
+        if(login)await livePermission(tx,actor,'account_security');
         if (login) {
           const [account] =
             await tx`SELECT id FROM studio_os.accounts WHERE id = ${login} AND active FOR SHARE`;
@@ -89,6 +91,7 @@ export class Members {
       body.loginAccountId !== undefined ? uuid(body.loginAccountId) : undefined;
     try {
       return await this.db.client.begin(async (tx) => {
+        if(login)await livePermission(tx,actor,'account_security');
         const [before] =
           await tx`SELECT id, display_name AS "displayName", login_account_id AS "loginAccountId", active, version, job_title AS "jobTitle", start_date::text AS "startDate", employment_status AS "employmentStatus" FROM studio_os.members WHERE id = ${id} FOR UPDATE`;
         if (!before) throw new NotFoundException();

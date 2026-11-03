@@ -1,4 +1,5 @@
 import { createHash, randomBytes } from 'node:crypto';
+import {databaseIdentity} from './permissions';
 import { hashPassword, verifyPassword } from './password';
 export { hashPassword } from './password';
 import {
@@ -13,6 +14,8 @@ export type Identity = {
   id: string;
   username: string;
   role: 'admin' | 'employee';
+  superadmin?: boolean;
+  permissions?: string[];
 };
 export type AuthRequest = Request & {
   identity?: Identity;
@@ -68,7 +71,7 @@ export class Authentication {
     const current = await this.db.client.begin(async tx => {
       // Verification is expensive and happens outside the lock. Recheck under a
       // shared account lock so a concurrent reset cannot leave an old-password session.
-      const [row] = await tx`SELECT id,username,role,active,password_hash FROM studio_os.accounts WHERE id=${account.id} FOR SHARE`;
+      const [row] = await tx`SELECT id,username,role,active,password_hash,superadmin,admin_permissions FROM studio_os.accounts WHERE id=${account.id} FOR SHARE`;
       if (!row?.active || row.password_hash !== verifiedHash)
         throw new UnauthorizedException('Invalid credentials');
       await tx`INSERT INTO studio_os.sessions (token_hash, account_id, csrf_token, expires_at)
@@ -78,7 +81,7 @@ export class Authentication {
     return {
       token,
       csrf,
-      user: { id: current.id, username: current.username, role: current.role },
+      user: databaseIdentity(current),
     };
   }
   async authenticate(req: AuthRequest) {
@@ -90,11 +93,11 @@ export class Authentication {
     const value = token[0].slice('studio_session='.length);
     if (!/^[a-f0-9]{64}$/.test(value)) throw new UnauthorizedException();
     const [row] = await this.db
-      .client`SELECT a.id, a.username, a.role, s.csrf_token FROM studio_os.sessions s
+      .client`SELECT a.id, a.username, a.role, a.superadmin, a.admin_permissions, s.csrf_token FROM studio_os.sessions s
       JOIN studio_os.accounts a ON a.id = s.account_id
       WHERE s.token_hash = ${digest(value)} AND s.expires_at > now() AND a.active = true`;
     if (!row) throw new UnauthorizedException();
-    req.identity = { id: row.id, username: row.username, role: row.role };
+    req.identity = databaseIdentity(row);
     req.csrf = row.csrf_token;
     req.tokenHash = digest(value);
   }

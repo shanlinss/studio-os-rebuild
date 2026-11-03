@@ -67,3 +67,5 @@ id、variant、observedAt（北京时间）、window、url、note、metrics（na
 039：warehouse_sample_links 固定一个原样品的来源库存项目与规格/单位；warehouse_sample_transfers 只记录原出库、原样品入库事件的双向标识、数量及双方前后值/快照。两表禁止改写删除。余额仍由 warehouse_items.quantity 与 shooting_samples.available_quantity 承载，没有第三套库存；借还不回增产品数量。
 
 040：account_lifecycle_events 记录原账号创建/重置密码的操作者、请求标识、非敏感元信息校验、原因、前后公开值和安全回执，禁止改写。密码及密码指纹不进入审计/回执；原 accounts.password_hash 是凭证存储。成员仍用 members.login_account_id，账号创建与可选绑定同一事务完成；重置不改变角色、启停或成员关联。
+
+041：accounts 追加 superadmin 和 admin_permissions，角色仍为原 admin/employee；权限名称仅含已实现的 finance 与 account_security。account_permission_events 为不可改写的权限前后值/原因/操作者记录。新账号默认无敏感授权；旧管理员迁移显式保留原访问，不自动授予超级管理员。授权/账号状态变化与原 sessions 撤销共用账号管理事务锁。

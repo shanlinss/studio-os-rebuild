@@ -1,3 +1,4 @@
+import {permissionPayload} from './admin-permissions.mjs';
 import {accountLifecyclePayload,accountLifecycleResult} from './account-lifecycle-contract.mjs';
 import {warehouseItem,warehouseCatalog,warehouseMovement,warehouseHistory,warehousePayload,warehousePath,sampleTargetPage,sampleTransferPayload,sampleTransferPage} from './warehouse-contract.mjs';
 import {equipmentRecord,equipmentPage,equipmentPayload,equipmentPath} from './equipment-contract.mjs';
@@ -18,7 +19,7 @@ const record = v => v!==null&&typeof v==='object'&&!Array.isArray(v);
 const string = v => typeof v==='string';
 const number = v => typeof v==='number'&&Number.isFinite(v);
 function list(value){if(!Array.isArray(value))throw new ContractError();return value;}
-function identity(v){if(!record(v)||!string(v.id)||!string(v.username)||!['admin','employee'].includes(v.role))throw new ContractError();return {id:v.id,username:v.username,role:v.role};}
+function identity(v){if(!record(v)||!string(v.id)||!string(v.username)||!['admin','employee'].includes(v.role))throw new ContractError();const out={id:v.id,username:v.username,role:v.role};if(Object.hasOwn(v,'superadmin')){if(typeof v.superadmin!=='boolean')throw new ContractError();out.superadmin=v.superadmin;}if(Object.hasOwn(v,'permissions')){if(!Array.isArray(v.permissions)||v.permissions.some(p=>!['finance','account_security'].includes(p)))throw new ContractError();out.permissions=[...v.permissions];}return out;}
 function base(v){if(!record(v)||!string(v.id)||!string(v.title))throw new ContractError();return v;}
 function endpointId(id){if(!/^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/.test(id))throw new ContractError('记录标识格式无效。');return id;}
 export function materialModel(raw){
@@ -87,6 +88,7 @@ export function createCloudApi(fetcher=globalThis.fetch,{allowWrites=false}={}){
     async linkMemberLogin(id,login,version){return mutations.send('/api/admin/members/'+endpointId(id),'PATCH',{loginAccountId:endpointId(login),expectedVersion:expectedVersion(version)});},
     async accountLifecycle(id,value,version){const path=id?'/api/admin/accounts/'+endpointId(id)+'/password-reset':'/api/admin/accounts';return mutations.send(path,'POST',accountLifecyclePayload(value,version));},
     async accountOperation(key,action,id){const path=id?'/api/admin/accounts/'+endpointId(id)+'/password-reset':'/api/admin/accounts';try{const result=accountLifecycleResult(await get('/api/admin/account-operations/'+endpointId(key)),action,id);mutations.confirmRead(path);return result;}catch(e){if(e.status===404){mutations.confirmRead(path);return null;}throw e;}},
+    async updateAccountPermissions(id,value,version){return mutations.send('/api/admin/accounts/'+endpointId(id)+'/permissions','PATCH',permissionPayload(value,version));},
     async updateAccountAccess(id,value,version){return mutations.send('/api/admin/accounts/'+endpointId(id),'PATCH',accountAccessPayload(value,version));},
     async accountAccessHistory(id,signal){return read('/api/admin/accounts/'+endpointId(id)+'/history',signal,v=>{if(!Array.isArray(v)||v.some(e=>!record(e)||typeof e.actor!=='string'||!record(e.beforeValue)||!record(e.afterValue)||!Number.isFinite(Date.parse(e.createdAt))))throw new ContractError();return v;});},
     async saveDirectory(kind,id,value,version){const route={member:'members',account:'business-accounts',store:'stores'}[kind];if(!route)throw new ContractError();return mutations.send('/api/admin/'+route+(id?'/'+endpointId(id):''),id?'PATCH':'POST',directoryPayload(kind,value,version));},

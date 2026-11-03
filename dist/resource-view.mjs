@@ -1,3 +1,4 @@
+import {hasSensitive} from './admin-permissions.mjs';
 import {renderKnowledgeNavigation} from './knowledge-navigation.mjs';
 import {maskContact} from './resource-model.mjs';
 export const resourcePages=new Set(['templates','titles','tools','knowledge','learning','members','accounts','shops','profile']);
@@ -8,7 +9,7 @@ export function createResourceViews({api,h,heading,showPanel,source,localTime,no
  const tags=items=>`<div class="tag-list">${(items||[]).map(x=>`<span>${h(x)}</span>`).join('')}</div>`;
  const facts=pairs=>`<dl class="record-facts">${pairs.map(([label,v])=>`<div><dt>${h(label)}</dt><dd>${h(v??'未填写')}</dd></div>`).join('')}</dl>`;
  const disabled=label=>`<button class="secondary" disabled title="当前为云端只读预览">${h(label)}</button>`;
- let onOpen=null,onCopy=null,canMaintain=false;
+ let onOpen=null,onCopy=null,canMaintain=false,canLinkLogin=false;
  document.addEventListener('click',e=>{const open=e.target.closest('[data-resource-open]'),copy=e.target.closest('[data-title-copy]'),close=e.target.closest('[data-resource-close]');if(open)onOpen?.(open.dataset.resourceOpen);if(copy)onCopy?.(copy.dataset.titleCopy);if(close)$('#cloud-detail').close();});
  function templates(rows){
   $('#main').innerHTML=heading('模板库','找到可复用的结构，把已经验证过的做法留下来。')+`<section class="work-panel module-panel"><div class="module-toolbar"><label class="module-search">查找模板<input id="template-search" type="search" placeholder="名称、结构、产品或标签"></label><label>范围<select id="template-scope"><option value="active">在用模板</option><option value="all">全部模板</option><option value="archived">已归档</option></select></label>${disabled('＋ 新建模板')}</div><div class="material-grid" id="template-grid"></div></section>`;
@@ -34,7 +35,7 @@ export function createResourceViews({api,h,heading,showPanel,source,localTime,no
  }
  function members(rows){
   $('#main').innerHTML=heading('团队成员','了解每个人的分工，保持成员档案与登录身份的关联。')+`<section class="work-panel module-panel"><div class="module-toolbar"><label class="module-search">查找成员<input id="member-search" type="search" placeholder="姓名、岗位或在职状态"></label>${canMaintain?'<button class="primary" data-directory-kind="member">＋ 添加成员</button>':disabled('＋ 添加成员')}</div><div class="member-grid" id="member-grid"></div></section>`;
-  onOpen=id=>{const m=rows.find(r=>r.id===id);showPanel('成员资料',async()=>head(m.displayName)+(canMaintain?`<button class="secondary" data-directory-kind="member" data-directory-id="${h(m.id)}">编辑成员资料</button>${!m.loginAccountId?`<button class="secondary" data-member-login="${h(m.id)}">关联登录账号</button>`:''}`:'')+facts([['岗位',m.jobTitle],['入职日期',m.startDate],['在职状态',m.employmentStatus],['业务参与',m.active?'启用':'停用'],['登录关联',m.loginAccountId?'已关联':'未关联'],['登录状态',m.loginAccountId?(m.loginActive?'启用':'停用'):'未关联']])+`<p class="muted">成员业务状态与登录账号状态分别管理。本页不推断考勤、工资或绩效。</p>`);};
+  onOpen=id=>{const m=rows.find(r=>r.id===id);showPanel('成员资料',async()=>head(m.displayName)+(canMaintain?`<button class="secondary" data-directory-kind="member" data-directory-id="${h(m.id)}">编辑成员资料</button>${canLinkLogin&&!m.loginAccountId?`<button class="secondary" data-member-login="${h(m.id)}">关联登录账号</button>`:''}`:'')+facts([['岗位',m.jobTitle],['入职日期',m.startDate],['在职状态',m.employmentStatus],['业务参与',m.active?'启用':'停用'],['登录关联',m.loginAccountId?'已关联':'未关联'],['登录状态',m.loginAccountId?(m.loginActive?'启用':'停用'):'未关联']])+`<p class="muted">成员业务状态与登录账号状态分别管理。本页不推断考勤、工资或绩效。</p>`);};
   const render=()=>{const q=$('#member-search').value.trim().toLowerCase();$('#member-grid').innerHTML=rows.filter(m=>[m.displayName,m.jobTitle,m.employmentStatus].join(' ').toLowerCase().includes(q)).map(m=>`<button class="member-card" data-resource-open="${h(m.id)}"><span class="member-avatar">${h(m.displayName.slice(0,1))}</span><b>${h(m.displayName)}</b><p>${h(m.jobTitle||'岗位未填写')}</p><span class="type-tag">${h(m.employmentStatus||(m.active?'业务启用':'业务停用'))}</span><small>${m.loginAccountId?'已关联登录身份':'尚未关联登录身份'}</small></button>`).join('')||blank('没有符合条件的成员','请调整关键词。');};$('#member-search').oninput=render;render();
  }
  function accounts(rows){
@@ -45,7 +46,7 @@ export function createResourceViews({api,h,heading,showPanel,source,localTime,no
  function shops(rows){$('#main').innerHTML=heading('店铺资料','统一维护店铺基础档案，供产品与业务记录引用。')+`<section class="work-panel module-panel"><div class="module-toolbar"><span class="muted">${rows.length} 个店铺档案</span>${canMaintain?'<button class="primary" data-directory-kind="store">＋ 新建店铺</button>':disabled('＋ 新建店铺')}</div>${rows.map(s=>`<article class="account-row"><span class="account-symbol">店</span><span><b>${h(s.name)}</b><small>版本 ${h(s.version)}</small></span><span class="type-tag">${s.active?'启用':'停用'}</span>${canMaintain?`<button class="secondary" data-directory-kind="store" data-directory-id="${h(s.id)}">编辑店铺</button>`:''}</article>`).join('')||blank('暂无店铺资料','后续创建的店铺会由产品与财务共同引用。')}</section>`;}
  function profileView(profile,user){$('#main').innerHTML=heading('个人资料','查看本人的登录身份与成员基础资料。')+`<section class="work-panel planning-panel">${facts([['登录用户名',user.username],['角色',user.role==='admin'?'管理员':'员工'],['成员姓名',profile?.display_name||profile?.displayName||'尚未关联'],['岗位',profile?.job_title||profile?.jobTitle],['入职日期',profile?.start_date||profile?.startDate],['在职状态',profile?.employment_status||profile?.employmentStatus]])}<p class="muted">登录资料与成员档案按实际关联展示，不自动修改角色或账号状态。</p></section>`;}
  return {async render(page,signal,user,profile){
-  onOpen=null;onCopy=null;canMaintain=writable&&user.role==='admin';
+  onOpen=null;onCopy=null;canMaintain=writable&&user.role==='admin';canLinkLogin=canMaintain&&hasSensitive(user,'account_security');
   if(page==='templates'){const rows=await api.templates(signal);if(!signal.aborted)templates(rows);}
   if(page==='titles')await titles(signal);
   if(page==='tools'){const rows=await api.tools(signal);if(!signal.aborted)tools(rows);}

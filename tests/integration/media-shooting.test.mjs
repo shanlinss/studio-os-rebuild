@@ -18,7 +18,7 @@ before(async()=>{
  for(const [i,role]of ['admin','employee','employee','employee'].entries()){
   const username='media_'+randomBytes(6).toString('hex'),password=randomBytes(24).toString('hex');const [u]=await db.client`INSERT INTO studio_os.accounts(username,password_hash,role) VALUES(${username},${await hashPassword(password)},${role}) RETURNING id`;
   if(i<3){const [m]=await db.client`INSERT INTO studio_os.members(display_name,login_account_id) VALUES(${'隔离拍摄成员 '+i},${u.id}) RETURNING id`;members.push(m.id);}
-  sessions.push(await auth.login(username,password,'media-local-'+i));
+  if(role==='admin')await db.client`UPDATE studio_os.accounts SET superadmin=true WHERE id=${u.id}`;sessions.push(await auth.login(username,password,'media-local-'+i));
  }
  app=await createStudioApp(db,undefined,{diagnosticSink:()=>{}});await app.listen(0,'127.0.0.1');base=await app.getUrl();
  for(const s of sessions){const api=apiFor(s);await api.session();clients.push(api);}
@@ -215,12 +215,12 @@ test('account permissions reuse original identities, revoke sessions, and expose
  const api=clients[0];accessPassword=randomBytes(24).toString('hex');const username='access_'+randomBytes(6).toString('hex');
  [accessTarget]=await db.client`INSERT INTO studio_os.accounts(username,password_hash,role) VALUES(${username},${await hashPassword(accessPassword)},'employee') RETURNING id,username`;
  const auth=new Authentication(db),logged=await auth.login(username,accessPassword,'access-target');
- const before=(await api.loginAccounts()).find(a=>a.id===accessTarget.id);assert.equal(before.version,1);assert.deepEqual(Object.keys(before).sort(),['active','id','role','username','version']);
+ const before=(await api.loginAccounts()).find(a=>a.id===accessTarget.id);assert.equal(before.version,1);assert.deepEqual(Object.keys(before).sort(),['active','id','permissions','role','superadmin','username','version']);
  await assert.rejects(clients[1].updateAccountAccess(before.id,{role:'admin',active:true},before.version),e=>e.status===403);
  await api.updateAccountAccess(before.id,{role:'admin',active:true},before.version);
  assert.equal((await request(logged,'/session')).status,401);assert.equal((await db.client`SELECT count(*)::int AS n FROM studio_os.sessions WHERE account_id=${before.id}`)[0].n,0);
  const promoted=await auth.login(username,accessPassword,'access-promoted');assert.equal(promoted.user.role,'admin');accessAdmin=apiFor(promoted);await accessAdmin.session();
- const history=await api.accountAccessHistory(before.id);assert.equal(history.length,1);assert.equal(history[0].beforeValue.role,'employee');assert.equal(history[0].afterValue.role,'admin');assert.ok(!JSON.stringify(history).includes('password_hash'));assert.equal((await accessAdmin.loginAccounts()).find(a=>a.id===before.id).version,2);
+ const history=await api.accountAccessHistory(before.id);assert.equal(history.length,1);assert.equal(history[0].beforeValue.role,'employee');assert.equal(history[0].afterValue.role,'admin');assert.ok(!JSON.stringify(history).includes('password_hash'));assert.equal((await api.loginAccounts()).find(a=>a.id===before.id).version,2);await assert.rejects(accessAdmin.loginAccounts(),e=>e.status===403);
 });
 test('role updates reject stale values, unsupported fields and self-lockout; deactivation prevents login',async()=>{
  const api=clients[0],me=await api.session();
@@ -234,7 +234,7 @@ test('role updates reject stale values, unsupported fields and self-lockout; dea
 });
 test('concurrent administrator changes cannot let two admins revoke one another simultaneously',async()=>{
  const auth=new Authentication(db),people=[];
- for(let i=0;i<2;i++){const username='mutual_'+randomBytes(6).toString('hex'),password=randomBytes(24).toString('hex');const [user]=await db.client`INSERT INTO studio_os.accounts(username,password_hash,role) VALUES(${username},${await hashPassword(password)},'admin') RETURNING id`;people.push({user,session:await auth.login(username,password,'mutual-'+i)});}
+ for(let i=0;i<2;i++){const username='mutual_'+randomBytes(6).toString('hex'),password=randomBytes(24).toString('hex');const [user]=await db.client`INSERT INTO studio_os.accounts(username,password_hash,role,superadmin) VALUES(${username},${await hashPassword(password)},'admin',true) RETURNING id`;people.push({user,session:await auth.login(username,password,'mutual-'+i)});}
  const replies=await Promise.all(people.map((p,i)=>request(p.session,'/admin/accounts/'+people[1-i].user.id,'PATCH',{role:'employee',active:true,expectedVersion:1})));
  assert.equal(replies.filter(r=>r.status===200).length,1);assert.ok(replies.some(r=>[401,403].includes(r.status)));
  const survivors=await db.client`SELECT id FROM studio_os.accounts WHERE id IN (${people[0].user.id},${people[1].user.id}) AND role='admin' AND active`;assert.equal(survivors.length,1);

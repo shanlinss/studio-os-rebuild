@@ -1,3 +1,4 @@
+import {requirePermission,livePermission} from './permissions';
 // ExpenseLedgerPanel/service@b9576d0: real expenses, statements and recorded
 // reimbursements. First-party identities/private receipts replace platform APIs.
 import {
@@ -68,12 +69,7 @@ function expenseInput(value: unknown, editing: boolean) {
     key: editing ? null : uuid(b.requestKey),
   };
 }
-async function actor(tx: TransactionSql, identity: Identity) {
-  const [a] =
-    await tx`SELECT role,active FROM studio_os.accounts WHERE id=${identity.id} FOR SHARE`;
-  if (!a?.active) throw new UnauthorizedException();
-  if (a.role !== 'admin') throw new ForbiddenException();
-}
+async function actor(tx: TransactionSql, identity: Identity) {await livePermission(tx,identity.id,'finance');}
 async function mutableExpense(tx: TransactionSql, id: string, v: number) {
   const [row] =
     await tx`SELECT *,expense_date::text AS "businessDate" FROM studio_os.expense_records WHERE id=${id} FOR UPDATE`;
@@ -90,7 +86,7 @@ async function mutableExpense(tx: TransactionSql, id: string, v: number) {
 export class Finance {
   constructor(private readonly db: StudioDatabase) {}
   async list(identity: Identity) {
-    requireAdministrator(identity);
+    requirePermission(identity,'finance');
     return this.db.client.begin(async (tx) => {
       await tx`SET TRANSACTION ISOLATION LEVEL REPEATABLE READ READ ONLY`;
       const categories =
@@ -109,7 +105,7 @@ export class Finance {
     });
   }
   async category(identity: Identity, value: unknown, id?: string) {
-    requireAdministrator(identity);
+    requirePermission(identity,'finance');
     if (id) uuid(id);
     const b = objectInput(
         value,
@@ -140,7 +136,7 @@ export class Finance {
     }
   }
   async save(identity: Identity, value: unknown, id?: string) {
-    requireAdministrator(identity);
+    requirePermission(identity,'finance');
     if (id) uuid(id);
     const input = expenseInput(value, !!id),
       { date, description, cents, mode, payer, store, category, note, v, key } =
@@ -203,7 +199,7 @@ export class Finance {
     }
   }
   async remove(identity: Identity, id: string, value: unknown) {
-    requireAdministrator(identity);
+    requirePermission(identity,'finance');
     uuid(id);
     const b = objectInput(value, ['expectedVersion']),
       v = version(b.expectedVersion);
@@ -218,7 +214,7 @@ export class Finance {
     });
   }
   async settle(identity: Identity, value: unknown) {
-    requireAdministrator(identity);
+    requirePermission(identity,'finance');
     const b = objectInput(value, [
         'payerId',
         'startDate',
@@ -289,7 +285,7 @@ export class Finance {
     }
   }
   async pay(identity: Identity, value: unknown) {
-    requireAdministrator(identity);
+    requirePermission(identity,'finance');
     const b = objectInput(value, [
         'settlementId',
         'amount',
@@ -342,7 +338,7 @@ export class Finance {
     mime: unknown,
     expected: unknown,
   ) {
-    requireAdministrator(identity);
+    requirePermission(identity,'finance');
     uuid(id);
     if (typeof expected !== 'string' || !/^\d{1,10}$/.test(expected))
       throw new BadRequestException();
@@ -365,7 +361,7 @@ export class Finance {
     });
   }
   async file(identity: Identity, id: string, receiptId: string) {
-    requireAdministrator(identity);
+    requirePermission(identity,'finance');
     uuid(id);
     uuid(receiptId);
     const [file] = await this.db.client<
@@ -380,7 +376,7 @@ export class Finance {
     receiptId: string,
     value: unknown,
   ) {
-    requireAdministrator(identity);
+    requirePermission(identity,'finance');
     uuid(id);
     uuid(receiptId);
     const b = objectInput(value, ['expectedVersion']),
@@ -398,13 +394,13 @@ export class Finance {
     });
   }
   async audit(identity: Identity, id: string) {
-    requireAdministrator(identity);
+    requirePermission(identity,'finance');
     uuid(id);
     return this.db
       .client`SELECT e.id,e.entity_type AS "entityType",e.action,e.detail,e.created_at AS "createdAt",coalesce(m.display_name,a.username,'已停用账号') AS actor FROM studio_os.expense_events e LEFT JOIN studio_os.accounts a ON a.id=e.actor_id LEFT JOIN studio_os.members m ON m.login_account_id=a.id WHERE e.entity_id=${id} OR e.detail->>'expenseId'=${id} OR e.detail->>'settlementId'=${id} ORDER BY e.created_at DESC,e.id`;
   }
   async csv(identity: Identity, value: unknown) {
-    requireAdministrator(identity);
+    requirePermission(identity,'finance');
     const q = objectInput(value, [
         'month',
         'payerId',

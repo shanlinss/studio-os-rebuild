@@ -1,3 +1,4 @@
+import {requirePermission,databaseIdentity} from './permissions';
 import {BadRequestException,ConflictException,ForbiddenException,NotFoundException,UnauthorizedException} from '@nestjs/common';
 import {createHash} from 'node:crypto';
 import type {Identity} from './auth';
@@ -8,9 +9,9 @@ import {objectInput,uuid,version,longText} from './validation';
 const fields='id,username,role,active,version';
 export class AccountLifecycle {
  constructor(private readonly db:StudioDatabase){}
- async receipt(who:Identity,key:string){requireAdministrator(who);uuid(key);const [r]=await this.db.client`SELECT result FROM studio_os.account_lifecycle_events WHERE actor_id=${who.id} AND request_key=${key}`;if(!r)throw new NotFoundException();return r.result;}
+ async receipt(who:Identity,key:string){requirePermission(who,'account_security');uuid(key);const [r]=await this.db.client`SELECT result FROM studio_os.account_lifecycle_events WHERE actor_id=${who.id} AND request_key=${key}`;if(!r)throw new NotFoundException();return r.result;}
  async save(who:Identity,value:unknown,id?:string){
-  requireAdministrator(who);if(id)uuid(id);
+  requirePermission(who,'account_security');if(id)uuid(id);
   const keys=id?['requestKey','expectedVersion','password','reason']:['requestKey','username','role','password','memberId','memberVersion','reason'];
   const b=objectInput(value,keys);if(keys.some(k=>!Object.hasOwn(b,k)))throw new BadRequestException('请保留完整账号信息');
   const key=uuid(b.requestKey),reason=longText(b.reason,2000).trim();
@@ -27,18 +28,19 @@ export class AccountLifecycle {
   const encoded=await hashPassword(b.password);
   try{return await this.db.client.begin(async tx=>{
    await tx`SELECT pg_advisory_xact_lock(hashtextextended('studio-account-access',0))`;
-   const [actor]=await tx`SELECT role,active FROM studio_os.accounts WHERE id=${who.id} FOR UPDATE`;
-   if(!actor?.active)throw new UnauthorizedException();if(actor.role!=='admin')throw new ForbiddenException();
+   const [actor]=await tx`SELECT id,username,role,active,superadmin,admin_permissions FROM studio_os.accounts WHERE id=${who.id} FOR UPDATE`;
+   if(!actor?.active)throw new UnauthorizedException();requirePermission(databaseIdentity(actor),'account_security');
    const [old]=await tx`SELECT metadata_hash,result FROM studio_os.account_lifecycle_events WHERE actor_id=${who.id} AND request_key=${key}`;
    if(old){if(old.metadata_hash!==hash)throw new ConflictException('此保存标识已用于其他操作');return old.result;}
    let before:Record<string,unknown>={},after;
    if(id){
     if(id===who.id)throw new ConflictException('此入口用于重置其他成员的密码');
     const [target]=await tx`SELECT ${tx.unsafe(fields)} FROM studio_os.accounts WHERE id=${id} FOR UPDATE`;
-    if(!target)throw new NotFoundException();if(target.version!==expected)throw new ConflictException('账号已变化，请重新读取');before=target;
+    if(!target)throw new NotFoundException();if(target.role==='admin'&&!actor.superadmin)throw new ForbiddenException();if(target.version!==expected)throw new ConflictException('账号已变化，请重新读取');before=target;
     [after]=await tx`UPDATE studio_os.accounts SET password_hash=${encoded},version=version+1 WHERE id=${id} RETURNING ${tx.unsafe(fields)}`;
     await tx`DELETE FROM studio_os.sessions WHERE account_id=${id}`;
    }else{
+    if(b.role==='admin'&&!actor.superadmin)throw new ForbiddenException();
     let member;
     if(memberId){[member]=await tx`SELECT * FROM studio_os.members WHERE id=${memberId} FOR UPDATE`;if(!member)throw new NotFoundException();if(!member.active||member.login_account_id||member.version!==memberVersion)throw new ConflictException('成员已变化、已停用或已有登录关联');}
     [after]=await tx`INSERT INTO studio_os.accounts(username,password_hash,role) VALUES(${String(b.username)},${encoded},${String(b.role)}) RETURNING ${tx.unsafe(fields)}`;

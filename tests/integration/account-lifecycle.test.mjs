@@ -16,7 +16,7 @@ const reset=(extra={})=>({requestKey:randomUUID(),password:secret(),reason:'æˆå
 const readAccount=async id=>(await clients[0].loginAccounts()).find(r=>r.id===id);
 before(async()=>{
  local=await startLocalDatabase();db=local.db;await migrate(db);auth=new Authentication(db);
- for(const role of ['admin','employee','admin']){const username='life_'+randomBytes(6).toString('hex'),password=secret();const [u]=await db.client`INSERT INTO studio_os.accounts(username,password_hash,role) VALUES(${username},${await hashPassword(password)},${role}) RETURNING id`;sessions.push(await auth.login(username,password,'life-fixture'));}
+ for(const role of ['admin','employee','admin']){const username='life_'+randomBytes(6).toString('hex'),password=secret();const [u]=await db.client`INSERT INTO studio_os.accounts(username,password_hash,role) VALUES(${username},${await hashPassword(password)},${role}) RETURNING id`;if(role==='admin')await db.client`UPDATE studio_os.accounts SET superadmin=true WHERE id=${u.id}`;sessions.push(await auth.login(username,password,'life-fixture'));}
  app=await createStudioApp(db,undefined,{diagnosticSink:e=>diagnostics.push(e)});await app.listen(0,'127.0.0.1');base=await app.getUrl();
  for(const s of sessions){const api=createCloudApi((path,options)=>{const headers=new Headers(options?.headers);headers.set('Cookie','studio_session='+s.token);headers.set('Origin',base);return fetch(base+path,{...options,headers});},{allowWrites:true});await api.session();clients.push(api);}
  await checkReadiness(db);
