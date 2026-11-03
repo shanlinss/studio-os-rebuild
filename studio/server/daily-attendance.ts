@@ -18,8 +18,8 @@ function validPeriod(row:any,today:string){const start=row.adjusted_in||row.orig
 export async function startAttendanceAtLogin(tx:TransactionSql,who:Identity){
  if(who.role!=='employee')return;
  await lockOwner(tx,who.id);
- const [member]=await tx`SELECT id,active FROM studio_os.members WHERE login_account_id=${who.id} FOR SHARE`;if(!member?.active)return;
- const {stamp,today}=await clock(tx),{rows,open}=await records(tx,who.id,today);
+ const [member]=await tx`SELECT id,active,start_date::text AS "startDate",end_date::text AS "endDate" FROM studio_os.members WHERE login_account_id=${who.id} FOR SHARE`;if(!member?.active)return;
+ const {stamp,today}=await clock(tx);if((member.startDate&&today<member.startDate)||(member.endDate&&today>member.endDate))return;const {rows,open}=await records(tx,who.id,today);
  if(open.length||rows.length>1||(rows[0]&&!validPeriod(rows[0],today)))return;
  let period=rows[0];
  if(!period){
@@ -40,7 +40,8 @@ export class DailyAttendance {
    await lockOwner(tx,who.id);const {stamp,today}=await clock(tx);
    const base={today,serverNow:iso(stamp),status:'not-applicable',issue:null as string|null,period:null as any,late:null as boolean|null,insufficient:null as boolean|null,durationMinutes:null as number|null};
    const [account]=await tx`SELECT active,role FROM studio_os.accounts WHERE id=${who.id}`;if(!account?.active)throw new UnauthorizedException();if(account.role!=='employee')return base;
-   const [member]=await tx`SELECT active FROM studio_os.members WHERE login_account_id=${who.id}`;if(!member?.active)return {...base,status:'unavailable',issue:'member-unavailable'};
+   const [member]=await tx`SELECT active,start_date::text AS "startDate",end_date::text AS "endDate" FROM studio_os.members WHERE login_account_id=${who.id}`;if(!member?.active)return {...base,status:'unavailable',issue:'member-unavailable'};
+   if((member.startDate&&today<member.startDate)||(member.endDate&&today>member.endDate))return {...base,status:'unavailable',issue:'outside-employment'};
    const {rows,open}=await records(tx,who.id,today),row=rows.length===1?rows[0]:null;
    if(row)base.period={id:String(row.id),workDate:row.work_date,version:Number(row.version),inAt:iso(row.adjusted_in||row.original_in),outAt:iso(row.adjusted_out||row.original_out)};
    if(open.length)return {...base,status:'needs-review',issue:'previous-open'};
@@ -63,8 +64,8 @@ export class DailyAttendance {
    if(!(await tx`SELECT token_hash FROM studio_os.sessions WHERE token_hash=${tokenHash} AND account_id=${who.id} AND expires_at>clock_timestamp()`).length)throw new UnauthorizedException();
    const [old]=await tx`SELECT action,request_hash,result FROM studio_os.attendance_receipts WHERE actor_id=${who.id} AND request_key=${key}`;
    if(old){if(old.action!=='day-end'||old.request_hash!==hash)throw new ConflictException();await tx`DELETE FROM studio_os.sessions WHERE account_id=${who.id}`;return old.result;}
-   const [member]=await tx`SELECT active FROM studio_os.members WHERE login_account_id=${who.id} FOR SHARE`;if(!member?.active)throw new ConflictException();
-   const {stamp,today}=await clock(tx),{rows,open}=await records(tx,who.id,today);
+   const [member]=await tx`SELECT active,start_date::text AS "startDate",end_date::text AS "endDate" FROM studio_os.members WHERE login_account_id=${who.id} FOR SHARE`;if(!member?.active)throw new ConflictException();
+   const {stamp,today}=await clock(tx);if((member.startDate&&today<member.startDate)||(member.endDate&&today>member.endDate))throw new ConflictException('当前日期不在入离职适用期间，请先核对人员资料');const {rows,open}=await records(tx,who.id,today);
    if(open.length||rows.length!==1||!validPeriod(rows[0],today))throw new ConflictException('存在待核对的考勤记录');
    const [before]=await tx`SELECT * FROM studio_os.attendance_periods WHERE id=${id} AND owner_id=${who.id} AND kind='studio' FOR UPDATE`;if(!before)throw new NotFoundException();
    if(before.id!==rows[0].id||before.version!==expected||before.adjusted_out||before.original_out)throw new ConflictException();

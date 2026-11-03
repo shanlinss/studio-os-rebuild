@@ -1,3 +1,4 @@
+import {employmentPayload,adminReviewPayload,personnelHistory,adminReviewHistory} from './personnel-contract.mjs';
 import {confirmationDetail,confirmationHistory,confirmationPayload,exportable,exportPayload,readWorkbook} from './payroll-confirmation-contract.mjs';
 import {payrollState,payrollHistory,payrollPayload} from './payroll-contract.mjs';
 import {closureState,closureDetail,closureHistory,closurePayload} from './closure-contract.mjs';
@@ -157,6 +158,12 @@ export function createCloudApi(fetcher=globalThis.fetch,{allowWrites=false}={}){
     async sampleWrite(action,owner,value,version){return mutations.send(sampleOperationPath(action,owner),action==='relocate'?'PATCH':'POST',samplePayload(action,value,version));},
     async sampleReceipt(key,action,owner){const path=sampleOperationPath(action,owner);try{const result=await get('/api/samples/receipts/'+endpointId(key));if(!record(result)||typeof result.id!=='string')throw new ContractError();endpointId(result.id);mutations.confirmRead(path);return result;}catch(e){if(e.status===404){mutations.confirmRead(path);return null;}throw e;}},
     async samples(params={},signal){const q=new URLSearchParams({offset:String(params.offset??0),q:params.q??'',active:'all'});return pagedRows(await get('/api/samples/catalog?'+q,signal));},
+    async employmentSave(id,value){return mutations.send('/api/admin/members/'+endpointId(id)+'/employment','POST',employmentPayload(value));},
+    async employmentHistory(id,offset=0,signal){return read('/api/admin/members/'+endpointId(id)+'/history?offset='+String(offset),signal,personnelHistory);},
+    async employmentReceipt(key,id){try{const r=await get('/api/admin/employment-receipts/'+endpointId(key));if(r?.id!==id)throw new ContractError();mutations.confirmRead('/api/admin/members/'+id+'/employment');return r;}catch(e){if(e.status===404){mutations.confirmRead('/api/admin/members/'+id+'/employment');return null;}throw e;}},
+    async adminPayrollReviewSave(value){return mutations.send('/api/payroll/admin-reviews','POST',adminReviewPayload(value));},
+    async adminPayrollReviewHistory(month,memberId,offset=0,signal){const q=new URLSearchParams({month:validMonth(month),memberId:endpointId(memberId),offset:String(offset)});return read('/api/payroll/admin-reviews?'+q,signal,adminReviewHistory);},
+    async adminPayrollReviewReceipt(key){try{const r=await get('/api/payroll/admin-review-receipts/'+endpointId(key));endpointId(r?.id);mutations.confirmRead('/api/payroll/admin-reviews');return r;}catch(e){if(e.status===404){mutations.confirmRead('/api/payroll/admin-reviews');return null;}throw e;}},
     async payrollConfirmationSave(value){return mutations.send('/api/payroll/confirmations','POST',confirmationPayload(value));},
     async payrollConfirmationDetail(id,signal){return read('/api/payroll/confirmations/'+endpointId(id),signal,confirmationDetail);},
     async payrollConfirmationHistory(month,memberId,offset=0,signal){const q=new URLSearchParams({month:validMonth(month),memberId:endpointId(memberId),offset:String(offset)});return read('/api/payroll/confirmations?'+q,signal,confirmationHistory);},

@@ -3,7 +3,7 @@ const id=v=>{if(typeof v!=='string'||!/^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f
 const date=v=>typeof v==='string'&&/^\d{4}-\d{2}-\d{2}$/.test(v)&&Number.isFinite(Date.parse(v+'T00:00:00Z'))&&new Date(v+'T00:00:00Z').toISOString().slice(0,10)===v;
 const time=v=>typeof v==='string'&&Number.isFinite(Date.parse(v));
 export function dailyAttendanceState(v){
- if(!v||!date(v.today)||!time(v.serverNow)||!['not-applicable','unavailable','not-started','working','finished','needs-review'].includes(v.status)||![null,'member-unavailable','previous-open','multiple-periods','invalid-period'].includes(v.issue)||![true,false,null].includes(v.late)||![true,false,null].includes(v.insufficient)||(v.durationMinutes!==null&&(!Number.isSafeInteger(v.durationMinutes)||v.durationMinutes<0)))throw new ContractError('考勤状态不完整。');
+ if(!v||!date(v.today)||!time(v.serverNow)||!['not-applicable','unavailable','not-started','working','finished','needs-review'].includes(v.status)||![null,'member-unavailable','outside-employment','previous-open','multiple-periods','invalid-period'].includes(v.issue)||![true,false,null].includes(v.late)||![true,false,null].includes(v.insufficient)||(v.durationMinutes!==null&&(!Number.isSafeInteger(v.durationMinutes)||v.durationMinutes<0)))throw new ContractError('考勤状态不完整。');
  if(v.period!==null){const p=v.period;id(p.id);if(!date(p.workDate)||!Number.isSafeInteger(p.version)||p.version<1||(p.inAt!==null&&!time(p.inAt))||(p.outAt!==null&&!time(p.outAt)))throw new ContractError();}
  if(['working','finished'].includes(v.status)&&(!v.period||!v.period.inAt||v.period.workDate!==v.today||v.late===null||v.durationMinutes===null||(v.status==='working'?(v.period.outAt!==null||v.insufficient!==null):(!v.period.outAt||typeof v.insufficient!=='boolean'))))throw new ContractError('上下班状态与原记录不一致。');
  return v;
@@ -15,7 +15,7 @@ export function createDailyAttendanceCard({api,h,localTime,notify,writable,onSig
   if(!host||user.role!=='employee')return;
   const card=document.createElement('section');card.className='work-panel daily-attendance-card';card.setAttribute('aria-label','今日考勤');host.prepend(card);let saving=false,key=crypto.randomUUID(),state;
   const labels={'not-applicable':'无需考勤',unavailable:'暂不能生成考勤','not-started':'今日未上班',working:'工作中',finished:'已下班','needs-review':'待补正'};
-  const issues={'member-unavailable':'当前账号未关联有效成员，请联系管理员核对。','previous-open':'有前一天未结束的记录，需核对补正；不会自动延长或补写下班时间。','multiple-periods':'当天有多条历史记录，请联系管理员核对。','invalid-period':'原考勤时间需要核对，请联系管理员补正。'};
+  const issues={'outside-employment':'当前日期不在已登记在职期间，未自动登记打卡。请联系管理员核对适用日期。','member-unavailable':'当前账号未关联有效成员，请联系管理员核对。','previous-open':'有前一天未结束的记录，需核对补正；不会自动延长或补写下班时间。','multiple-periods':'当天有多条历史记录，请联系管理员核对。','invalid-period':'原考勤时间需要核对，请联系管理员补正。'};
   async function load(){
    if(signal.aborted||!card.isConnected)return;card.textContent='正在读取今日考勤…';
    try{state=await api.dailyAttendance(signal);if(signal.aborted||!card.isConnected)return;

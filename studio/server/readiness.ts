@@ -129,6 +129,11 @@ export async function checkReadiness(
     await tx`SELECT id,member_id,month,revision,previous_id,action,draft_id,snapshot,note,actor_id FROM payroll_confirmations LIMIT 0`;
     await tx`SELECT actor_id,request_key,request_hash,result FROM payroll_confirmation_receipts LIMIT 0`;
     await tx`SELECT id,actor_id,request_key,request_hash,month,payload,file_hash FROM payroll_exports LIMIT 0`;
+    await tx`SELECT end_date FROM members LIMIT 0`;
+    await tx`SELECT actor_id,request_key,request_hash,result FROM employment_date_receipts LIMIT 0`;
+    await tx`SELECT id,member_id,month,revision,source_hash,source_snapshot,note,actor_id FROM admin_payroll_reviews LIMIT 0`;
+    await tx`SELECT actor_id,request_key,request_hash,result FROM admin_payroll_review_receipts LIMIT 0`;
+    await tx`SELECT basis_kind,admin_review_id FROM payroll_drafts LIMIT 0`;
     await tx`SELECT key, attempts, reset_at FROM login_limits LIMIT 0`;
     await tx`SELECT id, name, active, version, created_at, updated_at FROM stores LIMIT 0`;
     await tx`SELECT store_id, actor_id, action, before_value, after_value FROM store_events LIMIT 0`;

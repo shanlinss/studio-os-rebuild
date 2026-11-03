@@ -1,0 +1,19 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import {randomUUID} from 'node:crypto';
+import {employmentPayload,adminReviewPayload} from '../dist/personnel-contract.mjs';
+import {payrollPayload,draftRecord,payrollState} from '../dist/payroll-contract.mjs';
+import {createCloudApi,ContractError} from '../dist/cloud-api.mjs';
+const id=randomUUID(),key=randomUUID(),dates={requestKey:key,expectedVersion:1,startDate:'2020-01-01',endDate:'2020-01-31',note:'核实最后在职日，包含当天'},review={requestKey:key,month:'2020-01',memberId:id,expectedReviewId:null,sourceHash:'a'.repeat(64),note:'核实管理员当月适用情况',confirmed:true};
+test('personnel date changes require consistent dates and an explanation without changing login roles',()=>{
+ assert.equal(employmentPayload(dates).endDate,'2020-01-31');for(const patch of [{startDate:null},{endDate:'2019-12-31'},{endDate:'2020-02-30'},{startDate:'0001-01-01'},{note:' '},{role:'admin'},{expectedVersion:0}])assert.throws(()=>employmentPayload({...dates,...patch}),ContractError);assert.equal(employmentPayload({...dates,endDate:null}).endDate,null);
+});
+test('administrator applicability review requires a stable source and explicit monthly acknowledgement',()=>{
+ assert.equal(adminReviewPayload(review).confirmed,true);for(const patch of [{sourceHash:'bad'},{expectedReviewId:'bad'},{confirmed:false},{note:' '},{month:'2020-99'},{normalAttendanceDays:31}])assert.throws(()=>adminReviewPayload({...review,...patch}),ContractError);
+});
+test('wage drafts carry either an attendance closure or an administrator review, without invented attendance data',()=>{
+ const v={requestKey:key,memberId:id,month:'2020-01',expectedLatestId:null,salaryId:randomUUID(),closureId:null,adminReviewId:randomUUID(),baseCents:100000,bonusCents:0,allowanceCents:0,adjustmentCents:0,note:'人工确认金额',confirmReviewed:true};assert.equal(payrollPayload(v).closureId,null);assert.throws(()=>payrollPayload({...v,adminReviewId:null}),ContractError);assert.throws(()=>payrollPayload({...v,closureId:randomUUID()}),ContractError);const d={id,member_id:id,month:'2020-01',revision:1,created_at:'2020-02-01T00:00:00Z',note:'人工确认',basis_kind:'admin-exempt',closure_id:null,admin_review_id:v.adminReviewId,salary_id:v.salaryId,base_cents:100000,bonus_cents:0,allowance_cents:0,adjustment_cents:0,total_cents:100000};assert.equal(draftRecord(d).basis_kind,'admin-exempt');const m={id,name:'管理员'},s={month:'2020-01',roster:[m],member:m,salary:null,draft:null,closure:null,attendanceValid:true,salaryChanged:false,attendanceChanged:false,locked:false,confirmationChanged:false,basisKind:'admin-exempt',basisHash:'a'.repeat(64),adminReview:{source_hash:'a'.repeat(64)}};assert.equal(payrollState(s).closure,null);assert.throws(()=>payrollState({...s,basisKind:'attendance'}),ContractError);
+});
+test('uncertain employment and exemption changes recover by private receipts and readonly builds never send them',async()=>{
+ let writes=0;const api=createCloudApi(async path=>{if(path==='/api/session')return Response.json({user:{id,username:'payroll',role:'admin',permissions:['payroll']},csrfToken:'a'.repeat(64)});if(path==='/api/admin/employment-receipts/'+key)return Response.json({id,version:2});if(path==='/api/payroll/admin-review-receipts/'+key)return Response.json({id,revision:1});writes++;throw Error('lost');},{allowWrites:true});await api.session();await assert.rejects(api.employmentSave(id,dates),e=>e.uncertain);await assert.rejects(api.employmentSave(id,dates),e=>e.status===409);assert.equal((await api.employmentReceipt(key,id)).version,2);await assert.rejects(api.adminPayrollReviewSave(review),e=>e.uncertain);assert.equal((await api.adminPayrollReviewReceipt(key)).id,id);assert.equal(writes,2);const readonly=createCloudApi(async()=>{throw Error('not reached');});await assert.rejects(readonly.employmentSave(id,dates),e=>e.status===405);await assert.rejects(readonly.adminPayrollReviewSave(review),e=>e.status===405);
+});

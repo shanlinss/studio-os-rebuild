@@ -91,3 +91,7 @@ id、variant、observedAt（北京时间）、window、url、note、metrics（na
 ## 工资确认与导出更新（2026-11-03）
 
 048追加payroll_confirmations（成员/月递增确认或重开事件、草稿引用及冻结依据）、payroll_confirmation_receipts和payroll_exports（原操作者范围、原快照及文件哈希，不可改写）。payroll_month_heads仅协调原草稿写入与确认竞争，在可重复读事务中确保最新版本判断；不形成另一份工资金额。导出从当次固定payload生成确定文件，原账号与考勤引用不变。
+
+## 人员与工资适用依据更新（2026-11-03）
+
+049追加原members.end_date（最后在职日含当天）、原identity_events不可改写保护及employment_date_receipts。admin_payroll_reviews保存明确当月适用快照及版本，回执另存。原payroll_drafts.closure_id可空，但basis_kind=attendance必须原closure_id且无admin_review_id；admin-exempt必须admin_review_id且无closure_id。复用原工资草稿，不造考勤或平行成员表。

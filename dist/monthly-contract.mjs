@@ -2,7 +2,7 @@ import {ContractError,validDate} from './cloud-contract.mjs';
 import {attendanceId,periodRecord} from './attendance-contract.mjs';
 import {pagedRows} from './management-model.mjs';
 export const calendarModes={default:'按默认周历',work:'调休工作日',rest:'休息日'};
-export const monthlyStates={future:'尚未到来','before-start':'入职前','needs-review':'记录待核对',finished:'已签退',working:'工作中','legacy-field':'历史外勤待核对','leave-review':'有批准请假，待核对出勤',rest:'休息日','not-started':'今日未开始','unverified-absence':'无记录，缺勤待核实'};
+export const monthlyStates={future:'尚未到来','before-start':'入职前','after-end':'最后在职日之后','needs-review':'记录待核对',finished:'已签退',working:'工作中','legacy-field':'历史外勤待核对','leave-review':'有批准请假，待核对出勤',rest:'休息日','not-started':'今日未开始','unverified-absence':'无记录，缺勤待核实'};
 export function validMonth(v){if(typeof v!=='string'||!/^\d{4}-\d\d$/.test(v)||!validDate(v+'-01')||v<'1900-01'||v>'2199-12')throw new ContractError('请选择有效月份。');return v;}
 const nonnegative=v=>{if(!Number.isSafeInteger(v)||v<0)throw new ContractError('月度记录不完整。');return v;};
 function day(d){if(!validDate(d.date)||typeof d.workday!=='boolean'||!Object.hasOwn(calendarModes,d.mode)||typeof d.note!=='string')throw new ContractError();nonnegative(d.version);return d;}
