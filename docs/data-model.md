@@ -87,3 +87,7 @@ id、variant、observedAt（北京时间）、window、url、note、metrics（na
 ## 薪资草稿更新（2026-11-03）
 
 047扩展account_permission_names允许payroll，不自动修改已有授权。salary_versions按原member追加生效月份、参考月薪整数分、全成员递增revision及原因/操作者；payroll_drafts按成员/月份追加revision、previous_id、原closure_id/salary_id、attendance_hash、四项人工金额与合计/说明；两表不可改写。payroll_receipts按原操作者/请求键记录回执。原账号、成员、DB连接和考勤继续共用。
+
+## 工资确认与导出更新（2026-11-03）
+
+048追加payroll_confirmations（成员/月递增确认或重开事件、草稿引用及冻结依据）、payroll_confirmation_receipts和payroll_exports（原操作者范围、原快照及文件哈希，不可改写）。payroll_month_heads仅协调原草稿写入与确认竞争，在可重复读事务中确保最新版本判断；不形成另一份工资金额。导出从当次固定payload生成确定文件，原账号与考勤引用不变。

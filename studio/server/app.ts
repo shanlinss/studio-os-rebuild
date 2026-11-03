@@ -1,3 +1,4 @@
+import {PayrollConfirmations} from './payroll-confirmations';
 import {Payroll} from './payroll';
 import {AttendanceClosures} from './attendance-closures';
 import {AttendanceMonthly} from './attendance-monthly';
@@ -80,6 +81,8 @@ export async function createStudioApp(
   const attendanceMonthly = new AttendanceMonthly(database);
   const attendanceClosures = new AttendanceClosures(database);
   const payroll = new Payroll(database);
+  const payrollConfirmations = new PayrollConfirmations(database);
+  const workbookResponse=(res:express.Response,file:any)=>res.set({'Content-Type':'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet','Content-Disposition':'attachment; filename="Studio-OS-payroll-'+file.month+'-'+file.id.slice(0,8)+'.xlsx"','Cache-Control':'no-store','X-Studio-Export-Id':file.id,'X-Studio-File-Hash':file.fileHash}).send(file.buffer);
   const samples = new ShootingSamples(database);
   const businessAccounts = new BusinessAccounts(database);
   const workflow = new Workflow(database);
@@ -364,6 +367,15 @@ export async function createStudioApp(
     @Post('samples/catalog/:id/borrow') samplesBorrow(@Req() r: AuthRequest,@Param('id') id: string,@Body() b: unknown) { return samples.borrow(r.identity!,id,b); }
     @Post('samples/loans/:id/return') samplesReturn(@Req() r: AuthRequest,@Param('id') id: string,@Body() b: unknown) { return samples.ownLoan(r.identity!,id,b); }
     @Patch('samples/loans/:id/location') samplesMove(@Req() r: AuthRequest,@Param('id') id: string,@Body() b: unknown) { return samples.ownLoan(r.identity!,id,b,true); }
+    @Get('payroll/confirmations') payrollConfirmationHistory(@Req() r:AuthRequest){return payrollConfirmations.history(r.identity!,r.query);}
+    @Get('payroll/confirmations/:id') payrollConfirmationDetail(@Req() r:AuthRequest,@Param('id') id:string){return payrollConfirmations.detail(r.identity!,id,r.query);}
+    @Post('payroll/confirmations') payrollConfirm(@Req() r:AuthRequest,@Body() b:unknown){return payrollConfirmations.save(r.identity!,b);}
+    @Get('payroll/confirmation-receipts/:key') payrollConfirmReceipt(@Req() r:AuthRequest,@Param('key') key:string){return payrollConfirmations.receipt(r.identity!,key);}
+    @Get('payroll/exportable') payrollExportable(@Req() r:AuthRequest){return payrollConfirmations.list(r.identity!,r.query);}
+    @Get('payroll/exports') payrollExportHistory(@Req() r:AuthRequest){return payrollConfirmations.exportHistory(r.identity!,r.query);}
+    @Post('payroll/exports') async payrollExport(@Req() r:AuthRequest,@Body() b:unknown,@Res() res:express.Response){return workbookResponse(res,await payrollConfirmations.export(r.identity!,b));}
+    @Get('payroll/exports/:id') async payrollExportFile(@Req() r:AuthRequest,@Param('id') id:string,@Res() res:express.Response){return workbookResponse(res,await payrollConfirmations.exportFile(r.identity!,id,r.query));}
+    @Get('payroll/export-receipts/:key') payrollExportReceipt(@Req() r:AuthRequest,@Param('key') key:string){return payrollConfirmations.exportReceipt(r.identity!,key);}
     @Get('payroll/state') payrollState(@Req() r:AuthRequest){return payroll.state(r.identity!,r.query);}
     @Get('payroll/salaries') salaryHistory(@Req() r:AuthRequest){return payroll.history(r.identity!,r.query,true);}
     @Post('payroll/salaries') salarySave(@Req() r:AuthRequest,@Body() b:unknown){return payroll.saveSalary(r.identity!,b);}
@@ -1680,7 +1692,7 @@ export async function createStudioApp(
         return true;
       }
       if(req.path.startsWith('/api/payroll/')){
-        requirePermission(req.identity,'payroll');const route=req.path.slice('/api/payroll/'.length);if(!((req.method==='GET'&&/^(state|salaries|drafts|receipts\/[^/]+)$/.test(route))||(req.method==='POST'&&/^(salaries|drafts)$/.test(route))))throw new ForbiddenException();if(req.method!=='GET')auth.csrf(req);return true;
+        requirePermission(req.identity,'payroll');const route=req.path.slice('/api/payroll/'.length);if(!((req.method==='GET'&&/^(state|salaries|drafts|confirmations(?:\/[^/]+)?|exportable|exports(?:\/[^/]+)?|(?:receipts|confirmation-receipts|export-receipts)\/[^/]+)$/.test(route))||(req.method==='POST'&&/^(salaries|drafts|confirmations|exports)$/.test(route))))throw new ForbiddenException();if(req.method!=='GET')auth.csrf(req);return true;
       }
       if (req.path.startsWith('/api/attendance/')) {
         requireContributor(req.identity);

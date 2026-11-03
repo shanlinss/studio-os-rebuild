@@ -1,3 +1,4 @@
+import {confirmationDetail,confirmationHistory,confirmationPayload,exportable,exportPayload,readWorkbook} from './payroll-confirmation-contract.mjs';
 import {payrollState,payrollHistory,payrollPayload} from './payroll-contract.mjs';
 import {closureState,closureDetail,closureHistory,closurePayload} from './closure-contract.mjs';
 import {validMonth,monthlyResult,calendarMonth,calendarHistory,calendarPayload} from './monthly-contract.mjs';
@@ -156,6 +157,15 @@ export function createCloudApi(fetcher=globalThis.fetch,{allowWrites=false}={}){
     async sampleWrite(action,owner,value,version){return mutations.send(sampleOperationPath(action,owner),action==='relocate'?'PATCH':'POST',samplePayload(action,value,version));},
     async sampleReceipt(key,action,owner){const path=sampleOperationPath(action,owner);try{const result=await get('/api/samples/receipts/'+endpointId(key));if(!record(result)||typeof result.id!=='string')throw new ContractError();endpointId(result.id);mutations.confirmRead(path);return result;}catch(e){if(e.status===404){mutations.confirmRead(path);return null;}throw e;}},
     async samples(params={},signal){const q=new URLSearchParams({offset:String(params.offset??0),q:params.q??'',active:'all'});return pagedRows(await get('/api/samples/catalog?'+q,signal));},
+    async payrollConfirmationSave(value){return mutations.send('/api/payroll/confirmations','POST',confirmationPayload(value));},
+    async payrollConfirmationDetail(id,signal){return read('/api/payroll/confirmations/'+endpointId(id),signal,confirmationDetail);},
+    async payrollConfirmationHistory(month,memberId,offset=0,signal){const q=new URLSearchParams({month:validMonth(month),memberId:endpointId(memberId),offset:String(offset)});return read('/api/payroll/confirmations?'+q,signal,confirmationHistory);},
+    async payrollConfirmationReceipt(key){try{const r=await get('/api/payroll/confirmation-receipts/'+endpointId(key));endpointId(r?.id);if(!Number.isSafeInteger(r.revision)||r.revision<1)throw new ContractError();mutations.confirmRead('/api/payroll/confirmations');return r;}catch(e){if(e.status===404){mutations.confirmRead('/api/payroll/confirmations');return null;}throw e;}},
+    async payrollExportable(month,signal){return read('/api/payroll/exportable?month='+validMonth(month),signal,exportable);},
+    async payrollExportHistory(month,offset=0,signal){const q=new URLSearchParams({month:validMonth(month),offset:String(offset)});return read('/api/payroll/exports?'+q,signal,v=>{pagedRows(v);for(const r of v.rows){endpointId(r.id);if(!Array.isArray(r.names)||r.names.some(n=>typeof n!=='string'))throw new ContractError();}return v;});},
+    async payrollExport(value){return mutations.send('/api/payroll/exports','POST',exportPayload(value),{responseType:'workbook'});},
+    async payrollExportReceipt(key){try{const r=await get('/api/payroll/export-receipts/'+endpointId(key));endpointId(r?.id);validMonth(r.month);mutations.confirmRead('/api/payroll/exports');return r;}catch(e){if(e.status===404){mutations.confirmRead('/api/payroll/exports');return null;}throw e;}},
+    async payrollExportFile(id,signal){if(!allowWrites)throw new ApiError(405,'只读预览不提供私人导出文件。');return readWorkbook(await fetcher('/api/payroll/exports/'+endpointId(id),{credentials:'same-origin',cache:'no-store',redirect:'error',signal}));},
     async payrollState(month,memberId,signal){const q=new URLSearchParams({month:validMonth(month)});if(memberId)q.set('memberId',endpointId(memberId));return read('/api/payroll/state?'+q,signal,payrollState);},
     async payrollHistory(month,memberId,offset=0,salaries=false,signal){const q=new URLSearchParams({memberId:endpointId(memberId),offset:String(offset)});if(!salaries)q.set('month',validMonth(month));return read('/api/payroll/'+(salaries?'salaries':'drafts')+'?'+q,signal,v=>payrollHistory(v,salaries));},
     async payrollSave(value,salaries=false){return mutations.send('/api/payroll/'+(salaries?'salaries':'drafts'),'POST',payrollPayload(value,salaries));},
