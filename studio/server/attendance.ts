@@ -1,4 +1,5 @@
-import { BadRequestException, ConflictException, NotFoundException } from '@nestjs/common';
+import {publicValue,lockOwner,audit} from './attendance-support';
+import { BadRequestException, ConflictException, NotFoundException, ForbiddenException, UnauthorizedException } from '@nestjs/common';
 import { createHash } from 'node:crypto';
 import type { TransactionSql } from 'postgres';
 import type { Identity } from './auth';
@@ -6,19 +7,6 @@ import type { StudioDatabase } from './database';
 import { requireAdministrator, requireContributor } from './access';
 import { objectInput, longText, optionalLongText, uuid, version } from './validation';
 
-const timeFields = new Set(['original_in','original_out','adjusted_in','adjusted_out','proposed_at','reviewed_at','created_at','updated_at','serverNow']);
-function publicValue(value: unknown): unknown {
-  if (value instanceof Date) return value.toISOString();
-  if (Array.isArray(value)) return value.map(publicValue);
-  if (value && typeof value === 'object') return Object.fromEntries(Object.entries(value).map(([key, item]) => {
-    if (timeFields.has(key) && typeof item === 'string') {
-      const time = new Date(item);
-      return [key, Number.isFinite(time.getTime()) ? time.toISOString() : item];
-    }
-    return [key, publicValue(item)];
-  }));
-  return value;
-}
 function calendar(value: unknown): string {
   if (typeof value !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(value) || value.startsWith('0000')) throw new BadRequestException('日期格式无效');
   const d = new Date(value + 'T00:00:00Z');
@@ -41,16 +29,10 @@ function direction(value: unknown) {
   return value;
 }
 async function member(tx: TransactionSql, actor: string) {
-  const [m] = await tx`SELECT id,display_name FROM studio_os.members WHERE login_account_id=${actor}`;
+  const [m] = await tx`SELECT id,display_name,active FROM studio_os.members WHERE login_account_id=${actor}`;
   if (!m) throw new ConflictException('请先联系管理员关联成员档案');
+  if(!m.active)throw new ForbiddenException('成员已停用');
   return m;
-}
-async function lockOwner(tx: TransactionSql, owner: string) {
-  await tx`SELECT pg_advisory_xact_lock(hashtextextended(${'attendance-owner:' + owner},0))`;
-}
-async function audit(tx: TransactionSql, identity: Identity, owner: string, periodId: string | null, correctionId: string | null, action: string, before: unknown, after: unknown) {
-  const [name] = await tx`SELECT display_name FROM studio_os.members WHERE login_account_id=${identity.id}`;
-  await tx`INSERT INTO studio_os.attendance_events(owner_id,period_id,correction_id,actor_id,actor_name,action,before_value,after_value,created_at) VALUES(${owner},${periodId},${correctionId},${identity.id},${name?.display_name || (identity.role === 'admin' ? '管理员' : '员工')},${action},${before ? JSON.stringify(publicValue(before)) : null}::jsonb,${JSON.stringify(publicValue(after))}::jsonb,clock_timestamp())`;
 }
 async function activeStudio(tx: TransactionSql, owner: string) {
   return tx`SELECT id FROM studio_os.attendance_periods WHERE owner_id=${owner} AND kind='studio' AND coalesce(adjusted_in,original_in) IS NOT NULL AND coalesce(adjusted_out,original_out) IS NULL`;
@@ -60,9 +42,12 @@ export class Attendance {
   constructor(private readonly db: StudioDatabase) {}
   private async write(identity: Identity, action: string, b: Record<string, unknown>, work: (tx: TransactionSql) => Promise<{ id: string }>) {
     requireContributor(identity);
+    const decision=action.startsWith('decision:');
+    if(decision?identity.role!=='admin':identity.role!=='employee')throw new ForbiddenException();
     const key = uuid(b.requestKey), canonical = Object.fromEntries(Object.keys(b).sort().map(k => [k, b[k]]));
     const hash = createHash('sha256').update(JSON.stringify({ action, body: canonical })).digest('hex');
     return this.db.client.begin(async tx => {
+      const [actor]=await tx`SELECT active,role FROM studio_os.accounts WHERE id=${identity.id} FOR SHARE`;if(!actor?.active)throw new UnauthorizedException();if(decision?actor.role!=='admin':actor.role!=='employee')throw new ForbiddenException();
       await tx`SELECT pg_advisory_xact_lock(hashtextextended(${'attendance-key:' + identity.id + ':' + key},0))`;
       const [old] = await tx`SELECT action,request_hash,result FROM studio_os.attendance_receipts WHERE actor_id=${identity.id} AND request_key=${key}`;
       if (old) {
@@ -127,13 +112,8 @@ export class Attendance {
     return { rows: rows.map(publicValue), total: Number(count.count), offset, limit: 50 };
   }
   async studioIn(identity: Identity, value: unknown) {
-    const b = objectInput(value, ['requestKey']);
-    return this.write(identity, 'studio:in', b, async tx => {
-      await lockOwner(tx, identity.id); const m = await member(tx, identity.id);
-      if ((await activeStudio(tx, identity.id)).length) throw new ConflictException('已有未结束的工作室记录，请先核对');
-      const [row] = await tx`INSERT INTO studio_os.attendance_periods(owner_id,member_id,kind,work_date,approval_status,original_in) VALUES(${identity.id},${m.id},'studio',(clock_timestamp() AT TIME ZONE 'Asia/Shanghai')::date,'not-required',clock_timestamp()) RETURNING *`;
-      await audit(tx, identity, identity.id, row.id, null, 'studio-in', null, row); return { id: row.id };
-    });
+    const b=objectInput(value,['requestKey']);
+    return this.write(identity,'studio:in',b,async tx=>{await lockOwner(tx,identity.id);throw new ConflictException('上班记录由成功登录生成，请重新登录');});
   }
   async field(identity: Identity, value: unknown) {
     const b = objectInput(value, ['requestKey','date','expectedFrom','expectedTo','reason','taskId']);
@@ -151,6 +131,7 @@ export class Attendance {
       await lockOwner(tx, identity.id);
       const [p] = await tx`SELECT * FROM studio_os.attendance_periods WHERE id=${id} AND owner_id=${identity.id} FOR UPDATE`;
       if (!p) throw new NotFoundException();
+      if(p.kind==='studio'&&dir==='out')throw new ConflictException('请使用结束工作并退出');
       if (p.kind === 'field' && p.approval_status !== 'approved') throw new ConflictException('外勤未获批准，不能签到签退');
       const effectiveIn = p.adjusted_in || p.original_in, effectiveOut = p.adjusted_out || p.original_out;
       if (dir === 'in' && (p.kind !== 'field' || effectiveIn || effectiveOut)) throw new ConflictException('签到状态已变化，请核对');
@@ -214,6 +195,7 @@ export class Attendance {
       if (b.decision === 'approved') {
         const [clock] = await tx`SELECT ${c.proposed_at}::timestamptz<=clock_timestamp() AS valid`; if (!clock.valid) throw new ConflictException('补卡时间尚未发生');
         if (!periodId) {
+          if((await tx`SELECT id FROM studio_os.attendance_periods WHERE owner_id=${c.owner_id} AND kind='studio' AND work_date=(${c.proposed_at}::timestamptz AT TIME ZONE 'Asia/Shanghai')::date`).length)throw new ConflictException('该日已有上班记录，请引用原记录申请补正');
           if ((await activeStudio(tx, c.owner_id)).length) throw new ConflictException('有未结束工作室记录，请先核对');
           const [created] = await tx`INSERT INTO studio_os.attendance_periods(owner_id,member_id,kind,work_date,approval_status,adjusted_in) VALUES(${c.owner_id},${c.member_id},'studio',(${c.proposed_at}::timestamptz AT TIME ZONE 'Asia/Shanghai')::date,'not-required',${c.proposed_at}) RETURNING *`;
           periodId = created.id; await audit(tx, identity, c.owner_id, periodId, id, 'missing-studio-in-confirmed', null, created);

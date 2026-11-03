@@ -1,3 +1,4 @@
+import {createDailyAttendanceCard} from './daily-attendance.mjs';
 import {createWarehouseViews} from './warehouse-view.mjs';
 import {createEquipmentWorkspace} from './equipment-workspace.mjs';
 import {createSampleWorkspace} from './sample-workspace.mjs';
@@ -74,7 +75,7 @@ async function route(){
     else if(page==='materials'){state.materials=await api.materials(signal);if(signal.aborted)return;materialsPage();}
     else if(page==='tests'||page==='conclusions'){state.experiments=await api.experiments(signal);if(signal.aborted)return;page==='tests'?experimentsPage():conclusionsPage();}
     else if(page==='daily'){
-      [state.tasks,state.todos]=await Promise.all([api.tasks(profile,user,signal),api.todos(signal)]);if(signal.aborted)return;dailyPage();
+      [state.tasks,state.todos]=await Promise.all([api.tasks(profile,user,signal),api.todos(signal)]);if(signal.aborted)return;dailyPage();await createDailyAttendanceCard({api,h,localTime,notify,writable,onSignedOut:()=>init(),onAuthRequired:async()=>{await init();notify('请重新登录核对今日考勤，重登不会覆盖原上班或下班记录。');}}).render($('.right-column'),signal,user);if(signal.aborted)return;
     }else if(page==='history'){
       const [rows,todos]=await Promise.all([api.completed(selectedDate,user,profile,signal),api.todos(signal)]);if(signal.aborted)return;state.todos=todos;historyPage([...rows,...completedTodos(todos,selectedDate).map(t=>({taskId:t.id,title:t.title,occurredAt:t.completedAt,kind:'个人事项',feedback:t.notes,recordKind:'todo'}))].sort((a,b)=>Date.parse(b.occurredAt)-Date.parse(a.occurredAt)));
     }else{

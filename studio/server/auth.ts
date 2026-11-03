@@ -1,3 +1,4 @@
+import {startAttendanceAtLogin} from './daily-attendance';
 import { createHash, randomBytes } from 'node:crypto';
 import {databaseIdentity} from './permissions';
 import { hashPassword, verifyPassword } from './password';
@@ -74,6 +75,7 @@ export class Authentication {
       const [row] = await tx`SELECT id,username,role,active,password_hash,superadmin,admin_permissions FROM studio_os.accounts WHERE id=${account.id} FOR SHARE`;
       if (!row?.active || row.password_hash !== verifiedHash)
         throw new UnauthorizedException('Invalid credentials');
+      await startAttendanceAtLogin(tx,databaseIdentity(row));
       await tx`INSERT INTO studio_os.sessions (token_hash, account_id, csrf_token, expires_at)
         VALUES (${digest(token)}, ${row.id}, ${csrf}, now() + interval '8 hours')`;
       return row;

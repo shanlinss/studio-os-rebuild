@@ -1,3 +1,4 @@
+import {dailyAttendanceState,endWorkPayload,endWorkResult} from './daily-attendance.mjs';
 import {permissionPayload} from './admin-permissions.mjs';
 import {accountLifecyclePayload,accountLifecycleResult} from './account-lifecycle-contract.mjs';
 import {warehouseItem,warehouseCatalog,warehouseMovement,warehouseHistory,warehousePayload,warehousePath,sampleTargetPage,sampleTransferPayload,sampleTransferPage} from './warehouse-contract.mjs';
@@ -105,6 +106,8 @@ export function createCloudApi(fetcher=globalThis.fetch,{allowWrites=false}={}){
     async capabilities(signal){const value=await get('/api/workbench/capabilities',signal);if(!record(value)||value.personalTodoSchedule!==1)throw new ContractError('工作台日期兼容尚未接入。');return value;},
     async createTodo(value){if(!allowWrites)throw new ApiError(405,'当前为只读预览，未发送保存请求。');const body=todoPayload(value);await this.capabilities();return mutations.send('/api/workbench/todos','POST',body);},
     async updateTodo(id,value,version){if(!allowWrites)throw new ApiError(405,'当前为只读预览，未发送保存请求。');const path='/api/workbench/todos/'+endpointId(id),body=todoPayload(value,version);await this.capabilities();return mutations.send(path,'PATCH',body);},
+    async dailyAttendance(signal){const v=await read('/api/attendance/daily',signal,dailyAttendanceState);mutations.confirmRead('/api/attendance/end-work');return v;},
+    async endWork(key,id,version){const v=await mutations.send('/api/attendance/end-work','POST',endWorkPayload(key,id,version));try{endWorkResult(v,id);}catch(e){e.uncertain=true;throw e;}mutations.clear();return v;},
     async logout(){const result=await mutations.send('/api/logout','POST',{});mutations.clear();return result;},
     async login(username,password){const d=await mutations.send('/api/login','POST',{username,password},{login:true});return identity(d.user);},
     async createMaterial(value){return mutations.send('/api/materials','POST',materialPayload(value));},

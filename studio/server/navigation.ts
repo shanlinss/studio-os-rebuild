@@ -23,7 +23,7 @@ const sections: Section[] = [
       { id: 'today', title: '今日工作' },
       { id: 'reminders', title: '待办与提醒' },
       { id: 'history', title: '我的执行记录' },
-      { id: 'attendance', title: '打卡与外勤' },
+      { id: 'attendance', title: '我的考勤' },
       { id: 'samples', title: '拍摄样品领还' },
     ],
   },

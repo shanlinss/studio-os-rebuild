@@ -1,3 +1,4 @@
+import {DailyAttendance} from './daily-attendance';
 import {AccountPermissions,requirePermission} from './permissions';
 import {Warehouse} from './warehouse';
 import {Equipment} from './equipment';
@@ -68,6 +69,7 @@ export async function createStudioApp(
   const stores = new Stores(database);
   const members = new Members(database);
   const attendance = new Attendance(database);
+  const dailyAttendance = new DailyAttendance(database);
   const samples = new ShootingSamples(database);
   const businessAccounts = new BusinessAccounts(database);
   const workflow = new Workflow(database);
@@ -352,6 +354,10 @@ export async function createStudioApp(
     @Post('samples/catalog/:id/borrow') samplesBorrow(@Req() r: AuthRequest,@Param('id') id: string,@Body() b: unknown) { return samples.borrow(r.identity!,id,b); }
     @Post('samples/loans/:id/return') samplesReturn(@Req() r: AuthRequest,@Param('id') id: string,@Body() b: unknown) { return samples.ownLoan(r.identity!,id,b); }
     @Patch('samples/loans/:id/location') samplesMove(@Req() r: AuthRequest,@Param('id') id: string,@Body() b: unknown) { return samples.ownLoan(r.identity!,id,b,true); }
+    @Get('attendance/daily')
+    attendanceDaily(@Req() r:AuthRequest){return dailyAttendance.state(r.identity!);}
+    @Post('attendance/end-work')
+    async attendanceEndWork(@Req() r:AuthRequest,@Body() b:unknown,@Res({passthrough:true}) res:express.Response){const result=await dailyAttendance.end(r.identity!,r.tokenHash,b);res.clearCookie(cookie,{secure:r.secure,path:'/api',httpOnly:true,sameSite:'strict'});return result;}
     @Get('attendance/state') attendanceState(@Req() r: AuthRequest) { return attendance.state(r.identity!); }
     @Get('attendance/receipts/:key') attendanceReceipt(@Req() r: AuthRequest, @Param('key') key: string) { return attendance.receipt(r.identity!, key); }
     @Get('attendance/periods') attendancePeriods(@Req() r: AuthRequest) { return attendance.list(r.identity!, r.query); }
@@ -1636,8 +1642,8 @@ export async function createStudioApp(
       if (req.path.startsWith('/api/attendance/')) {
         requireContributor(req.identity);
         const route = req.path.slice('/api/attendance/'.length);
-        const allowed = (req.method === 'GET' && /^(state|receipts\/[^/]+|periods|corrections|(?:periods|corrections)\/[^/]+\/history)$/.test(route)) ||
-          (req.method === 'POST' && /^(studio\/in|field|periods\/[^/]+\/(?:in|out|decision)|corrections(?:\/[^/]+\/decision)?)$/.test(route)) ||
+        const allowed = (req.method === 'GET' && /^(daily|state|receipts\/[^/]+|periods|corrections|(?:periods|corrections)\/[^/]+\/history)$/.test(route)) ||
+          (req.method === 'POST' && /^(end-work|studio\/in|field|periods\/[^/]+\/(?:in|out|decision)|corrections(?:\/[^/]+\/decision)?)$/.test(route)) ||
           (req.method === 'PATCH' && /^corrections\/[^/]+$/.test(route));
         if (!allowed) throw new ForbiddenException();
         if (route.endsWith('/decision')) requireAdministrator(req.identity);
