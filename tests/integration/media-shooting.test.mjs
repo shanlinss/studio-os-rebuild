@@ -255,3 +255,54 @@ test('readiness rejects an incomplete account-access schema even when migration 
  try{await assert.rejects(checkReadiness(db));}finally{await db.client`ALTER TABLE studio_os.accounts RENAME COLUMN temporarily_missing_version TO version`;}
  await checkReadiness(db);
 });
+let device,deviceLoan;
+test('equipment registers once, keeps private notes admin-only and shares only catalog facts with employees',async()=>{
+ const api=clients[0],value={requestKey:randomUUID(),assetTag:'CAM-001',name:'隔离相机',model:'测试机型',keeperMemberId:members[0],location:'设备柜 A',notes:'管理员维护说明'};
+ await assert.rejects(clients[1].equipmentWrite('register',undefined,value),e=>e.status===403);device=await api.equipmentWrite('register',undefined,value);assert.deepEqual(await api.equipmentWrite('register',undefined,value),device);
+ const row=await api.equipmentDetail(device.id);assert.equal(row.status,'available');assert.equal(row.notes,value.notes);assert.equal(row.version,1);assert.equal((await clients[1].equipmentDetail(device.id)).notes,'');
+ await assert.rejects(api.equipmentWrite('register',undefined,{...value,requestKey:randomUUID(),assetTag:'cam-001'}),e=>e.status===409);
+ assert.equal((await clients[1].equipmentCatalog()).rows.filter(e=>e.id===device.id).length,1);assert.deepEqual(await api.equipmentReceipt(value.requestKey,'register'),device);
+});
+test('equipment concurrent borrowing permits one owner and cannot be replayed with changed content',async()=>{
+ const value={requestKey:randomUUID(),location:'拍摄区',shootingRequestId:shoot.id,note:'本次拍摄'},path='/equipment/catalog/'+device.id+'/borrow';
+ const submitted=[{...value,expectedVersion:1},{...value,requestKey:randomUUID(),expectedVersion:1}];const replies=await Promise.all([request(sessions[1],path,'POST',submitted[0]),request(sessions[2],path,'POST',submitted[1])]);assert.equal(replies.filter(r=>r.status===201).length,1);assert.equal(replies.filter(r=>r.status===409).length,1);
+ const winner=replies[0].status===201?1:2,loser=winner===1?2:1;deviceLoan={...(await replies[winner-1].json()),winner,loser};
+ const loan=await clients[winner].equipmentLoan(deviceLoan.id);assert.equal(loan.shootingRequestId,shoot.id);assert.ok(loan.shootingTitle);assert.equal(loan.ownerId,sessions[winner].user.id);assert.equal((await clients[0].equipmentDetail(device.id)).status,'on_loan');
+ await assert.rejects(clients[loser].equipmentLoan(loan.id),e=>e.status===404);await assert.rejects(clients[winner].equipmentLoans({team:true}),e=>e.status===403);await assert.rejects(clients[winner].equipmentHistory(device.id),e=>e.status===403);
+ const raw=submitted[winner-1];assert.deepEqual(await json(sessions[winner],path,'POST',raw),{id:loan.id});assert.equal((await request(sessions[winner],path,'POST',{...raw,note:'改变内容'})).status,409);
+});
+test('equipment location and returns stay owner-only; abnormal returns block reborrowing until repair',async()=>{
+ const api=clients[deviceLoan.winner],admin=clients[0];let loan=await api.equipmentLoan(deviceLoan.id);
+ for(const other of [admin,clients[deviceLoan.loser]])await assert.rejects(other.equipmentWrite('return',loan.id,{requestKey:randomUUID(),condition:'ok',note:''},loan.version),e=>e.status===404);
+ let row=await admin.equipmentDetail(device.id);await assert.rejects(admin.equipmentWrite('state',device.id,{requestKey:randomUUID(),action:'retired',note:'在借不能停用'},row.version),e=>e.status===409);
+ await api.equipmentWrite('relocate',loan.id,{requestKey:randomUUID(),location:'拍摄区 B',note:'更新位置'},loan.version);loan=await api.equipmentLoan(loan.id);assert.equal(loan.location,'拍摄区 B');assert.equal(loan.version,2);
+ await assert.rejects(api.equipmentWrite('return',loan.id,{requestKey:randomUUID(),condition:'issue',note:'机身需要检查'},1),e=>e.status===409);
+ assert.equal((await request(sessions[deviceLoan.winner],'/equipment/loans/'+loan.id+'/return','POST',{requestKey:randomUUID(),expectedVersion:loan.version,condition:'issue',note:''})).status,400);
+ const value={requestKey:randomUUID(),condition:'issue',note:'机身需要检查'};await api.equipmentWrite('return',loan.id,value,loan.version);await api.equipmentWrite('return',loan.id,value,loan.version);
+ loan=await api.equipmentLoan(loan.id);assert.ok(loan.returnedAt);assert.equal(loan.returnCondition,'issue');row=await admin.equipmentDetail(device.id);assert.equal(row.status,'maintenance');
+ await assert.rejects(api.equipmentWrite('borrow',row.id,{requestKey:randomUUID(),location:'试借',shootingRequestId:null,note:''},row.version),e=>e.status===409);
+ await assert.rejects(api.equipmentWrite('state',row.id,{requestKey:randomUUID(),action:'ready',note:'员工不能维修确认'},row.version),e=>e.status===403);
+ await admin.equipmentWrite('state',row.id,{requestKey:randomUUID(),action:'ready',note:'检查维修完成'},row.version);assert.equal((await admin.equipmentDetail(row.id)).status,'available');
+});
+test('equipment maintenance, retirement and recovery preserve identity, borrow history and versioned metadata',async()=>{
+ const api=clients[0];let row=await api.equipmentDetail(device.id);const value={requestKey:randomUUID(),assetTag:row.assetTag,name:'相机资料更新',model:row.model,keeperMemberId:row.keeperMemberId,location:'设备柜 B',notes:row.notes};await api.equipmentWrite('edit',row.id,value,row.version);
+ row=await api.equipmentDetail(row.id);assert.equal(row.notes,'管理员维护说明');assert.equal(row.location,'设备柜 B');assert.equal((await clients[deviceLoan.winner].equipmentLoan(deviceLoan.id)).returnLocation,'设备柜 A');await assert.rejects(api.equipmentWrite('edit',row.id,{...value,requestKey:randomUUID()},1),e=>e.status===409);
+ await api.equipmentWrite('state',row.id,{requestKey:randomUUID(),action:'maintenance',note:'定期检查'},row.version);row=await api.equipmentDetail(row.id);await api.equipmentWrite('state',row.id,{requestKey:randomUUID(),action:'retired',note:'暂停使用'},row.version);row=await api.equipmentDetail(row.id);assert.equal(row.status,'retired');
+ assert.ok(!(await clients[1].equipmentCatalog()).rows.some(e=>e.id===row.id));assert.ok((await api.equipmentCatalog({all:true})).rows.some(e=>e.id===row.id));await assert.rejects(clients[1].equipmentCatalog({all:true}),e=>e.status===403);
+ await api.equipmentWrite('state',row.id,{requestKey:randomUUID(),action:'ready',note:'恢复启用'},row.version);assert.equal((await api.equipmentDetail(row.id)).status,'available');
+ const history=await api.equipmentHistory(row.id);for(const action of ['registered','edited','borrowed','returned','relocated','maintenance','retired','ready'])assert.ok(history.rows.some(e=>e.action===action));
+ assert.ok((await clients[deviceLoan.winner].equipmentLoans({status:'returned'})).rows.some(l=>l.id===deviceLoan.id));
+});
+test('equipment rejects unlinked/inactive borrowers and missing CSRF without changing state or audit records',async()=>{
+ const api=clients[0],row=await api.equipmentDetail(device.id),value={requestKey:randomUUID(),location:'借用验证',shootingRequestId:null,note:''};
+ const before=(await api.equipmentHistory(device.id)).total;
+ await assert.rejects(clients[3].equipmentWrite('borrow',device.id,value,row.version),e=>e.status===409);
+ const noCsrf=await fetch(base+'/api/equipment/catalog/'+device.id+'/borrow',{method:'POST',headers:{Cookie:'studio_session='+sessions[1].token,Origin:base,'Content-Type':'application/json'},body:JSON.stringify({...value,expectedVersion:row.version})});assert.equal(noCsrf.status,403);
+ await db.client`UPDATE studio_os.members SET active=false WHERE id=${members[1]}`;
+ try{await assert.rejects(clients[1].equipmentWrite('borrow',device.id,{...value,requestKey:randomUUID()},row.version),e=>e.status===403);}finally{await db.client`UPDATE studio_os.members SET active=true WHERE id=${members[1]}`;}
+ assert.equal((await api.equipmentDetail(device.id)).version,row.version);assert.equal((await api.equipmentHistory(device.id)).total,before);
+});
+test('equipment catalog pagination covers the complete filtered directory without duplicating IDs',async()=>{
+ const api=clients[0];for(let i=0;i<55;i++)await api.equipmentWrite('register',undefined,{requestKey:randomUUID(),assetTag:'PAGE-'+i,name:'设备分页 '+i,model:'',keeperMemberId:null,location:'分页柜',notes:''});
+ const first=await api.equipmentCatalog({q:'设备分页'}),second=await api.equipmentCatalog({q:'设备分页',offset:50});assert.equal(first.total,55);assert.equal(first.rows.length,50);assert.equal(second.rows.length,5);assert.equal(new Set([...first.rows,...second.rows].map(r=>r.id)).size,55);
+});

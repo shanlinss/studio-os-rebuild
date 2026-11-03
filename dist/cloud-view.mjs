@@ -1,3 +1,4 @@
+import {createEquipmentWorkspace} from './equipment-workspace.mjs';
 import {createSampleWorkspace} from './sample-workspace.mjs';
 import {attachmentList,createAttachmentViews} from './attachments.mjs';
 import {navigationForRole} from './page-access.mjs';
@@ -160,11 +161,16 @@ function notify(message){
  clearTimeout(notificationTimer);notificationTimer=setTimeout(()=>{el.classList.remove('visible');if(feedback?.isConnected&&feedback.textContent===message)feedback.textContent='';},5000);
 }
 createSampleWorkspace({api,h,writable,getUser:()=>user,notify});
+const equipmentWorkspace=createEquipmentWorkspace({api,h,writable,getUser:()=>user,notify,localTime});
 const planning=createPlanningViews({api,h,heading,notify});
 const management=createManagementViews({api,h,heading,showPanel,source,localTime,writable});
 const resources=createResourceViews({api,h,heading,showPanel,source,localTime,notify,writable});
 const business=createBusinessViews({api,h,heading,showPanel,source,localTime,writable,getRole:()=>user?.role});
-const editors=writable?createRecordEditors({api,h,notify,onSaved:async result=>{if(['directory','finance'].includes(result?.kind))$('#cloud-detail').close();await route();if(result?.expenseId)await management.expenseDetail(result.expenseId);else if(result?.id&&result.kind==='shooting')await business.shootingDetail(result.id);else if(result?.id&&['material','task','test'].includes(result.kind))await openDetail(result.kind,result.id);}}):null;
+const editors=writable?createRecordEditors({api,h,notify,onSaved:async result=>{if(result?.kind==='equipment'){await equipmentWorkspace.refresh();return;}if(['directory','finance'].includes(result?.kind))$('#cloud-detail').close();await route();if(result?.expenseId)await management.expenseDetail(result.expenseId);else if(result?.id&&result.kind==='shooting')await business.shootingDetail(result.id);else if(result?.id&&['material','task','test'].includes(result.kind))await openDetail(result.kind,result.id);}}):null;
+document.addEventListener('click',async e=>{
+ const button=e.target.closest('button[data-equipment-action]');if(!button||!editors)return;const action=button.dataset.equipmentAction;if(!['borrow','return','relocate'].includes(action)&&user?.role!=='admin')return;
+ button.disabled=true;try{await editors.equipment(action,button.dataset.equipmentId||undefined,equipmentWorkspace.context());}catch(err){notify(err.message);}finally{if(button.isConnected)button.disabled=false;}
+});
 document.addEventListener('click',async e=>{
  if(!editors||user?.role!=='admin')return;const button=e.target.closest('button[data-next-round],button[data-experiment-product],button[data-experiment-priority],button[data-directory-kind],button[data-edit-expense],button[data-expense-category],button[data-create-settlement],button[data-record-payment],button[data-remove-expense-receipt],button[data-member-login],button[data-account-access]');if(!button)return;
  try{if(button.hasAttribute('data-member-login'))await editors.memberLogin(button.dataset.memberLogin);else if(button.hasAttribute('data-account-access'))await editors.accountAccess(button.dataset.accountAccess);else if(button.hasAttribute('data-remove-expense-receipt'))await editors.removeExpenseReceipt(button.dataset.expenseId,button.dataset.removeExpenseReceipt);else if(button.hasAttribute('data-next-round'))await editors.nextRound(button.dataset.nextRound);else if(button.hasAttribute('data-experiment-product'))await editors.experimentProduct(button.dataset.experimentProduct);else if(button.hasAttribute('data-experiment-priority')){button.disabled=true;const row=await api.experiment(button.dataset.experimentPriority);await api.experimentPriority(row.id,button.dataset.priorityNext==='true',row.version);await route();await openDetail('test',row.id);notify('实验优先级已更新');}else if(button.hasAttribute('data-directory-kind'))await editors.directory(button.dataset.directoryKind,button.dataset.directoryId||undefined);else if(button.hasAttribute('data-edit-expense'))await editors.expense(button.dataset.editExpense||undefined);else if(button.hasAttribute('data-expense-category'))await editors.category(button.dataset.expenseCategory||undefined);else if(button.hasAttribute('data-create-settlement'))await editors.settlement();else await editors.payment(button.dataset.recordPayment);}catch(err){notify(err.message);}finally{if(button.isConnected)button.disabled=false;}

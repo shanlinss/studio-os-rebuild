@@ -42,3 +42,11 @@ test('read-only financial receipt routes preserve the 10 MiB image contract and 
  const upstream=http.createServer((req,res)=>{seen++;res.writeHead(200,{'Content-Type':mime});res.end(bytes);});await listen(upstream);const preview=createPreviewServer({upstreamPort:upstream.address().port});await listen(preview);const port=preview.address().port;
  try{const result=await request(port,path);assert.equal(result.status,200);assert.deepEqual(result.bytes,bytes);assert.equal((await request(port,path,{method:'DELETE'})).status,405);assert.equal((await request(port,path,{method:'POST'})).status,405);assert.equal(seen,1);mime='video/mp4';assert.equal((await request(port,path)).status,502);assert.equal((await request(port,path+'?target=other')).status,400);assert.equal((await request(port,'/api/finance/expenses/'+id+'/receipts/not-a-uuid')).status,404);}finally{await close(preview);await close(upstream);}
 });
+test('equipment reads and modules are available without forwarding mutations, receipts or arbitrary queries',async()=>{
+ const id='11111111-1111-4111-8111-111111111111',seen=[];const upstream=http.createServer((req,res)=>{seen.push(req.url);res.writeHead(200,{'Content-Type':'application/json'});res.end('{}');});await listen(upstream);const preview=createPreviewServer({upstreamPort:upstream.address().port});await listen(preview);const port=preview.address().port;
+ try{for(const path of ['/api/equipment/catalog?q=camera&offset=0&all=false','/api/equipment/loans?view=own&status=open&offset=0','/api/equipment/loans/'+id,'/api/equipment/catalog/'+id+'/history?offset=50'])assert.equal((await request(port,path)).status,200);const count=seen.length;
+ for(const method of ['POST','PATCH','DELETE'])assert.equal((await request(port,'/api/equipment/catalog/'+id,{method})).status,405);
+ assert.equal((await request(port,'/api/equipment/receipts/'+id)).status,404);assert.equal((await request(port,'/api/equipment/catalog?owner=someone')).status,400);assert.equal(seen.length,count);
+ for(const path of ['/equipment-workspace.mjs','/equipment-contract.mjs'])assert.equal((await request(port,path)).status,200);
+ }finally{await close(preview);await close(upstream);}
+});

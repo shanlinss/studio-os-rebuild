@@ -1,3 +1,4 @@
+import {equipmentRecord,equipmentPage,equipmentPayload,equipmentPath} from './equipment-contract.mjs';
 import {sampleState,samplePage,samplePayload,sampleOperationPath} from './sample-contract.mjs';
 import {assetPath,mediaUpload,readMedia,expenseReceiptMaxBytes} from './media-contract.mjs';
 import {shootingPayload,shootingAction,shootingProgress,shootingArchive} from './shooting-contract.mjs';
@@ -118,6 +119,13 @@ export function createCloudApi(fetcher=globalThis.fetch,{allowWrites=false}={}){
     async todos(signal){return read('/api/workbench/todos',signal,v=>list(v).map(todoModel));},
     async finance(signal){return read('/api/finance',signal,financeRecord);},
     async competitors(signal){return namedList(await get('/api/competitors',signal));},
+    async equipmentCatalog(params={},signal){const q=new URLSearchParams({q:params.q??'',offset:String(params.offset??0),all:String(params.all===true)});return read('/api/equipment/catalog?'+q,signal,equipmentPage);},
+    async equipmentDetail(id,signal){return read('/api/equipment/catalog/'+endpointId(id),signal,v=>{equipmentRecord(v);if(typeof v.notes!=='string')throw new ContractError('设备说明不完整，请重新读取。');return v;});},
+    async equipmentLoan(id,signal){return read('/api/equipment/loans/'+endpointId(id),signal,v=>equipmentPage({rows:[v],total:1,offset:0,limit:50},true).rows[0]);},
+    async equipmentLoans(params={},signal){const q=new URLSearchParams({view:params.team?'team':'own',status:params.status??'open',offset:String(params.offset??0)});return read('/api/equipment/loans?'+q,signal,v=>equipmentPage(v,true));},
+    async equipmentHistory(id,offset=0,signal){return read('/api/equipment/catalog/'+endpointId(id)+'/history?offset='+String(offset),signal,v=>{pagedRows(v);if(v.rows.some(e=>!record(e)||typeof e.action!=='string'||typeof e.actor!=='string'||typeof e.note!=='string'||!Number.isFinite(Date.parse(e.createdAt))))throw new ContractError();return v;});},
+    async equipmentWrite(action,id,value,version){return mutations.send(equipmentPath(action,id),['edit','relocate'].includes(action)?'PATCH':'POST',equipmentPayload(action,value,version));},
+    async equipmentReceipt(key,action,id){const path=equipmentPath(action,id);try{const value=await get('/api/equipment/receipts/'+endpointId(key));if(!record(value)||typeof value.id!=='string')throw new ContractError();endpointId(value.id);mutations.confirmRead(path);return value;}catch(e){if(e.status===404){mutations.confirmRead(path);return null;}throw e;}},
     async sampleState(signal){return read('/api/samples/state',signal,sampleState);},
     async sampleCatalog(params={},signal){const q=new URLSearchParams({offset:String(params.offset??0),q:params.q??'',active:params.all?'all':'active'});return read('/api/samples/catalog?'+q,signal,v=>samplePage(v));},
     async sampleLoans(params={},signal){const q=new URLSearchParams({offset:String(params.offset??0),view:params.team?'team':'own',status:params.status??'open'});return read('/api/samples/loans?'+q,signal,v=>samplePage(v,true));},

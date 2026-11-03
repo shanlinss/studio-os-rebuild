@@ -1,3 +1,4 @@
+import {Equipment} from './equipment';
 import {AccountAccess} from './account-access';
 import 'reflect-metadata';
 import {
@@ -83,6 +84,7 @@ export async function createStudioApp(
   const observations = new OperationalObservations(database);
   const knowledge = new Knowledge(database);
   const accountAccess = new AccountAccess(database);
+  const equipment = new Equipment(database);
   const templates = new Templates(database);
   const competitors = new Competitors(database);
   const finance = new Finance(database);
@@ -306,6 +308,18 @@ export async function createStudioApp(
     ) {
       return stores.update(id, body, req.identity!.id);
     }
+    @Get('equipment/catalog') equipmentCatalog(@Req() r: AuthRequest) { return equipment.catalog(r.identity!,r.query); }
+    @Get('equipment/catalog/:id') equipmentDetail(@Req() r: AuthRequest,@Param('id') id: string) { return equipment.detail(r.identity!,id); }
+    @Get('equipment/catalog/:id/history') equipmentHistory(@Req() r: AuthRequest,@Param('id') id: string) { return equipment.history(r.identity!,id,r.query); }
+    @Get('equipment/loans/:id') equipmentLoan(@Req() r: AuthRequest,@Param('id') id: string) { return equipment.loan(r.identity!,id); }
+    @Get('equipment/loans') equipmentLoans(@Req() r: AuthRequest) { return equipment.loans(r.identity!,r.query); }
+    @Get('equipment/receipts/:key') equipmentReceipt(@Req() r: AuthRequest,@Param('key') key: string) { return equipment.receipt(r.identity!,key); }
+    @Post('equipment/catalog') equipmentCreate(@Req() r: AuthRequest,@Body() b: unknown) { return equipment.save(r.identity!,b); }
+    @Patch('equipment/catalog/:id') equipmentEdit(@Req() r: AuthRequest,@Param('id') id: string,@Body() b: unknown) { return equipment.save(r.identity!,b,id); }
+    @Post('equipment/catalog/:id/borrow') equipmentBorrow(@Req() r: AuthRequest,@Param('id') id: string,@Body() b: unknown) { return equipment.borrow(r.identity!,id,b); }
+    @Post('equipment/catalog/:id/state') equipmentState(@Req() r: AuthRequest,@Param('id') id: string,@Body() b: unknown) { return equipment.state(r.identity!,id,b); }
+    @Post('equipment/loans/:id/return') equipmentReturn(@Req() r: AuthRequest,@Param('id') id: string,@Body() b: unknown) { return equipment.ownLoan(r.identity!,id,b); }
+    @Patch('equipment/loans/:id/location') equipmentLocation(@Req() r: AuthRequest,@Param('id') id: string,@Body() b: unknown) { return equipment.ownLoan(r.identity!,id,b,true); }
     @Get('samples/state') samplesState(@Req() r: AuthRequest) { return samples.state(r.identity!); }
     @Get('samples/catalog') samplesCatalog(@Req() r: AuthRequest) { return samples.catalog(r.identity!,r.query); }
     @Get('samples/loans') samplesLoans(@Req() r: AuthRequest) { return samples.loans(r.identity!,r.query); }
@@ -1558,6 +1572,17 @@ export async function createStudioApp(
           if (typeof page !== 'string') throw new ForbiddenException();
           pageFor(req.identity, id, page);
         } else sectionFor(req.identity, id);
+        return true;
+      }
+      if(req.path.startsWith('/api/equipment/')){
+        requireContributor(req.identity);
+        const route=req.path.slice('/api/equipment/'.length);
+        const allowed=(req.method==='GET' && /^(catalog|catalog\/[^/]+(?:\/history)?|loans(?:\/[^/]+)?|receipts\/[^/]+)$/.test(route)) ||
+          (req.method==='POST' && /^(catalog|catalog\/[^/]+\/(?:borrow|state)|loans\/[^/]+\/return)$/.test(route)) ||
+          (req.method==='PATCH' && /^(catalog\/[^/]+|loans\/[^/]+\/location)$/.test(route));
+        if(!allowed)throw new ForbiddenException();
+        if((req.method==='POST' && (route==='catalog'||route.endsWith('/state')))||(req.method==='PATCH' && /^catalog\/[^/]+$/.test(route))||route.endsWith('/history'))requireAdministrator(req.identity);
+        if(req.method!=='GET')auth.csrf(req);
         return true;
       }
       if (req.path.startsWith('/api/samples/')) {
