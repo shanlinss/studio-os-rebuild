@@ -1,10 +1,9 @@
 import {readDrafts,saveDraft,draftMarkdown} from './creation-model.mjs';
 export const planningPages=new Set(['creation','account-info','warehouse']);
-export function createPlanningViews({api,h,heading,notify}){
+export function createPlanningViews({api,h,heading,notify,warehouse}){
  const $=s=>document.querySelector(s);
  const blank=(title,desc)=>`<div class="empty"><h3>${h(title)}</h3><p>${h(desc)}</p></div>`;
  function accountIndex(){ $('#main').innerHTML=heading('账户资料','资料只维护一次，从这里进入对应的经营档案。')+`<div class="index-grid"><a class="index-card" href="#shops"><span>01</span><h2>店铺经营资料</h2><p>店铺名称、启停与业务归属，由产品和财务共同引用。</p><b>查看店铺资料 →</b></a><a class="index-card" href="#accounts"><span>02</span><h2>业务运营账号</h2><p>运营账号负责人、使用状态与主页资料，和系统登录用户分开。</p><b>查看运营账号 →</b></a><a class="index-card" href="#profile"><span>03</span><h2>本人资料</h2><p>当前登录身份及关联的成员基础档案。</p><b>查看本人资料 →</b></a></div><p class="muted">这里先作为资料索引，不维护第二份店铺或运营账号信息。</p>`;}
- async function inventory(signal){const rows=await api.products(signal);if(signal.aborted)return;$('#main').innerHTML=heading('仓库管理','产品和包材库存使用真实出入库事实，样品领还单独管理。')+`<div class="planning-rule">产品/包材库存和出入库接口尚未接入。以下为可关联的产品档案，数量显示“未接入”，不表示库存为零。</div><section class="work-panel module-panel" style="margin-top:24px"><div class="panel-head"><h2>产品库存</h2></div><table class="record-table"><thead><tr><th>产品档案</th><th>所属店铺</th><th>可用库存</th><th>出入库流水</th></tr></thead><tbody>${rows.map(p=>`<tr><td><button class="table-title" data-product-detail="${h(p.id)}">${h(p.name)}</button></td><td>${h(p.storeName||'未关联')}</td><td>未接入</td><td>未接入</td></tr>`).join('')}</tbody></table>${rows.length?'':blank('暂无可关联的产品档案','不会自动生成库存数据。')}</section><section class="work-panel planning-panel" style="margin-top:24px"><h2>包材库存</h2><p class="muted">包材档案、计量单位、入库和领用流水需要新增对应底层能力。</p><a class="text-button" href="#assets">查看已有拍摄样品档案 →</a></section>`;}
  async function creation(signal,user){
   const [materials,templates,tasks]=await Promise.all([api.materials(signal),api.templates(signal),api.workTasks(signal)]);if(signal.aborted)return;
   let rows=[],broken=false,current=null,dirty=false,saveTimer;
@@ -25,5 +24,5 @@ export function createPlanningViews({api,h,heading,notify}){
   $('#export-draft').onclick=()=>{const d=collect(),url=URL.createObjectURL(new Blob([draftMarkdown(d)],{type:'text/markdown;charset=utf-8'})),link=document.createElement('a');link.href=url;link.download=(d.name.replace(/[\\/:*?"<>|]/g,'_')||'content-draft')+'.md';link.click();setTimeout(()=>URL.revokeObjectURL(url),1000);};
   if(broken){$('#save-draft').disabled=true;$('#draft-save-state').textContent='已有草稿读取异常，原数据保留。可导出当前编辑内容。';}else open(rows[0]?.id);
  }
- return {async render(page,signal,user){if(page==='account-info')accountIndex();if(page==='warehouse')await inventory(signal);if(page==='creation')await creation(signal,user);}};
+ return {async render(page,signal,user){if(page==='account-info')accountIndex();if(page==='warehouse')await warehouse.render(signal);if(page==='creation')await creation(signal,user);}};
 }

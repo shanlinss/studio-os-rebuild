@@ -1,3 +1,4 @@
+import {createWarehouseViews} from './warehouse-view.mjs';
 import {createEquipmentWorkspace} from './equipment-workspace.mjs';
 import {createSampleWorkspace} from './sample-workspace.mjs';
 import {attachmentList,createAttachmentViews} from './attachments.mjs';
@@ -162,11 +163,16 @@ function notify(message){
 }
 createSampleWorkspace({api,h,writable,getUser:()=>user,notify});
 const equipmentWorkspace=createEquipmentWorkspace({api,h,writable,getUser:()=>user,notify,localTime});
-const planning=createPlanningViews({api,h,heading,notify});
+const warehouseViews=createWarehouseViews({api,h,heading,showPanel,localTime,writable,getUser:()=>user});
+const planning=createPlanningViews({api,h,heading,notify,warehouse:warehouseViews});
 const management=createManagementViews({api,h,heading,showPanel,source,localTime,writable});
 const resources=createResourceViews({api,h,heading,showPanel,source,localTime,notify,writable});
 const business=createBusinessViews({api,h,heading,showPanel,source,localTime,writable,getRole:()=>user?.role});
-const editors=writable?createRecordEditors({api,h,notify,onSaved:async result=>{if(result?.kind==='equipment'){await equipmentWorkspace.refresh();return;}if(['directory','finance'].includes(result?.kind))$('#cloud-detail').close();await route();if(result?.expenseId)await management.expenseDetail(result.expenseId);else if(result?.id&&result.kind==='shooting')await business.shootingDetail(result.id);else if(result?.id&&['material','task','test'].includes(result.kind))await openDetail(result.kind,result.id);}}):null;
+const editors=writable?createRecordEditors({api,h,notify,onSaved:async result=>{if(result?.kind==='warehouse'){await warehouseViews.refresh();if(result.id)await warehouseViews.detail(result.id);return;}if(result?.kind==='equipment'){await equipmentWorkspace.refresh();return;}if(['directory','finance'].includes(result?.kind))$('#cloud-detail').close();await route();if(result?.expenseId)await management.expenseDetail(result.expenseId);else if(result?.id&&result.kind==='shooting')await business.shootingDetail(result.id);else if(result?.id&&['material','task','test'].includes(result.kind))await openDetail(result.kind,result.id);}}):null;
+document.addEventListener('click',async e=>{
+ const button=e.target.closest('button[data-warehouse-action],button[data-warehouse-correct]');if(!button||!editors||user?.role!=='admin')return;button.disabled=true;
+ try{await editors.warehouse(button.hasAttribute('data-warehouse-correct')?'stocktake':button.dataset.warehouseAction,button.dataset.warehouseId||undefined,button.dataset.warehouseCorrect||null);}catch(err){notify(err.message);}finally{if(button.isConnected)button.disabled=false;}
+});
 document.addEventListener('click',async e=>{
  const button=e.target.closest('button[data-equipment-action]');if(!button||!editors)return;const action=button.dataset.equipmentAction;if(!['borrow','return','relocate'].includes(action)&&user?.role!=='admin')return;
  button.disabled=true;try{await editors.equipment(action,button.dataset.equipmentId||undefined,equipmentWorkspace.context());}catch(err){notify(err.message);}finally{if(button.isConnected)button.disabled=false;}

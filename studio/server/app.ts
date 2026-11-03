@@ -1,3 +1,4 @@
+import {Warehouse} from './warehouse';
 import {Equipment} from './equipment';
 import {AccountAccess} from './account-access';
 import 'reflect-metadata';
@@ -85,6 +86,7 @@ export async function createStudioApp(
   const knowledge = new Knowledge(database);
   const accountAccess = new AccountAccess(database);
   const equipment = new Equipment(database);
+  const warehouse = new Warehouse(database);
   const templates = new Templates(database);
   const competitors = new Competitors(database);
   const finance = new Finance(database);
@@ -308,6 +310,15 @@ export async function createStudioApp(
     ) {
       return stores.update(id, body, req.identity!.id);
     }
+    @Get('warehouse/items') warehouseCatalog(@Req() r: AuthRequest) { return warehouse.catalog(r.identity!,r.query); }
+    @Get('warehouse/items/:id') warehouseDetail(@Req() r: AuthRequest,@Param('id') id: string) { return warehouse.detail(r.identity!,id); }
+    @Get('warehouse/items/:id/movements') warehouseMovements(@Req() r: AuthRequest,@Param('id') id: string) { return warehouse.movements(r.identity!,id,r.query); }
+    @Get('warehouse/items/:id/movements/:movement') warehouseMovement(@Req() r: AuthRequest,@Param('id') id: string,@Param('movement') movement: string) { return warehouse.movement(r.identity!,id,movement); }
+    @Get('warehouse/items/:id/events') warehouseEvents(@Req() r: AuthRequest,@Param('id') id: string) { return warehouse.events(r.identity!,id,r.query); }
+    @Get('warehouse/receipts/:key') warehouseReceipt(@Req() r: AuthRequest,@Param('key') key: string) { return warehouse.receipt(r.identity!,key); }
+    @Post('warehouse/items') warehouseCreate(@Req() r: AuthRequest,@Body() b: unknown) { return warehouse.save(r.identity!,b); }
+    @Patch('warehouse/items/:id') warehouseEdit(@Req() r: AuthRequest,@Param('id') id: string,@Body() b: unknown) { return warehouse.save(r.identity!,b,id); }
+    @Post('warehouse/items/:id/movements') warehouseMove(@Req() r: AuthRequest,@Param('id') id: string,@Body() b: unknown) { return warehouse.move(r.identity!,id,b); }
     @Get('equipment/catalog') equipmentCatalog(@Req() r: AuthRequest) { return equipment.catalog(r.identity!,r.query); }
     @Get('equipment/catalog/:id') equipmentDetail(@Req() r: AuthRequest,@Param('id') id: string) { return equipment.detail(r.identity!,id); }
     @Get('equipment/catalog/:id/history') equipmentHistory(@Req() r: AuthRequest,@Param('id') id: string) { return equipment.history(r.identity!,id,r.query); }
@@ -1573,6 +1584,12 @@ export async function createStudioApp(
           pageFor(req.identity, id, page);
         } else sectionFor(req.identity, id);
         return true;
+      }
+      if(req.path.startsWith('/api/warehouse/')){
+        requireAdministrator(req.identity);
+        const route=req.path.slice('/api/warehouse/'.length),allowed=(req.method==='GET' && /^(items|items\/[^/]+(?:\/(?:movements(?:\/[^/]+)?|events))?|receipts\/[^/]+)$/.test(route)) ||
+          (req.method==='POST' && /^(items|items\/[^/]+\/movements)$/.test(route)) || (req.method==='PATCH' && /^items\/[^/]+$/.test(route));
+        if(!allowed)throw new ForbiddenException();if(req.method!=='GET')auth.csrf(req);return true;
       }
       if(req.path.startsWith('/api/equipment/')){
         requireContributor(req.identity);

@@ -58,6 +58,8 @@ id、variant、observedAt（北京时间）、window、url、note、metrics（na
 - 仅管理员维护导航的分类、名称、说明、标签与链接，操作放在当前页面，不单独设编辑板块。
 - 复用现有知识条目与管理员权限；已有正文保留原数据，不新增正文编辑器或协作草稿存储。
 
-036 的 accounts.version 仅用于已有账号权限的并发控制，account_access_events 仅记录角色/启停前后值与操作者，不存密码或会话。成员绑定沿用 members.login_account_id 的唯一外键；权限变更撤销原 sessions，未创建新的身份系统。设备对象已在 037 实现；仓库对象仍为规划，详见 assets-warehouse-plan.md。
+036 的 accounts.version 仅用于已有账号权限的并发控制，account_access_events 仅记录角色/启停前后值与操作者，不存密码或会话。成员绑定沿用 members.login_account_id 的唯一外键；权限变更撤销原 sessions，未创建新的身份系统。设备对象已在 037 实现；仓库对象已在 038 实现，详见 assets-warehouse-plan.md。
 
 037：equipment_assets 一物一档；equipment_loans 保存原成员/账号/可选拍摄外键及实际借还时间、归还状况与归还位置快照；equipment_events 为追加历史；equipment_receipts 仅保存幂等回执。维修与停用沿用原设备标识，归还不复制档案或执行任务。
+
+038：warehouse_items 引用原 products，quantity=NULL 与 opening_confirmed=false 表示未登记；warehouse_movements 保存期初/出入库/实盘差异、原项目快照和可选纠错来源，禁止更新删除；warehouse_item_events 记录资料变更；warehouse_receipts 只负责幂等回放。基础单位与产品/规格在期初后锁定，汇总按类型和单位分组，不生成订单、财务或样品副本。
