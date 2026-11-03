@@ -161,7 +161,7 @@ function notify(message){
  if(active){feedback=active.querySelector('[data-dialog-status]');if(!feedback){feedback=document.createElement('p');feedback.className='dialog-feedback';feedback.dataset.dialogStatus='';feedback.setAttribute('role','status');active.querySelector('.dialog-header')?.after(feedback);}feedback.textContent=message;feedback.scrollIntoView({block:'nearest'});}
  clearTimeout(notificationTimer);notificationTimer=setTimeout(()=>{el.classList.remove('visible');if(feedback?.isConnected&&feedback.textContent===message)feedback.textContent='';},5000);
 }
-createSampleWorkspace({api,h,writable,getUser:()=>user,notify});
+createSampleWorkspace({api,h,writable,getUser:()=>user,notify,localTime});
 const equipmentWorkspace=createEquipmentWorkspace({api,h,writable,getUser:()=>user,notify,localTime});
 const warehouseViews=createWarehouseViews({api,h,heading,showPanel,localTime,writable,getUser:()=>user});
 const planning=createPlanningViews({api,h,heading,notify,warehouse:warehouseViews});
@@ -171,7 +171,7 @@ const business=createBusinessViews({api,h,heading,showPanel,source,localTime,wri
 const editors=writable?createRecordEditors({api,h,notify,onSaved:async result=>{if(result?.kind==='warehouse'){await warehouseViews.refresh();if(result.id)await warehouseViews.detail(result.id);return;}if(result?.kind==='equipment'){await equipmentWorkspace.refresh();return;}if(['directory','finance'].includes(result?.kind))$('#cloud-detail').close();await route();if(result?.expenseId)await management.expenseDetail(result.expenseId);else if(result?.id&&result.kind==='shooting')await business.shootingDetail(result.id);else if(result?.id&&['material','task','test'].includes(result.kind))await openDetail(result.kind,result.id);}}):null;
 document.addEventListener('click',async e=>{
  const button=e.target.closest('button[data-warehouse-action],button[data-warehouse-correct]');if(!button||!editors||user?.role!=='admin')return;button.disabled=true;
- try{await editors.warehouse(button.hasAttribute('data-warehouse-correct')?'stocktake':button.dataset.warehouseAction,button.dataset.warehouseId||undefined,button.dataset.warehouseCorrect||null);}catch(err){notify(err.message);}finally{if(button.isConnected)button.disabled=false;}
+ try{if(button.dataset.warehouseAction==='transfer')await editors.warehouseToSamples(button.dataset.warehouseId);else await editors.warehouse(button.hasAttribute('data-warehouse-correct')?'stocktake':button.dataset.warehouseAction,button.dataset.warehouseId||undefined,button.dataset.warehouseCorrect||null);}catch(err){notify(err.message);}finally{if(button.isConnected)button.disabled=false;}
 });
 document.addEventListener('click',async e=>{
  const button=e.target.closest('button[data-equipment-action]');if(!button||!editors)return;const action=button.dataset.equipmentAction;if(!['borrow','return','relocate'].includes(action)&&user?.role!=='admin')return;

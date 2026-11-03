@@ -314,6 +314,9 @@ export async function createStudioApp(
     @Get('warehouse/items/:id') warehouseDetail(@Req() r: AuthRequest,@Param('id') id: string) { return warehouse.detail(r.identity!,id); }
     @Get('warehouse/items/:id/movements') warehouseMovements(@Req() r: AuthRequest,@Param('id') id: string) { return warehouse.movements(r.identity!,id,r.query); }
     @Get('warehouse/items/:id/movements/:movement') warehouseMovement(@Req() r: AuthRequest,@Param('id') id: string,@Param('movement') movement: string) { return warehouse.movement(r.identity!,id,movement); }
+    @Get('warehouse/items/:id/sample-targets') warehouseSampleTargets(@Req() r: AuthRequest,@Param('id') id: string) { return warehouse.sampleTargets(r.identity!,id,r.query); }
+    @Get('warehouse/items/:id/transfers') warehouseTransfers(@Req() r: AuthRequest,@Param('id') id: string) { return warehouse.transfers(r.identity!,id,r.query); }
+    @Post('warehouse/items/:id/to-samples') warehouseToSamples(@Req() r: AuthRequest,@Param('id') id: string,@Body() b: unknown) { return warehouse.transfer(r.identity!,id,b); }
     @Get('warehouse/items/:id/events') warehouseEvents(@Req() r: AuthRequest,@Param('id') id: string) { return warehouse.events(r.identity!,id,r.query); }
     @Get('warehouse/receipts/:key') warehouseReceipt(@Req() r: AuthRequest,@Param('key') key: string) { return warehouse.receipt(r.identity!,key); }
     @Post('warehouse/items') warehouseCreate(@Req() r: AuthRequest,@Body() b: unknown) { return warehouse.save(r.identity!,b); }
@@ -335,6 +338,7 @@ export async function createStudioApp(
     @Get('samples/catalog') samplesCatalog(@Req() r: AuthRequest) { return samples.catalog(r.identity!,r.query); }
     @Get('samples/loans') samplesLoans(@Req() r: AuthRequest) { return samples.loans(r.identity!,r.query); }
     @Get('samples/receipts/:key') samplesReceipt(@Req() r: AuthRequest,@Param('key') key: string) { return samples.receipt(r.identity!,key); }
+    @Get('samples/catalog/:id/transfers') sampleTransfers(@Req() r: AuthRequest,@Param('id') id: string) { return warehouse.transfers(r.identity!,id,r.query,true); }
     @Get('samples/catalog/:id/history') samplesHistory(@Req() r: AuthRequest,@Param('id') id: string) { return samples.history(r.identity!,id,r.query); }
     @Get('samples/loans/:id/history') loansHistory(@Req() r: AuthRequest,@Param('id') id: string) { return samples.history(r.identity!,id,r.query,true); }
     @Post('samples/catalog') samplesCreate(@Req() r: AuthRequest,@Body() b: unknown) { return samples.save(r.identity!,b); }
@@ -1587,8 +1591,8 @@ export async function createStudioApp(
       }
       if(req.path.startsWith('/api/warehouse/')){
         requireAdministrator(req.identity);
-        const route=req.path.slice('/api/warehouse/'.length),allowed=(req.method==='GET' && /^(items|items\/[^/]+(?:\/(?:movements(?:\/[^/]+)?|events))?|receipts\/[^/]+)$/.test(route)) ||
-          (req.method==='POST' && /^(items|items\/[^/]+\/movements)$/.test(route)) || (req.method==='PATCH' && /^items\/[^/]+$/.test(route));
+        const route=req.path.slice('/api/warehouse/'.length),allowed=(req.method==='GET' && /^(items|items\/[^/]+(?:\/(?:movements(?:\/[^/]+)?|events|transfers|sample-targets))?|receipts\/[^/]+)$/.test(route)) ||
+          (req.method==='POST' && /^(items|items\/[^/]+\/(?:movements|to-samples))$/.test(route)) || (req.method==='PATCH' && /^items\/[^/]+$/.test(route));
         if(!allowed)throw new ForbiddenException();if(req.method!=='GET')auth.csrf(req);return true;
       }
       if(req.path.startsWith('/api/equipment/')){
@@ -1605,11 +1609,11 @@ export async function createStudioApp(
       if (req.path.startsWith('/api/samples/')) {
         requireContributor(req.identity);
         const route = req.path.slice('/api/samples/'.length);
-        const allowed = (req.method === 'GET' && /^(state|catalog|loans|receipts\/[^/]+|(?:catalog|loans)\/[^/]+\/history)$/.test(route)) ||
+        const allowed = (req.method === 'GET' && /^(state|catalog|loans|receipts\/[^/]+|(?:(?:catalog|loans)\/[^/]+\/history|catalog\/[^/]+\/transfers))$/.test(route)) ||
           (req.method === 'POST' && /^(catalog|catalog\/[^/]+\/(?:stock-in|stocktake|borrow)|loans\/[^/]+\/return)$/.test(route)) ||
           (req.method === 'PATCH' && /^(catalog\/[^/]+|loans\/[^/]+\/location)$/.test(route));
         if (!allowed) throw new ForbiddenException();
-        if ((req.method !== 'GET' && route === 'catalog') || (req.method === 'PATCH' && /^catalog\/[^/]+$/.test(route)) || /\/(stock-in|stocktake)$/.test(route) || /^catalog\/[^/]+\/history$/.test(route)) requireAdministrator(req.identity);
+        if (/^catalog\/[^/]+\/transfers$/.test(route) || (req.method !== 'GET' && route === 'catalog') || (req.method === 'PATCH' && /^catalog\/[^/]+$/.test(route)) || /\/(stock-in|stocktake)$/.test(route) || /^catalog\/[^/]+\/history$/.test(route)) requireAdministrator(req.identity);
         if (req.method !== 'GET') auth.csrf(req);
         return true;
       }

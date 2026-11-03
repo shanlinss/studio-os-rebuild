@@ -63,3 +63,5 @@ id、variant、observedAt（北京时间）、window、url、note、metrics（na
 037：equipment_assets 一物一档；equipment_loans 保存原成员/账号/可选拍摄外键及实际借还时间、归还状况与归还位置快照；equipment_events 为追加历史；equipment_receipts 仅保存幂等回执。维修与停用沿用原设备标识，归还不复制档案或执行任务。
 
 038：warehouse_items 引用原 products，quantity=NULL 与 opening_confirmed=false 表示未登记；warehouse_movements 保存期初/出入库/实盘差异、原项目快照和可选纠错来源，禁止更新删除；warehouse_item_events 记录资料变更；warehouse_receipts 只负责幂等回放。基础单位与产品/规格在期初后锁定，汇总按类型和单位分组，不生成订单、财务或样品副本。
+
+039：warehouse_sample_links 固定一个原样品的来源库存项目与规格/单位；warehouse_sample_transfers 只记录原出库、原样品入库事件的双向标识、数量及双方前后值/快照。两表禁止改写删除。余额仍由 warehouse_items.quantity 与 shooting_samples.available_quantity 承载，没有第三套库存；借还不回增产品数量。

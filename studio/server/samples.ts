@@ -29,7 +29,29 @@ async function sample(tx: TransactionSql, id: string) {
 }
 async function event(tx: TransactionSql, who: Identity, sampleId: string, loanId: string | null, action: string, delta: number, before: unknown, after: unknown, note = '') {
   const [m] = await tx`SELECT display_name FROM studio_os.members WHERE login_account_id=${who.id}`;
-  await tx`INSERT INTO studio_os.shooting_sample_events(sample_id,loan_id,actor_id,actor_name,action,quantity_delta,before_value,after_value,note) VALUES(${sampleId},${loanId},${who.id},${m?.display_name || who.username},${action},${delta},${before ? JSON.stringify(normalized(before)) : null}::jsonb,${JSON.stringify(normalized(after))}::jsonb,${note})`;
+  const [saved] = await tx`INSERT INTO studio_os.shooting_sample_events(sample_id,loan_id,actor_id,actor_name,action,quantity_delta,before_value,after_value,note) VALUES(${sampleId},${loanId},${who.id},${m?.display_name || who.username},${action},${delta},${before ? JSON.stringify(normalized(before)) : null}::jsonb,${JSON.stringify(normalized(after))}::jsonb,${note}) RETURNING id`;
+  return String(saved.id);
+}
+// Shared transaction helpers: the original sample APIs and warehouse transfers
+// call these on their existing transaction, never through a second HTTP request.
+export async function registerSampleRecord(tx: TransactionSql, who: Identity, input: {name:string,productId:string|null,warehouseLocation:string,keeperMemberId:string|null,notes:string}) {
+  requireAdministrator(who);
+  const name=shortText(input.name,120),productId=optionalId(input.productId),location=shortText(input.warehouseLocation,150),keeper=optionalId(input.keeperMemberId),notes=optionalLongText(input.notes,2000);
+  let productLabel:string|null=null;
+  if(productId){const [p]=await tx`SELECT name FROM studio_os.products WHERE id=${productId} FOR SHARE`;if(!p)throw new NotFoundException();productLabel=p.name;}
+  if(keeper&&!(await tx`SELECT id FROM studio_os.members WHERE id=${keeper} FOR SHARE`).length)throw new NotFoundException();
+  const [row]=await tx`INSERT INTO studio_os.shooting_samples(name,product_id,product_label,warehouse_location,keeper_member_id,notes,created_by) VALUES(${name},${productId},${productLabel},${location},${keeper},${notes},${who.id}) RETURNING *`;
+  await event(tx,who,row.id,null,'registered',0,null,row);
+  return row;
+}
+export async function stockInSampleRecord(tx: TransactionSql, who: Identity, id:string, count:number, expected:number, note:string, origin?:{warehouseTransferId:string,warehouseItemId:string,warehouseMovementId:string}) {
+  requireAdministrator(who);uuid(id);quantity(count);version(expected);
+  const before=await sample(tx,id);
+  if(before.version!==expected||(origin&&!before.active))throw new ConflictException('样品数量或状态已变化');
+  const next=before.available_quantity+count;if(next>MAX)throw new ConflictException('数量超过整数容量');
+  const [after]=await tx`UPDATE studio_os.shooting_samples SET available_quantity=${next},version=version+1,updated_at=now() WHERE id=${id} RETURNING *`;
+  const eventId=await event(tx,who,id,null,'stock-in',count,before,origin?{...after,origin}:after,note);
+  return {before,after,eventId};
 }
 export class ShootingSamples {
   constructor(private readonly db: StudioDatabase) {}
@@ -102,12 +124,13 @@ export class ShootingSamples {
     const expected = id ? version(b.expectedVersion) : 0;
     if (b.active !== undefined && typeof b.active !== 'boolean') throw new BadRequestException();
     return this.write(who,'admin:save:'+(id || 'new'),b,async tx => {
+      if(!id){const created=await registerSampleRecord(tx,who,{name,productId,warehouseLocation:location,keeperMemberId:keeper,notes});return {id:created.id};}
       const old = id ? await sample(tx,id) : null;
       if (old && old.version !== expected) throw new ConflictException('样品资料已变化，请重新核对');
       let productLabel: string | null = null;
       if (productId) { const [p] = await tx`SELECT name FROM studio_os.products WHERE id=${productId} FOR SHARE`; if (!p) throw new NotFoundException(); productLabel=p.name; }
       if (keeper && !(await tx`SELECT id FROM studio_os.members WHERE id=${keeper} FOR SHARE`).length) throw new NotFoundException();
-      const [row] = id ? await tx`UPDATE studio_os.shooting_samples SET name=${name},product_id=${productId},product_label=${productLabel},warehouse_location=${location},keeper_member_id=${keeper},notes=${notes},active=${b.active === undefined ? old!.active : b.active},version=version+1,updated_at=now() WHERE id=${id} RETURNING *` : await tx`INSERT INTO studio_os.shooting_samples(name,product_id,product_label,warehouse_location,keeper_member_id,notes,created_by) VALUES(${name},${productId},${productLabel},${location},${keeper},${notes},${who.id}) RETURNING *`;
+      const [row] = await tx`UPDATE studio_os.shooting_samples SET name=${name},product_id=${productId},product_label=${productLabel},warehouse_location=${location},keeper_member_id=${keeper},notes=${notes},active=${b.active === undefined ? old!.active : b.active},version=version+1,updated_at=now() WHERE id=${id} RETURNING *`;
       await event(tx,who,row.id,null,id?'edited':'registered',0,old,row);return {id:row.id};
     });
   }
@@ -115,6 +138,7 @@ export class ShootingSamples {
     requireAdministrator(who); uuid(id);
     const b = objectInput(value,['requestKey','quantity','note','expectedVersion']); const qty=quantity(b.quantity,count), expected=version(b.expectedVersion), note=count ? longText(b.note,2000) : optionalLongText(b.note,2000);
     return this.write(who,'admin:'+(count?'stocktake:':'stock-in:')+id,b,async tx => {
+      if(!count){await stockInSampleRecord(tx,who,id,qty,expected,note);return {id};}
       const old=await sample(tx,id);if(old.version!==expected)throw new ConflictException('数量已变化，请核对后再操作');
       const next=count?qty:old.available_quantity+qty;if(next>MAX)throw new ConflictException('数量超过整数容量');
       const [row]=await tx`UPDATE studio_os.shooting_samples SET available_quantity=${next},version=version+1,updated_at=now() WHERE id=${id} RETURNING *`;

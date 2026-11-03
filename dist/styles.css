@@ -29,3 +29,5 @@ body{min-width:1180px}main{min-width:958px}.module-panel{min-width:0}
 #equipment-filter[hidden],#equipment-loan-filter[hidden]{display:none}
 
 .warehouse-summary{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:14px;margin:18px 0}.warehouse-summary-card{border:1px solid var(--line);border-radius:8px;padding:16px}.warehouse-summary-card small,.warehouse-summary-card p{font-size:11px;color:var(--muted)}.warehouse-summary-card b{display:block;font-size:20px;margin:10px 0}.warehouse-product-field[hidden]{display:none}
+
+.transfer-new-fields[hidden],.transfer-existing-fields[hidden]{display:none}.transfer-existing-fields{border:1px solid var(--line);border-radius:8px;padding:16px;margin:14px 0}.transfer-confirm{display:flex;align-items:center;gap:10px}.transfer-confirm input[type=checkbox]{width:auto}

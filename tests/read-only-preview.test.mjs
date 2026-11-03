@@ -52,9 +52,11 @@ test('equipment reads and modules are available without forwarding mutations, re
 });
 test('warehouse preview forwards only scoped reads and keeps journal edits and recovery receipts inaccessible',async()=>{
  const id='11111111-1111-4111-8111-111111111111',seen=[];const upstream=http.createServer((req,res)=>{seen.push(req.url);res.writeHead(200,{'Content-Type':'application/json'});res.end('{}');});await listen(upstream);const preview=createPreviewServer({upstreamPort:upstream.address().port});await listen(preview);const port=preview.address().port;
- try{for(const path of ['/api/warehouse/items?q=box&kind=packaging&active=all&offset=50','/api/warehouse/items/'+id,'/api/warehouse/items/'+id+'/movements?offset=50','/api/warehouse/items/'+id+'/movements/'+id,'/api/warehouse/items/'+id+'/events?offset=0'])assert.equal((await request(port,path)).status,200);const count=seen.length;
+ try{for(const path of ['/api/warehouse/items?q=box&kind=packaging&active=all&offset=50','/api/warehouse/items/'+id,'/api/warehouse/items/'+id+'/movements?offset=50','/api/warehouse/items/'+id+'/movements/'+id,'/api/warehouse/items/'+id+'/events?offset=0','/api/warehouse/items/'+id+'/sample-targets?q=sample&offset=50','/api/warehouse/items/'+id+'/transfers?offset=50','/api/samples/catalog/'+id+'/transfers?offset=0'])assert.equal((await request(port,path)).status,200);const count=seen.length;
  for(const method of ['POST','PATCH','DELETE'])assert.equal((await request(port,'/api/warehouse/items/'+id+'/movements',{method})).status,405);
  assert.equal((await request(port,'/api/warehouse/receipts/'+id)).status,404);assert.equal((await request(port,'/api/warehouse/items?target=elsewhere')).status,400);assert.equal((await request(port,'/api/warehouse/items/'+id+'/movements/not-an-id')).status,404);assert.equal(seen.length,count);
- for(const path of ['/warehouse-view.mjs','/warehouse-editors.mjs','/warehouse-contract.mjs'])assert.equal((await request(port,path)).status,200);
+ assert.equal((await request(port,'/api/warehouse/items/'+id+'/to-samples',{method:'POST'})).status,405);
+ assert.equal((await request(port,'/api/warehouse/items/'+id+'/transfers?sampleId='+id)).status,400);assert.equal((await request(port,'/api/samples/catalog/'+id+'/transfers?owner=other')).status,400);assert.equal(seen.length,count);
+ for(const path of ['/warehouse-view.mjs','/warehouse-editors.mjs','/warehouse-contract.mjs','/warehouse-transfer-editors.mjs'])assert.equal((await request(port,path)).status,200);
  }finally{await close(preview);await close(upstream);}
 });

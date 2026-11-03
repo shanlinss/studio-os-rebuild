@@ -1,3 +1,4 @@
+import {createWarehouseTransferEditors} from './warehouse-transfer-editors.mjs';
 import {createWarehouseEditors} from './warehouse-editors.mjs';
 import {createOperationsEditors} from './operations-editors.mjs';
 import {createShootingEditors} from './shooting-editors.mjs';
@@ -15,14 +16,16 @@ export function beijingTimestamp(value){
 // This editor is mounted only in an explicitly connected build or an isolated test fixture.
 export function createRecordEditors({api,h,onSaved,notify}){
  const dialog=document.createElement('dialog');dialog.className='editor wide-editor';dialog.setAttribute('aria-label','编辑资料');document.body.append(dialog);
- let saving=false,dirty=false,allowDiscard=false;
- const close=()=>{if(saving)return;if(dirty&&!allowDiscard){dialog.querySelector('[data-discard]').hidden=false;return;}dialog.close();};
+ let saving=false,dirty=false,allowDiscard=false,cleanup=null;
+ const dispose=()=>{const release=cleanup;cleanup=null;release?.();};
+ dialog.addEventListener('close',()=>{if(!dialog.open)dispose();});
+ const close=()=>{if(saving)return;if(dirty&&!allowDiscard){dialog.querySelector('[data-discard]').hidden=false;return;}dispose();dialog.close();};
  dialog.addEventListener('cancel',e=>{e.preventDefault();close();});
  const input=(name,label,value='',opts='')=>`<label>${h(label)}<input name="${name}" value="${h(value??'')}" ${opts}></label>`;
  const area=(name,label,value='',max=2000)=>`<label>${h(label)}<textarea name="${name}" maxlength="${max}" rows="4">${h(value??'')}</textarea></label>`;
  const select=(name,label,value,values)=>`<label>${h(label)}<select name="${name}">${values.map(([v,t])=>`<option value="${h(v)}" ${v===value?'selected':''}>${h(t)}</option>`).join('')}</select></label>`;
  function mount(title,body,submit,after,recover,setup){
-  if(saving)return;dirty=false;allowDiscard=false;
+  if(saving)return;cleanup?.();cleanup=null;dirty=false;allowDiscard=false;
   dialog.innerHTML=`<form><div class="dialog-header"><h2>${h(title)}</h2><button type="button" class="icon-button" data-close aria-label="关闭编辑">×</button></div>${body}<p class="save-error" role="alert" aria-live="polite"></p><div data-discard hidden class="planning-rule">当前内容尚未保存。<button type="button" class="text-button" data-keep>继续编辑</button><button type="button" class="text-button" data-confirm-discard>放弃本次编辑</button></div><button type="button" class="secondary" data-reconcile hidden>核对上次保存结果</button><div class="form-actions"><button type="button" class="secondary" data-close>取消</button><button class="primary" type="submit">保存</button></div></form>`;
   const form=dialog.querySelector('form'),save=form.querySelector('[type=submit]'),error=form.querySelector('[role=alert]'),submitLabel=after?.submitLabel||'保存';save.textContent=submitLabel;
   form.addEventListener('input',()=>{dirty=true;});form.addEventListener('change',()=>{dirty=true;});
@@ -30,7 +33,7 @@ export function createRecordEditors({api,h,onSaved,notify}){
   form.querySelector('[data-keep]').onclick=()=>{form.querySelector('[data-discard]').hidden=true;};
   form.querySelector('[data-confirm-discard]').onclick=()=>{allowDiscard=true;close();};
   const fields=()=>form.querySelectorAll('input,textarea,select');
-  const finished=async result=>{dirty=false;dialog.close();notify(after?.submitLabel==='确认删除'?'凭证已删除':'已保存');try{await onSaved({...after,id:after?.id||result?.id});}catch{notify('已保存，页面刷新失败，请重新读取资料。');}};
+  const finished=async result=>{dirty=false;dispose();dialog.close();notify(after?.submitLabel==='确认删除'?'凭证已删除':'已保存');try{await onSaved({...after,id:after?.id||result?.id});}catch{notify('已保存，页面刷新失败，请重新读取资料。');}};
   const reconcile=form.querySelector('[data-reconcile]');reconcile.onclick=async()=>{if(saving)return;saving=true;reconcile.disabled=true;try{const result=await recover();if(result){await finished(result);}else{error.textContent='尚未找到这次记录，可以使用同一保存标识再次提交。';delete save.dataset.blocked;save.disabled=false;reconcile.hidden=true;fields().forEach(el=>el.disabled=false);}}catch(err){error.textContent=err.message;}finally{saving=false;reconcile.disabled=false;}};
   form.onsubmit=async e=>{
    e.preventDefault();if(saving)return;saving=true;save.disabled=true;save.textContent='正在保存…';error.textContent='';const payload=new FormData(form);fields().forEach(el=>el.disabled=true);
@@ -38,7 +41,7 @@ export function createRecordEditors({api,h,onSaved,notify}){
    catch(err){error.textContent=err.message;error.scrollIntoView({block:'nearest'});if(err.uncertain||err.status===409){save.dataset.blocked='true';if(recover&&err.uncertain)reconcile.hidden=false;error.textContent+=' 编辑内容已保留，请先核对记录，再重新打开编辑。';}}
    finally{saving=false;save.disabled=save.dataset.blocked==='true';save.textContent=submitLabel;if(!save.disabled)fields().forEach(el=>el.disabled=false);}
   };
-  if(setup)setup(form);
+  if(setup){const release=setup(form);if(typeof release==='function')cleanup=release;}
   if(!dialog.open)dialog.showModal();form.querySelector('input,textarea,select')?.focus();
  }
  async function material(id){
@@ -101,8 +104,9 @@ export function createRecordEditors({api,h,onSaved,notify}){
   const root=await api.experiment(id);mount(root.status==='concluded'?'更新实验结论':'形成实验结论',`<p class="muted">${h(root.title)}</p>`+select('verdict','复用判断',root.verdict||'unclear',[['unclear','暂时无法判断'],['reusable','值得复用'],['conditional','满足条件后复用'],['rejected','暂不采用']])+area('finding','结论与适用条件',root.finding)+area('recommendation','下一步建议',root.recommendation)+input('tags','结论标签（用逗号分开）',(root.tags||[]).join('，'),'maxlength="800"')+'<p class="muted">保存后结论直接进入测试结论页；结束实验会停止新增发布，请先完成本轮记录。</p>',async f=>api.concludeExperiment(id,{verdict:f.get('verdict'),finding:f.get('finding'),recommendation:f.get('recommendation'),tags:f.get('tags').split(/[,，\n]/).map(t=>t.trim()).filter(Boolean)},root.version),{kind:'test',id});
  }
  const operations=createOperationsEditors({api,h,mount,input,area,select});
+ const warehouseTransferEditors=createWarehouseTransferEditors({api,h,mount,input,area,select});
  const warehouseEditors=createWarehouseEditors({api,h,mount,input,area,select});
  const shootingEditors=createShootingEditors({api,h,mount,input,area,select});
- return {material,product,publication,snapshot,todo,experiment,dispatch,review,conclusion,...shootingEditors,...operations,...warehouseEditors};
+ return {material,product,publication,snapshot,todo,experiment,dispatch,review,conclusion,...shootingEditors,...operations,...warehouseEditors,...warehouseTransferEditors};
 
 }
