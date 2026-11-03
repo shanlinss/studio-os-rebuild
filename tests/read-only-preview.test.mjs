@@ -79,3 +79,10 @@ test('leave preview permits scoped reads only and never forwards submission, app
  for(const module of ['/leave-contract.mjs','/leave-editors.mjs','/leave-view.mjs'])assert.equal((await request(port,module)).status,200);
  }finally{await close(preview);await close(upstream);}
 });
+test('exception preview forwards scoped queue and history only, blocking review writes and private receipts',async()=>{
+ const id='11111111-1111-4111-8111-111111111111',seen=[];const upstream=http.createServer((req,res)=>{seen.push(req.url);res.writeHead(200,{'Content-Type':'application/json'});res.end('{}');});await listen(upstream);const preview=createPreviewServer({upstreamPort:upstream.address().port});await listen(preview);const port=preview.address().port;
+ try{for(const path of ['/api/attendance/exceptions?view=team&kind=late&status=pending&offset=50','/api/attendance/periods/'+id+'/exceptions','/api/attendance/periods/'+id+'/exceptions/history?offset=50'])assert.equal((await request(port,path)).status,200);const count=seen.length;
+ assert.equal((await request(port,'/api/attendance/periods/'+id+'/exceptions',{method:'POST'})).status,405);assert.equal((await request(port,'/api/attendance/exception-receipts/'+id)).status,404);assert.equal((await request(port,'/api/attendance/periods/'+id+'/exceptions?owner=other')).status,400);assert.equal(seen.length,count);
+ for(const module of ['/exception-contract.mjs','/exception-editors.mjs','/exception-view.mjs'])assert.equal((await request(port,module)).status,200);
+ }finally{await close(preview);await close(upstream);}
+});

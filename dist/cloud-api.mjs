@@ -1,3 +1,4 @@
+import {exceptionPage,exceptionDetail,exceptionHistory,exceptionPayload} from './exception-contract.mjs';
 import {leavePage,leaveRecord,leaveHistory,leavePayload,leavePath} from './leave-contract.mjs';
 import {attendancePage,attendanceDetail,attendanceHistory,attendancePayload,attendanceWritePath} from './attendance-contract.mjs';
 import {dailyAttendanceState,endWorkPayload,endWorkResult} from './daily-attendance.mjs';
@@ -152,6 +153,11 @@ export function createCloudApi(fetcher=globalThis.fetch,{allowWrites=false}={}){
     async sampleWrite(action,owner,value,version){return mutations.send(sampleOperationPath(action,owner),action==='relocate'?'PATCH':'POST',samplePayload(action,value,version));},
     async sampleReceipt(key,action,owner){const path=sampleOperationPath(action,owner);try{const result=await get('/api/samples/receipts/'+endpointId(key));if(!record(result)||typeof result.id!=='string')throw new ContractError();endpointId(result.id);mutations.confirmRead(path);return result;}catch(e){if(e.status===404){mutations.confirmRead(path);return null;}throw e;}},
     async samples(params={},signal){const q=new URLSearchParams({offset:String(params.offset??0),q:params.q??'',active:'all'});return pagedRows(await get('/api/samples/catalog?'+q,signal));},
+    async exceptionList(params={},signal){const q=new URLSearchParams({view:params.view??'own',status:params.status??'pending',kind:params.kind??'all',offset:String(params.offset??0)});for(const k of ['from','to'])if(params[k]){if(!validDate(params[k]))throw new ContractError();q.set(k,params[k]);}if(params.from&&params.to&&params.from>params.to)throw new ContractError('开始日期不能晚于结束日期。');return read('/api/attendance/exceptions?'+q,signal,exceptionPage);},
+    async exceptionDetail(id,signal){return read('/api/attendance/periods/'+endpointId(id)+'/exceptions',signal,exceptionDetail);},
+    async exceptionHistory(id,offset=0,signal){return read('/api/attendance/periods/'+endpointId(id)+'/exceptions/history?offset='+String(offset),signal,exceptionHistory);},
+    async exceptionReview(id,value){return mutations.send('/api/attendance/periods/'+endpointId(id)+'/exceptions','POST',exceptionPayload(value));},
+    async exceptionReceipt(key,id){const path='/api/attendance/periods/'+endpointId(id)+'/exceptions';try{const result=await get('/api/attendance/exception-receipts/'+endpointId(key));if(result?.id!==id)throw new ContractError();endpointId(result.reviewId);mutations.confirmRead(path);return result;}catch(e){if(e.status===404){mutations.confirmRead(path);return null;}throw e;}},
     async leaveList(params={},signal){const q=new URLSearchParams({view:params.view??'own',status:params.status??'all',offset:String(params.offset??0)});for(const k of ['from','to'])if(params[k]){if(!validDate(params[k]))throw new ContractError();q.set(k,params[k]);}if(params.from&&params.to&&params.from>params.to)throw new ContractError('开始日期不能晚于结束日期。');return read('/api/attendance/leaves?'+q,signal,leavePage);},
     async leaveDetail(id,signal){return read('/api/attendance/leaves/'+endpointId(id),signal,leaveRecord);},
     async leaveHistory(id,offset=0,signal){return read('/api/attendance/leaves/'+endpointId(id)+'/history?offset='+String(offset),signal,leaveHistory);},

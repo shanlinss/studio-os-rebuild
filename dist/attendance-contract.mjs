@@ -2,7 +2,7 @@ import {ContractError,validDate} from './cloud-contract.mjs';
 import {pagedRows} from './management-model.mjs';
 export const approvalBlockers={'source-changed':'原考勤已有变化。请员工重新核对并修改本申请，再由管理员批准。','day-already-exists':'该日现在已有考勤记录，请从原记录申请补正。本申请可驳回并说明。','other-open-period':'该员工还有未结束的工作室记录，请先核对处理后再批准漏登上班。'};
 export const correctionLabels={pending:'待审核',approved:'已批准',rejected:'已驳回'};
-export const attendanceActions={'login-started':'登录登记上班','day-ended':'结束工作','studio-in':'登记上班','studio-out':'登记下班','correction-requested':'提交补卡申请','correction-edited':'修改申请','correction-applied':'应用补正','correction-approved':'批准申请','correction-rejected':'驳回申请','missing-studio-in-confirmed':'确认漏登上班'};
+export const attendanceActions={'exception-reviewed':'异常核实说明','login-started':'登录登记上班','day-ended':'结束工作','studio-in':'登记上班','studio-out':'登记下班','correction-requested':'提交补卡申请','correction-edited':'修改申请','correction-applied':'应用补正','correction-approved':'批准申请','correction-rejected':'驳回申请','missing-studio-in-confirmed':'确认漏登上班'};
 export const attendanceId=v=>{if(typeof v!=='string'||!/^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/.test(v))throw new ContractError('考勤标识无效。');return v;};
 const version=v=>{if(!Number.isSafeInteger(v)||v<1)throw new ContractError('请重新读取记录版本。');return v;};
 const stamp=v=>typeof v==='string'&&Number.isFinite(Date.parse(v));

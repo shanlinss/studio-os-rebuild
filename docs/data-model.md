@@ -73,3 +73,5 @@ id、variant、observedAt（北京时间）、window、url、note、metrics（na
 042：attendance_daily_links 只保存 owner_id＋work_date 对原 period_id 的唯一关联及来源（登录生成/旧记录关联），原上下班时间、版本和审批历史仍在 attendance_periods。首次登录与原 sessions 同事务，签退与回执/事件/全部旧会话清理同事务。无跨日时间猜测、工资字段或第二套考勤事实。
 
 043：leave_requests 关联原 accounts/members，存类型、起止时间、原因、状态、版本及审核/撤回/撤销信息；leave_events 追加前后快照，数据库禁止改写；leave_receipts 仅负责幂等恢复。请假独立于原打卡，不新增第二套人员/身份或任何薪资/财务数据。原批准信息在撤销后保留。时间段重叠在同员工事务锁下校验；不存猜测的计薪小时或假期余额。
+
+044：attendance_exception_reviews 为原工作段的迟到/时长不足保存追加核实（属实/特殊说明/重新待核实）、原因、来源版本/时间快照、递增序号与前一条引用。数据库禁止改写；attendance_exception_receipts 仅负责幂等恢复。核实同步追加原 attendance_events，但不更新原打卡、原版本、工资或财务。最新核实以每工作段/异常种类的序号确定，源版本变化时旧结论仅供追溯。
