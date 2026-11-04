@@ -1,3 +1,4 @@
+import {resourceProfileState,resourceProfilePayload,profileKind} from './resource-profiles.mjs';
 import {closingState,closingRecord,closingPayload,closingResult} from './finance-month-closures-contract.mjs';
 import {scopeState,scopePayload,scopeResult,monthReview} from './finance-month-review-contract.mjs';
 import {stockCorrectionState,stockCorrectionPayload} from './product-stock-corrections-contract.mjs';
@@ -159,6 +160,9 @@ export function createCloudApi(fetcher=globalThis.fetch,{allowWrites=false}={}){
     async tasks(profile,user,signal){if(!profile)return [];return ownTasks(await get('/api/tasks',signal),profile,user.role);},
     async task(id,signal){return read('/api/tasks/'+endpointId(id),signal,taskModel);},
     async todos(signal){return read('/api/workbench/todos',signal,v=>list(v).map(todoModel));},
+    async resourceProfile(kind,id,offset=0,signal){profileKind(kind);return read('/api/resource-profiles/'+kind+'/'+endpointId(id)+'?offset='+offset,signal,v=>resourceProfileState(v,kind,id));},
+    async saveResourceProfile(kind,id,value){profileKind(kind);return mutations.send('/api/resource-profiles/'+kind+'/'+endpointId(id),'POST',resourceProfilePayload(kind,value));},
+    async resourceProfileReceipt(kind,id,key){profileKind(kind);const path='/api/resource-profiles/'+kind+'/'+endpointId(id);try{const r=await get(path+'/receipts/'+endpointId(key));if(r?.id!==id||r.kind!==kind||!Number.isSafeInteger(r.version)||r.version<1)throw new ContractError();endpointId(r.recordId);mutations.confirmRead(path);return r;}catch(e){if(e.status===404){mutations.confirmRead(path);return null;}throw e;}},
     async financeClosing(month,offset=0,signal){costMonth(month);return read('/api/finance/month-closures?'+new URLSearchParams({month,offset}),signal,v=>closingState(v,month));},
     async financeClosingRecord(id,signal){return read('/api/finance/month-closures/'+endpointId(id),signal,v=>{closingRecord(v);if(v.id!==id)throw new ContractError();return v;});},
     async saveFinanceClosing(value){return mutations.send('/api/finance/month-closures','POST',closingPayload(value));},

@@ -1,3 +1,4 @@
+import {equipmentAccounts,accountReviewInput,reviewEquipmentAccounts} from './equipment-account-review';
 import {mediaFile} from './media';
 import {livePermission,currentPermission,freshIdentity,hasPermission} from './permissions';
 import {BadRequestException,ConflictException,ForbiddenException,NotFoundException,UnauthorizedException} from '@nestjs/common';
@@ -9,7 +10,7 @@ import {requireAdministrator,requireContributor} from './access';
 import {objectInput,shortText,longText,optionalLongText,uuid,version} from './validation';
 
 const optionalId=(v:unknown)=>v===null||v===undefined||v===''?null:uuid(v);
-const project=`e.id,e.asset_tag AS "assetTag",e.name,e.model,e.device_type AS "deviceType",e.brand,e.image_id AS "imageId",(SELECT m.display_name FROM studio_os.equipment_loans l JOIN studio_os.members m ON m.id=l.member_id WHERE l.equipment_id=e.id AND l.returned_at IS NULL) AS "currentUserName",e.keeper_member_id AS "keeperMemberId",m.display_name AS "keeperName",e.location,e.status,e.version,e.created_at AS "createdAt",e.updated_at AS "updatedAt"`;
+const project=`coalesce((SELECT v.scope FROM studio_os.equipment_store_versions v WHERE v.equipment_id=e.id ORDER BY version DESC LIMIT 1),'unclassified') AS "ownershipScope",(SELECT v.store_name FROM studio_os.equipment_store_versions v WHERE v.equipment_id=e.id ORDER BY version DESC LIMIT 1) AS "ownershipStoreName",e.id,e.asset_tag AS "assetTag",e.name,e.model,e.device_type AS "deviceType",e.brand,e.image_id AS "imageId",(SELECT m.display_name FROM studio_os.equipment_loans l JOIN studio_os.members m ON m.id=l.member_id WHERE l.equipment_id=e.id AND l.returned_at IS NULL) AS "currentUserName",e.keeper_member_id AS "keeperMemberId",m.display_name AS "keeperName",e.location,e.status,e.version,e.created_at AS "createdAt",e.updated_at AS "updatedAt"`;
 const loanProject=`l.id,l.equipment_id AS "equipmentId",l.owner_id AS "ownerId",l.member_id AS "memberId",e.asset_tag AS "assetTag",e.name,CASE WHEN l.returned_at IS NULL THEN e.location ELSE l.return_location END AS "returnLocation",l.location,l.shooting_request_id AS "shootingRequestId",l.shooting_title AS "shootingTitle",m.display_name AS "borrowerName",l.note,l.return_condition AS "returnCondition",l.return_note AS "returnNote",l.version,l.borrowed_at AS "borrowedAt",l.returned_at AS "returnedAt"`;
 async function asset(tx:TransactionSql,id:string){const [row]=await tx`SELECT * FROM studio_os.equipment_assets WHERE id=${id} FOR UPDATE`;if(!row)throw new NotFoundException();return row;}
 async function borrower(tx:TransactionSql,id:string){const [m]=await tx`SELECT id,active FROM studio_os.members WHERE login_account_id=${id} FOR SHARE`;if(!m)throw new ConflictException('请先关联成员档案');if(!m.active)throw new ForbiddenException();return m;}
@@ -130,12 +131,13 @@ export class Equipment {
    const [equipment]=await tx`SELECT id,name,asset_tag AS "assetTag",status,version FROM studio_os.equipment_assets WHERE id=${id}`;if(!equipment)throw new NotFoundException();
    const [current]=await tx`SELECT l.id,l.version,l.member_id AS "memberId",m.display_name AS "borrowerName",l.borrowed_at AS "borrowedAt" FROM studio_os.equipment_loans l JOIN studio_os.members m ON m.id=l.member_id WHERE l.equipment_id=${id} AND l.returned_at IS NULL`;
    const recipients=await tx`SELECT m.id,m.display_name AS "displayName" FROM studio_os.members m JOIN studio_os.accounts a ON a.id=m.login_account_id WHERE m.active AND a.active AND a.role IN('admin','employee') ORDER BY m.display_name,m.id`;
-   return {equipment,currentLoan:current??null,recipients};
+   return {equipment,currentLoan:current??null,recipients,linkedAccounts:await equipmentAccounts(tx,id)};
   });
  }
  async handover(who:Identity,id:string,value:unknown){
-  uuid(id);const keys=['requestKey','expectedVersion','previousLoanId','previousLoanVersion','toMemberId','occurredAt','condition','location','note'],b=objectInput(value,keys);
+  uuid(id);const keys=['requestKey','expectedVersion','previousLoanId','previousLoanVersion','toMemberId','occurredAt','condition','location','note'],b=objectInput(value,[...keys,'accountReview','accountsConfirmed']);
   if(keys.some(k=>!Object.hasOwn(b,k)))throw new BadRequestException();
+  const accountReview=accountReviewInput(b.accountReview);if(b.accountsConfirmed!==undefined&&typeof b.accountsConfirmed!=='boolean')throw new BadRequestException();
   const expected=version(b.expectedVersion),previous=b.previousLoanId===null?null:uuid(b.previousLoanId),previousVersion=previous?version(b.previousLoanVersion):null,to=uuid(b.toMemberId),condition=longText(b.condition,500),location=shortText(b.location,150),note=longText(b.note,2000);
   if(!previous&&b.previousLoanVersion!==null)throw new BadRequestException();
   if(typeof b.occurredAt!=='string'||!/^\d{4}-\d{2}-\d{2}T(?:[01]\d|2[0-3]):[0-5]\d:[0-5]\d(?:\.\d{1,3})?(?:Z|\+08:00)$/.test(b.occurredAt))throw new BadRequestException('请填写准确交接时间');
@@ -149,10 +151,12 @@ export class Equipment {
    const [target]=await tx`SELECT m.id,m.login_account_id,m.display_name FROM studio_os.members m JOIN studio_os.accounts a ON a.id=m.login_account_id WHERE m.id=${to} AND m.active AND a.active AND a.role IN('admin','employee') FOR SHARE OF m,a`;if(!target)throw new ConflictException('接收人需要关联有效团队登录账号');
    const [boundary]=await tx`SELECT max(greatest(borrowed_at,coalesce(returned_at,borrowed_at))) AS latest,clock_timestamp() AS present FROM studio_os.equipment_loans WHERE equipment_id=${id}`;
    if(when.getTime()>new Date(boundary.present).getTime()||(boundary.latest&&when.getTime()<new Date(boundary.latest).getTime()))throw new ConflictException('交接时间不能晚于当前时间，也不能早于已有使用记录');
+   const reviewed=await reviewEquipmentAccounts(tx,id,accountReview,b.accountsConfirmed,to);
    if(loan)await tx`UPDATE studio_os.equipment_loans SET returned_at=${when.toISOString()},return_location=${old.location},return_condition='handover',return_note='管理员交接，原借用结束。',version=version+1 WHERE id=${loan.id}`;
    const [next]=await tx`INSERT INTO studio_os.equipment_loans(equipment_id,owner_id,member_id,location,note,borrowed_at) VALUES(${id},${target.login_account_id},${target.id},${location},'管理员交接登记的使用记录',${when.toISOString()}) RETURNING *`;
    const [actor]=await tx`SELECT username FROM studio_os.accounts WHERE id=${who.id}`;
    const [handover]=await tx`INSERT INTO studio_os.equipment_handovers(equipment_id,previous_loan_id,new_loan_id,from_member_id,to_member_id,from_name,to_name,occurred_at,condition,note,actor_id,actor_name) VALUES(${id},${loan?.id??null},${next.id},${loan?.member_id??null},${target.id},${loan?.display_name??null},${target.display_name},${when.toISOString()},${condition},${note},${who.id},${actor.username}) RETURNING id`;
+   for(const r of reviewed){await tx`INSERT INTO studio_os.equipment_handover_account_reviews(handover_id,account_id,decision,before_value,after_value) VALUES(${handover.id},${r.before.id},${r.decision},${JSON.stringify(r.before)}::jsonb,${JSON.stringify(r.after)}::jsonb)`;if(r.before.version!==r.after.version)await tx`INSERT INTO studio_os.business_account_events(account_id,actor_id,before_value,after_value) VALUES(${r.before.id},${who.id},${JSON.stringify(r.before)}::jsonb,${JSON.stringify(r.after)}::jsonb)`;}
    const [row]=await tx`UPDATE studio_os.equipment_assets SET status='on_loan',version=version+1,updated_at=now() WHERE id=${id} RETURNING *`;
    await event(tx,who,id,next.id,'handover',{asset:old,previousLoanId:loan?.id??null},{asset:row,newLoanId:next.id,handoverId:handover.id},'管理员交接，详见交接记录');return {id};
   });
@@ -161,7 +165,7 @@ export class Equipment {
   await currentPermission(this.db,who,'resources');uuid(id);const b=objectInput(value,['offset']),offset=b.offset===undefined?0:Number(b.offset);if(!Number.isSafeInteger(offset)||offset<0||offset>2147483647)throw new BadRequestException();
   return this.db.client.begin(async tx=>{
    await tx`SET TRANSACTION ISOLATION LEVEL REPEATABLE READ READ ONLY`;if(!(await tx`SELECT id FROM studio_os.equipment_assets WHERE id=${id}`).length)throw new NotFoundException();
-   const rows=await tx`SELECT id,previous_loan_id AS "previousLoanId",new_loan_id AS "newLoanId",from_name AS "fromName",to_name AS "toName",occurred_at AS "occurredAt",condition,note,actor_name AS actor,created_at AS "createdAt" FROM studio_os.equipment_handovers WHERE equipment_id=${id} ORDER BY occurred_at DESC,id DESC LIMIT 50 OFFSET ${offset}`;
+   const rows=await tx`SELECT id,previous_loan_id AS "previousLoanId",new_loan_id AS "newLoanId",from_name AS "fromName",to_name AS "toName",occurred_at AS "occurredAt",condition,note,actor_name AS actor,created_at AS "createdAt",coalesce((SELECT jsonb_agg(jsonb_build_object('decision',r.decision,'before',r.before_value,'after',r.after_value) ORDER BY r.account_id) FROM studio_os.equipment_handover_account_reviews r WHERE r.handover_id=equipment_handovers.id),'[]'::jsonb) AS "accountReviews" FROM studio_os.equipment_handovers WHERE equipment_id=${id} ORDER BY occurred_at DESC,id DESC LIMIT 50 OFFSET ${offset}`;
    const [n]=await tx`SELECT count(*)::int AS n FROM studio_os.equipment_handovers WHERE equipment_id=${id}`;return {rows,total:n.n,offset,limit:50};
   });
  }

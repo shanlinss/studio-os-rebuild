@@ -1,3 +1,4 @@
+import {ResourceProfiles} from './resource-profiles';
 import {FinanceClosingExceptionFilter} from './finance-closing-filter';
 import {FinanceMonthClosures} from './finance-month-closures';
 import {FinanceMonthScope} from './finance-month-scope';
@@ -149,6 +150,7 @@ export async function createStudioApp(
   const templates = new Templates(database);
   const competitors = new Competitors(database);
   const finance = new Finance(database);
+  const resourceProfiles=new ResourceProfiles(database);
   const financeMonthClosures=new FinanceMonthClosures(database);
   const financeMonthScope=new FinanceMonthScope(database);
   const financeMonthReview=new FinanceMonthReview(database);
@@ -1263,6 +1265,12 @@ export async function createStudioApp(
 
     @Get('finance/cash-sources')
     cashSources(@Req() r:AuthRequest){return cashCorrespondence.sources(r.identity!,r.query);}
+    @Get('resource-profiles/:kind/:id')
+    resourceProfile(@Req() r:AuthRequest,@Param('kind') kind:string,@Param('id') id:string){return resourceProfiles.state(r.identity!,kind,id,r.query);}
+    @Post('resource-profiles/:kind/:id')
+    resourceProfileSave(@Req() r:AuthRequest,@Param('kind') kind:string,@Param('id') id:string,@Body() b:unknown){return resourceProfiles.save(r.identity!,kind,id,b);}
+    @Get('resource-profiles/:kind/:id/receipts/:key')
+    resourceProfileReceipt(@Req() r:AuthRequest,@Param('kind') kind:string,@Param('id') id:string,@Param('key') key:string){objectInput(r.query,[]);return resourceProfiles.receipt(r.identity!,key,kind,id);}
     @Get('finance/month-closures')
     financeClosingState(@Req() r:AuthRequest){return financeMonthClosures.state(r.identity!,r.query);}
     @Post('finance/month-closures')
@@ -2510,6 +2518,7 @@ export async function createStudioApp(
         if (req.method !== 'GET') auth.csrf(req);
         return true;
       }
+      if(req.path.startsWith('/api/resource-profiles/')){requireAdministrator(req.identity);if(req.method!=='GET')auth.csrf(req);return true;}
       if (req.path === '/api/finance' || req.path.startsWith('/api/finance/')) {
         requireAdministrator(req.identity);
         if (req.method !== 'GET') auth.csrf(req);

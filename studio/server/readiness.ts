@@ -221,6 +221,10 @@ export async function checkReadiness(
     await tx`SELECT actor_id,request_key,month,request_hash,result FROM finance_month_scope_receipts LIMIT 0`;
     await tx`SELECT id,month,version,action,source_hash,snapshot FROM finance_month_closures LIMIT 0`;
     await tx`SELECT actor_id,request_key,month,action,request_hash,result FROM finance_month_closure_receipts LIMIT 0`;
+    await tx`SELECT equipment_id,version,scope,store_id,store_name FROM equipment_store_versions LIMIT 0`;
+    await tx`SELECT handover_id,account_id,decision,before_value,after_value FROM equipment_handover_account_reviews LIMIT 0`;
+    await tx`SELECT card_id,version,plan_name,fixed_cents,cycle,billing_day,effective_on FROM phone_card_plan_versions LIMIT 0`;
+    await tx`SELECT actor_id,request_key,kind,target_id,request_hash,result FROM resource_profile_receipts LIMIT 0`;
     const layout =
       await tx`SELECT singleton,version FROM material_folder_layout WHERE singleton`;
     if (layout.length !== 1)

@@ -121,6 +121,7 @@ export class BusinessAccounts {
     }
     try {
       return await this.db.client.begin(async (tx) => {
+        await tx`SELECT pg_advisory_xact_lock(hashtextextended('studio-account-access',0))`;
         await livePermission(tx,actor,'resources');
         const [operator] =
           await tx`SELECT role,active FROM studio_os.accounts WHERE id=${actor} FOR SHARE`;

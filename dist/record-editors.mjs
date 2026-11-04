@@ -1,3 +1,4 @@
+import {createResourceProfileEditors} from './resource-profiles.mjs';
 import {createFinanceClosingEditors} from './finance-month-closures-editors.mjs';
 import {createFinanceMonthEditors} from './finance-month-review-editors.mjs';
 import {createStockCorrectionEditors} from './product-stock-corrections-editors.mjs';
@@ -151,6 +152,7 @@ export function createRecordEditors({api,h,onSaved,notify}){
  const cashEditors=createCashEditors({api,h,mount,input,area});
  const sampleCostEditors=createSampleCostEditors({api,h,mount,input,area,select});
  const inventoryCostEditors=createInventoryCostEditors({api,h,mount,input,area,select});
+ const resourceProfileEditors=createResourceProfileEditors({api,h,mount,input,select,area});
  const financeClosingEditors=createFinanceClosingEditors({api,h,mount,area});
  const financeMonthEditors=createFinanceMonthEditors({api,h,mount,area});
  const overviewEditors=createOperatingOverviewEditors({api,h,mount,input,area});
@@ -163,6 +165,6 @@ export function createRecordEditors({api,h,onSaved,notify}){
  const commercialEditors=createCommercialProductEditors({api,h,mount,input,area,select});
  const warehouseEditors=createWarehouseEditors({api,h,mount,input,area,select});
  const shootingEditors=createShootingEditors({api,h,mount,input,area,select});
- return {...financeClosingEditors,...financeMonthEditors,...stockCorrectionEditors,...cashEditors,...sampleCostEditors,...inventoryCostEditors,...overviewEditors,...expenseAttributionEditors,...operatingFinanceEditors,...costSourcesEditors,...productOpeningEditors,...productPurchaseEditors,...productStockEditors,...commercialEditors,material,product,publication,snapshot,todo,experiment,dispatch,review,conclusion,...shootingEditors,...operations,...warehouseEditors,...warehouseTransferEditors,...accountLifecycleEditors,...inventoryAccessEditors,...equipmentPurchaseEditors,...equipmentAssetsEditors,...phoneCardEditors,...phoneCardFinanceEditors,...attendanceEditors,...leaveEditors,...exceptionEditors,...monthlyEditors,...closureEditors,...payrollEditors,...payrollConfirmationEditors,...personnelEditors};
+ return {...resourceProfileEditors,...financeClosingEditors,...financeMonthEditors,...stockCorrectionEditors,...cashEditors,...sampleCostEditors,...inventoryCostEditors,...overviewEditors,...expenseAttributionEditors,...operatingFinanceEditors,...costSourcesEditors,...productOpeningEditors,...productPurchaseEditors,...productStockEditors,...commercialEditors,material,product,publication,snapshot,todo,experiment,dispatch,review,conclusion,...shootingEditors,...operations,...warehouseEditors,...warehouseTransferEditors,...accountLifecycleEditors,...inventoryAccessEditors,...equipmentPurchaseEditors,...equipmentAssetsEditors,...phoneCardEditors,...phoneCardFinanceEditors,...attendanceEditors,...leaveEditors,...exceptionEditors,...monthlyEditors,...closureEditors,...payrollEditors,...payrollConfirmationEditors,...personnelEditors};
 
 }
