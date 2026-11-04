@@ -64,3 +64,6 @@ test('platform fee links exclude duplicate expense deductions across months and 
  const d=data();d.incomes=[income('a',10000)];d.expenses=[expense('a',200,{id:'original-fee'})];d.feeExpenseLinks=[{id:'fee-other-month',storeId:'a',expenseId:'original-fee',sourceChanged:false}];
  let r=operatingOverview(d,month);assert.equal(r.rows[0].operatingCents,'0');assert.equal(r.rows[0].profitCents,'10000');d.feeExpenseLinks[0].sourceChanged=true;r=operatingOverview(d,month);assert.equal(r.rows[0].profitCents,null);
 });
+test('legacy duplicate live supplier sources block profit instead of being accepted as two confirmed costs',()=>{
+ const d=data();d.incomes=[income('a',10000)];d.dropship=[{storeId:'a',basis:'actual',amountCents:'600',documentId:'duplicate',sourceConflict:true}];const r=operatingOverview(d,month);assert.equal(r.rows[0].dropshipCents,null);assert.equal(r.summary.studioProfitCents,null);assert.match(r.rows[0].pending[0].label,/重复有效批次/);d.dropship=[];d.refunds=[{storeId:'a',amountCents:'100',documentId:'duplicate',sourceConflict:true}];assert.equal(operatingOverview(d,month).summary.studioProfitCents,null);
+});

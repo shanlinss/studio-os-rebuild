@@ -30,8 +30,8 @@ export function operatingOverview(data:{stores:any[],incomes:any[],expenses:any[
   }
  }
  for(const d of data.daily){const row=get(d.storeId);if(d.kind==='sale')row.dailySale+=cents(d.amountCents);else row.dailyRefund+=cents(d.amountCents);}
- for(const d of data.dropship){const row=get(d.storeId);source(row,'dropship',d.documentId);if(d.basis!=='actual')issue(row,'dropship',d.documentId,'代发仍为参考估算，需核实实际成本');else row.drop+=cents(d.amountCents);}
- for(const r of data.refunds){const row=get(r.storeId);row.drop-=cents(r.amountCents);source(row,'dropship',r.documentId);}
+ for(const d of data.dropship){const row=get(d.storeId);source(row,'dropship',d.documentId);if(d.sourceConflict)issue(row,'dropship',d.documentId,'同供应商来源存在重复有效批次，请核对');else if(d.basis!=='actual')issue(row,'dropship',d.documentId,'代发仍为参考估算，需核实实际成本');else row.drop+=cents(d.amountCents);}
+ for(const r of data.refunds){const row=get(r.storeId);if(r.sourceConflict)issue(row,'dropship',r.documentId,'供应商退款关联的原代发来源重复，请核对');else row.drop-=cents(r.amountCents);source(row,'dropship',r.documentId);}
  const movements=new Map<string,CostMovement[]>();for(const m of data.movements){if(!movements.has(m.skuId))movements.set(m.skuId,[]);movements.get(m.skuId)!.push(m);}
  for(const [skuId,list]of movements){const result=movingCosts(list,month);
   for(const bucket of result.storeCosts){if(!bucket.storeId){issue(null,'stock',skuId,'商品发货或退货缺少业务店铺');continue;}const row=get(bucket.storeId);source(row,'stock',skuId);

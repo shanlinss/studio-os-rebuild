@@ -56,6 +56,14 @@ export async function checkReadiness(
     await tx`SELECT product_id,code,version FROM commercial_products LIMIT 0`;
     await tx`SELECT id,product_id,code,specification,unit,active,warehouse_item_id FROM product_skus LIMIT 0`;
     await tx`SELECT id,operation,business_date,source_reference,reason,actor_id,source_shipment_id,resellable_confirmed FROM product_stock_documents LIMIT 0`;
+    await tx`SELECT document_id,sku_id,store_id FROM dropship_business_references LIMIT 0`;
+    await tx`SELECT document_id,cost_version,business_date,supplier,source_reference,lines,actor_id FROM dropship_business_versions LIMIT 0`;
+    await tx`SELECT id,business_date,supplier,source_reference FROM dropship_effective_documents LIMIT 0`;
+    await tx`SELECT id,sku_id,store_id,quantity,snapshot FROM dropship_effective_lines LIMIT 0`;
+    await tx`SELECT status FROM dropship_cost_versions LIMIT 0`;
+    await tx`SELECT status FROM dropship_refund_versions LIMIT 0`;
+    await tx`SELECT replaces_refund_id FROM dropship_refunds LIMIT 0`;
+    await tx`SELECT original_document_id,document_id,actor_id FROM dropship_document_replacements LIMIT 0`;
     await tx`SELECT id,direction,account_label,source_reference,created_by FROM cash_movement_records LIMIT 0`;
     await tx`SELECT id,record_id,version,paid_date,amount_cents,description,lines,status,reason,actor_id FROM cash_movement_versions LIMIT 0`;
     await tx`SELECT record_id,source_key,expense_id,store_id,month FROM cash_source_references LIMIT 0`;

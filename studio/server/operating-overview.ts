@@ -28,13 +28,13 @@ export class OperatingOverview{
    const feeExpenseLinks=await tx`SELECT r.id,r.store_id AS "storeId",r.expense_id AS "expenseId",coalesce(e.version<>(v.expense_snapshot->>'version')::int,false) AS "sourceChanged"
     FROM studio_os.operating_finance_records r JOIN LATERAL(SELECT * FROM studio_os.operating_finance_versions v WHERE v.record_id=r.id ORDER BY version DESC LIMIT 1) v ON true
     LEFT JOIN studio_os.expense_records e ON e.id=r.expense_id WHERE r.kind='fee' AND v.status='active' AND r.expense_id IS NOT NULL`;
-   const dropship=await tx`SELECT d.id AS "documentId",l.store_id AS "storeId",c.value->>'basis' AS basis,c.value->>'amountCents' AS "amountCents"
-    FROM studio_os.dropship_cost_lines l JOIN studio_os.dropship_cost_documents d ON d.id=l.document_id
+   const dropship=await tx`SELECT d.id AS "documentId",l.store_id AS "storeId",c.value->>'basis' AS basis,c.value->>'amountCents' AS "amountCents",(SELECT count(*)>1 FROM studio_os.dropship_effective_documents other JOIN LATERAL(SELECT status FROM studio_os.dropship_cost_versions v WHERE v.document_id=other.id ORDER BY version DESC LIMIT 1) ov ON true WHERE ov.status='active' AND lower(btrim(other.supplier))=lower(btrim(d.supplier)) AND lower(btrim(other.source_reference))=lower(btrim(d.source_reference))) AS "sourceConflict"
+    FROM studio_os.dropship_effective_lines l JOIN studio_os.dropship_effective_documents d ON d.id=l.document_id
     JOIN LATERAL(SELECT * FROM studio_os.dropship_cost_versions v WHERE v.document_id=d.id ORDER BY version DESC LIMIT 1) v ON true
-    JOIN LATERAL jsonb_array_elements(v.lines) c(value) ON c.value->>'lineId'=l.id::text WHERE to_char(d.business_date,'YYYY-MM')=${month}`;
-   const refunds=await tx`SELECT d.id AS "documentId",l.store_id AS "storeId",v.amount_cents AS "amountCents"
-    FROM studio_os.dropship_refunds r JOIN studio_os.dropship_cost_lines l ON l.id=r.line_id JOIN studio_os.dropship_cost_documents d ON d.id=l.document_id
-    JOIN LATERAL(SELECT * FROM studio_os.dropship_refund_versions v WHERE v.refund_id=r.id ORDER BY version DESC LIMIT 1) v ON true WHERE to_char(r.business_date,'YYYY-MM')=${month}`;
+    JOIN LATERAL jsonb_array_elements(v.lines) c(value) ON c.value->>'lineId'=l.id::text WHERE v.status='active' AND to_char(d.business_date,'YYYY-MM')=${month}`;
+   const refunds=await tx`SELECT d.id AS "documentId",l.store_id AS "storeId",v.amount_cents AS "amountCents",(SELECT count(*)>1 FROM studio_os.dropship_effective_documents other JOIN LATERAL(SELECT status FROM studio_os.dropship_cost_versions ov WHERE ov.document_id=other.id ORDER BY version DESC LIMIT 1) ov ON true WHERE ov.status='active' AND lower(btrim(other.supplier))=lower(btrim(d.supplier)) AND lower(btrim(other.source_reference))=lower(btrim(d.source_reference))) AS "sourceConflict"
+    FROM studio_os.dropship_refunds r JOIN studio_os.dropship_effective_lines l ON l.id=r.line_id JOIN studio_os.dropship_effective_documents d ON d.id=l.document_id
+    JOIN LATERAL(SELECT * FROM studio_os.dropship_refund_versions v WHERE v.refund_id=r.id ORDER BY version DESC LIMIT 1) v ON true JOIN LATERAL(SELECT status FROM studio_os.dropship_cost_versions dv WHERE dv.document_id=d.id ORDER BY version DESC LIMIT 1) dv ON true WHERE v.status='active' AND dv.status='active' AND to_char(r.business_date,'YYYY-MM')=${month}`;
    const inventoryCosts=[...await inventoryCostSummary(tx,month),...await sampleCostSummary(tx,month)];
    return operatingOverview({stores,incomes,expenses,fees:operating.filter(r=>r.kind==='fee'),daily:operating.filter(r=>r.kind!=='fee'),dropship,refunds,movements:await stockCostMovements(tx),packaging:[],inventoryCosts,feeExpenseLinks},month);
   });

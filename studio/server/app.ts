@@ -396,6 +396,12 @@ export async function createStudioApp(
     dropshipCreate(@Req() r:AuthRequest,@Body() b:unknown){return dropshipCosts.create(r.identity!,b);}
     @Post('dropship-costs/:id')
     dropshipRevise(@Req() r:AuthRequest,@Param('id') id:string,@Body() b:unknown){return dropshipCosts.revise(r.identity!,id,b);}
+    @Post('dropship-costs/:id/facts')
+    dropshipCorrectFacts(@Req() r:AuthRequest,@Param('id') id:string,@Body() b:unknown){return dropshipCosts.correctFacts(r.identity!,id,b);}
+    @Post('dropship-costs/:id/void')
+    dropshipVoid(@Req() r:AuthRequest,@Param('id') id:string,@Body() b:unknown){return dropshipCosts.void(r.identity!,id,b);}
+    @Post('dropship-costs/:id/refunds/:refundId/void')
+    dropshipRefundVoid(@Req() r:AuthRequest,@Param('id') id:string,@Param('refundId') refundId:string,@Body() b:unknown){return dropshipCosts.void(r.identity!,id,b,refundId);}
     @Post('dropship-costs/:id/refunds')
     dropshipRefund(@Req() r:AuthRequest,@Param('id') id:string,@Body() b:unknown){return dropshipCosts.refund(r.identity!,id,b);}
     @Get('product-opening-costs/:id')
@@ -1963,7 +1969,7 @@ export async function createStudioApp(
       if(req.path==='/api/dropship-costs'||req.path.startsWith('/api/dropship-costs/')){
         requirePermission(req.identity,'finance');
         if(req.method==='GET'&&/^\/api\/dropship-costs(?:\/[^/]+(?:\/[^/]+)?)?$/.test(req.path))return true;
-        if(req.method==='POST'&&/^\/api\/dropship-costs(?:\/[^/]+(?:\/refunds)?)?$/.test(req.path)){requirePermission(req.identity,'resources');auth.csrf(req);return true;}
+        if(req.method==='POST'&&/^\/api\/dropship-costs(?:\/[^/]+(?:\/(?:refunds|void|facts)|\/refunds\/[^/]+\/void)?)?$/.test(req.path)){requirePermission(req.identity,'resources');auth.csrf(req);return true;}
         throw new ForbiddenException();
       }
       if(req.path.startsWith('/api/product-opening-costs/')){

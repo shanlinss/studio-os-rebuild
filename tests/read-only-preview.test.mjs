@@ -224,3 +224,7 @@ test('cash correspondence preview permits only source, list and history reads, n
  try{for(const p of [path+'?month=2026-11&direction=out&status=active&q=bank&offset=50',path+'/'+id+'?offset=50','/api/finance/cash-sources?month=2026-10&kind=income&q=shop&offset=50'])assert.equal((await request(port,p)).status,200);assert.equal((await request(port,path+'/'+id+'?month=2026-11')).status,400);assert.equal((await request(port,path+'/receipts/'+id+'?operation=create')).status,404);assert.equal((await request(port,path+'/'+id+'/void')).status,404);assert.equal((await request(port,path+'/'+id,{method:'POST'})).status,405);assert.equal(seen.length,3);for(const p of ['/cash-correspondence-contract.mjs','/cash-correspondence-editors.mjs','/cash-correspondence-view.mjs'])assert.equal((await request(port,p)).status,200);
  }finally{await close(preview);await close(upstream);}
 });
+test('dropship correction actions and private void recovery remain blocked by the read-only preview',async()=>{
+ const id='11111111-1111-4111-8111-111111111111',preview=createPreviewServer();await listen(preview);const port=preview.address().port;
+ try{for(const p of ['/api/dropship-costs/'+id+'/void','/api/dropship-costs/'+id+'/facts','/api/dropship-costs/'+id+'/refunds/'+id+'/void']){assert.equal((await request(port,p)).status,404);assert.equal((await request(port,p,{method:'POST'})).status,405);}assert.equal((await request(port,'/api/dropship-costs/receipts/'+id+'?operation=void&target='+id)).status,404);}finally{await close(preview);}
+});
