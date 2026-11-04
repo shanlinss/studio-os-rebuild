@@ -12,6 +12,9 @@ import {InventoryAccess} from './inventory-access';
 import {Warehouse} from './warehouse';
 import {Equipment} from './equipment';
 import {PhoneCards} from './phone-cards';
+import {PhoneCardFinance} from './phone-card-finance';
+import {PhoneCardReminders} from './phone-card-reminders';
+import {cardOperationReceipt} from './phone-card-operations';
 import {EquipmentPurchase} from './equipment-purchase';
 import {AccountLifecycle} from './account-lifecycle';
 import {AccountAccess} from './account-access';
@@ -112,6 +115,8 @@ export async function createStudioApp(
   const accountPermissions = new AccountPermissions(database);
   const inventoryAccess = new InventoryAccess(database);
   const phoneCards = new PhoneCards(database);
+  const phoneCardFinance = new PhoneCardFinance(database);
+  const phoneCardReminders = new PhoneCardReminders(database);
   const equipmentPurchase = new EquipmentPurchase(database);
   const accountLifecycle = new AccountLifecycle(database);
   const equipment = new Equipment(database);
@@ -341,6 +346,20 @@ export async function createStudioApp(
     }
     @Get('warehouse/items') warehouseCatalog(@Req() r: AuthRequest) { return warehouse.catalog(r.identity!,r.query); }
     @Get('phone-cards') phoneCardCatalog(@Req() r:AuthRequest){return phoneCards.catalog(r.identity!,r.query);}
+    @Get('phone-card-finance/:id') phoneCardFinanceState(@Req() r:AuthRequest,@Param('id') id:string){return phoneCardFinance.state(r.identity!,id);}
+    @Get('phone-card-finance/:id/recharges') phoneCardRecharges(@Req() r:AuthRequest,@Param('id') id:string){return phoneCardFinance.recharges(r.identity!,id,r.query);}
+    @Post('phone-card-finance/:id/recharges') phoneCardRechargeCreate(@Req() r:AuthRequest,@Param('id') id:string,@Body() b:unknown){return phoneCardFinance.recharge(r.identity!,id,b);}
+    @Get('phone-card-finance/:id/recharges/:record') phoneCardRechargeDetail(@Req() r:AuthRequest,@Param('id') id:string,@Param('record') record:string){return phoneCardFinance.rechargeDetail(r.identity!,id,record);}
+    @Post('phone-card-finance/:id/recharges/:record') phoneCardRechargeCorrect(@Req() r:AuthRequest,@Param('id') id:string,@Param('record') record:string,@Body() b:unknown){return phoneCardFinance.recharge(r.identity!,id,b,record);}
+    @Post('phone-card-finance/:id/recharges/:record/void') phoneCardRechargeVoid(@Req() r:AuthRequest,@Param('id') id:string,@Param('record') record:string,@Body() b:unknown){return phoneCardFinance.void(r.identity!,id,record,b);}
+    @Get('phone-card-finance/:id/recharges/:record/history') phoneCardRechargeHistory(@Req() r:AuthRequest,@Param('id') id:string,@Param('record') record:string){return phoneCardFinance.rechargeHistory(r.identity!,id,record,r.query);}
+    @Get('phone-card-finance/:id/balances') phoneCardBalances(@Req() r:AuthRequest,@Param('id') id:string){return phoneCardFinance.balances(r.identity!,id,r.query);}
+    @Post('phone-card-finance/:id/balances') phoneCardBalanceSave(@Req() r:AuthRequest,@Param('id') id:string,@Body() b:unknown){return phoneCardFinance.balance(r.identity!,id,b);}
+    @Get('phone-card-reminders') phoneCardReminderCatalog(@Req() r:AuthRequest){return phoneCardReminders.catalog(r.identity!,r.query);}
+    @Get('phone-card-reminders/:id') phoneCardReminderState(@Req() r:AuthRequest,@Param('id') id:string){return phoneCardReminders.state(r.identity!,id);}
+    @Post('phone-card-reminders/:id') phoneCardReminderSave(@Req() r:AuthRequest,@Param('id') id:string,@Body() b:unknown){return phoneCardReminders.save(r.identity!,id,b);}
+    @Get('phone-card-reminders/:id/history') phoneCardReminderHistory(@Req() r:AuthRequest,@Param('id') id:string){return phoneCardReminders.history(r.identity!,id,r.query);}
+    @Get('phone-card-operations/receipts/:key') phoneCardOperationReceipt(@Req() r:AuthRequest,@Param('key') key:string){return cardOperationReceipt(database,r.identity!,key);}
     @Get('phone-cards/options') phoneCardOptions(@Req() r:AuthRequest){return phoneCards.options(r.identity!);}
     @Get('phone-cards/receipts/:key') phoneCardReceipt(@Req() r:AuthRequest,@Param('key') key:string){return phoneCards.receipt(r.identity!,key);}
     @Get('phone-cards/:id') phoneCardDetail(@Req() r:AuthRequest,@Param('id') id:string){return phoneCards.detail(r.identity!,id);}
@@ -1717,6 +1736,15 @@ export async function createStudioApp(
         } else sectionFor(req.identity, id);
         return true;
       }
+      if(req.path.startsWith('/api/phone-card-finance/')){
+        requirePermission(req.identity,'resources');requirePermission(req.identity,'finance');const route=req.path.slice('/api/phone-card-finance/'.length);
+        const allowed=(req.method==='GET'&&/^[^/]+(?:\/(?:balances|recharges(?:\/[^/]+(?:\/history)?)?))?$/.test(route))||(req.method==='POST'&&/^[^/]+\/(?:balances|recharges(?:\/[^/]+(?:\/void)?)?)$/.test(route));
+        if(!allowed)throw new ForbiddenException();if(req.method!=='GET')auth.csrf(req);return true;
+      }
+      if(req.path==='/api/phone-card-reminders'||req.path.startsWith('/api/phone-card-reminders/')){
+        requirePermission(req.identity,'resources');const route=req.path.slice('/api/phone-card-reminders'.length),allowed=(req.method==='GET'&&/^(|\/[^/]+(?:\/history)?)$/.test(route))||(req.method==='POST'&&/^\/[^/]+$/.test(route));if(!allowed)throw new ForbiddenException();if(req.method!=='GET')auth.csrf(req);return true;
+      }
+      if(req.method==='GET'&&/^\/api\/phone-card-operations\/receipts\/[^/]+$/.test(req.path)){requirePermission(req.identity,'resources');return true;}
       if(req.path==='/api/phone-cards'||req.path.startsWith('/api/phone-cards/')){
         requirePermission(req.identity,'resources');
         const route=req.path.slice('/api/phone-cards'.length),allowed=(req.method==='GET'&&/^(|\/options|\/receipts\/[^/]+|\/[^/]+(?:\/(?:history|identity))?)$/.test(route))||(req.method==='POST'&&/^(|\/[^/]+\/identity)$/.test(route))||(req.method==='PATCH'&&/^\/[^/]+$/.test(route));

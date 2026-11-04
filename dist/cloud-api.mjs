@@ -1,3 +1,4 @@
+import {financeState,rechargeRecord,rechargePage,rechargeHistory,balancePage,reminderState,reminderHistory,reminderPage,rechargePayload,voidPayload,balancePayload,reminderPayload,operationPath,operationAction,operationResult} from './phone-card-finance-contract.mjs';
 import {phoneCard,phoneCardPage,phoneCardHistory,phoneCardIdentity,phoneCardOptions,phoneCardPayload,phoneCardIdentityPayload,phoneCardResult} from './phone-cards-contract.mjs';
 import {handoverState,handoverPayload,handoverPage} from './equipment-assets-contract.mjs';
 import {equipmentPurchaseState,equipmentPurchaseHistory,equipmentPurchasePayload,equipmentPurchaseResult} from './equipment-purchase-contract.mjs';
@@ -154,6 +155,19 @@ export function createCloudApi(fetcher=globalThis.fetch,{allowWrites=false}={}){
     async warehouseTransfers(id,offset=0,bySample=false,signal){const path=bySample?'/api/samples/catalog/'+endpointId(id)+'/transfers':'/api/warehouse/items/'+endpointId(id)+'/transfers';return read(path+'?offset='+String(offset),signal,sampleTransferPage);},
     async warehouseWrite(action,id,value,version){return mutations.send(warehousePath(action,id),action==='edit'?'PATCH':'POST',warehousePayload(action,value,version));},
     async warehouseReceipt(key,action,id){const path=warehousePath(action,id);try{const result=await get('/api/warehouse/receipts/'+endpointId(key));if(!record(result)||typeof result.id!=='string')throw new ContractError();endpointId(result.id);if(result.movementId!==undefined)endpointId(result.movementId);if(action==='transfer'){for(const key of ['movementId','transferId','sampleId','sampleEventId'])endpointId(result[key]);}mutations.confirmRead(path);return result;}catch(e){if(e.status===404){mutations.confirmRead(path);return null;}throw e;}},
+    async cardFinanceState(id,signal){return financeState(await get('/api/phone-card-finance/'+endpointId(id),signal),id);},
+    async cardRecharges(id,params={},signal){const q=new URLSearchParams({offset:String(params.offset||0),status:params.status||'all'});for(const k of ['q','from','to','storeId'])if(params[k])q.set(k,params[k]);return rechargePage(await get('/api/phone-card-finance/'+endpointId(id)+'/recharges?'+q,signal),id);},
+    async cardRecharge(id,root,signal){return rechargeRecord(await get('/api/phone-card-finance/'+endpointId(id)+'/recharges/'+endpointId(root),signal),id,root);},
+    async cardRechargeHistory(id,root,offset=0,signal){if(!Number.isSafeInteger(offset)||offset<0)throw new ContractError();return rechargeHistory(await get('/api/phone-card-finance/'+endpointId(id)+'/recharges/'+endpointId(root)+'/history?offset='+offset,signal),id,root);},
+    async cardBalances(id,offset=0,signal){if(!Number.isSafeInteger(offset)||offset<0)throw new ContractError();return balancePage(await get('/api/phone-card-finance/'+endpointId(id)+'/balances?offset='+offset,signal),id);},
+    async cardReminderState(id,signal){return reminderState(await get('/api/phone-card-reminders/'+endpointId(id),signal),id);},
+    async cardReminderHistory(id,offset=0,signal){if(!Number.isSafeInteger(offset)||offset<0)throw new ContractError();return reminderHistory(await get('/api/phone-card-reminders/'+endpointId(id)+'/history?offset='+offset,signal),id);},
+    async cardReminders(params={},signal){const q=new URLSearchParams({offset:String(params.offset||0)});if(params.until)q.set('until',params.until);return reminderPage(await get('/api/phone-card-reminders?'+q,signal));},
+    async saveCardRecharge(id,value,root){return mutations.send(operationPath(root?'correct':'recharge',id,root),'POST',rechargePayload(value,!!root));},
+    async voidCardRecharge(id,root,value){return mutations.send(operationPath('void',id,root),'POST',voidPayload(value));},
+    async saveCardBalance(id,value){return mutations.send(operationPath('balance',id),'POST',balancePayload(value));},
+    async saveCardReminder(id,value){return mutations.send(operationPath('reminder',id),'POST',reminderPayload(value));},
+    async cardOperationReceipt(kind,id,key,root){const path=operationPath(kind,id,root),action=operationAction(kind,id,root);try{const result=operationResult(await get('/api/phone-card-operations/receipts/'+endpointId(key)),id,action,root);mutations.confirmRead(path,{exact:true});return result;}catch(e){if(e.status===404){mutations.confirmRead(path,{exact:true});return null;}throw e;}},
     async phoneCards(params={},signal){const q=new URLSearchParams({q:params.q||'',status:params.status||'current',offset:String(params.offset||0)});for(const k of ['deviceId','accountId','storeId'])if(params[k])q.set(k,endpointId(params[k]));return phoneCardPage(await get('/api/phone-cards?'+q,signal));},
     async phoneCard(id,signal){return phoneCard(await get('/api/phone-cards/'+endpointId(id),signal),id);},
     async phoneCardOptions(signal){return phoneCardOptions(await get('/api/phone-cards/options',signal));},

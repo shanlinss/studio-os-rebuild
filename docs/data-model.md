@@ -115,3 +115,7 @@ id、variant、observedAt（北京时间）、window、url、note、metrics（na
 ## 手机卡与实名版本（2026-11-03）
 
 054扩展原accounts.admin_permissions合法集合新增resource_identity，不自动赋权。phone_cards记录独立卡号/号码/状态/套餐/到期日期/原成员设备店铺引用；phone_card_accounts保存原运营账号的明确多对多关联。phone_card_events、phone_card_identities与phone_card_receipts不可改写。实名版本单独保存主体、原因、操作者与当时卡号/号码/普通档案版本快照，普通字段及事件不读取实名表。姓名/旧号码字段均不被卡片关联默改。见phone-cards.md。
+
+## 手机卡充值、余额与日期提醒（2026-11-03）
+
+055新增phone_card_recharges不可改写根、phone_card_recharge_versions追加金额/来源/状态/经办/付款/归属历史、phone_card_balances独立查询时点版本、phone_card_reminder_versions独立公开日期配置及phone_card_operation_receipts私人操作回执。经办人保留成员或原账号ID，录入者另存；原始卡号/号码快照在充值后续版本不变。复用原卡片行锁与原expense_id及其版本，读写financial需resources+finance，公开提醒仅resources且不查金额/实名。无平行账本/原始余额累计值。

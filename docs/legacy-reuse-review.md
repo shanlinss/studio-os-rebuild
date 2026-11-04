@@ -90,3 +90,7 @@
 ## 手机卡与实名版本（2026-11-03）
 
 先检索旧独立后端phone/sim_card/实名/mobile/card_id及原020_business_account_details.sql、business-accounts.ts。可直接沿用原号码字段、账号/成员/设备/店铺ID、鉴权/CSRF/版本/授权管理，但没有独立SIM卡或实名版本可直接复制。054只补缺失模型，不把bound_phone/actual_phone自动导入为卡或实名事实，也不复制原运营账号/设备。原ZIP未挂载，本轮读取现有解包参考。
+
+## 手机卡充值、余额与提醒（2026-11-03）
+
+本轮先检索旧独立后端/迁移的recharge、balance、充值、余额；无完成的SIM模型可直接套用。复用已有finance/money.ts金额工具、expense_records与版本、members/stores/card ID、现有授权/CSRF/前端网关及原首页布局，只补055事实表与对应服务。充值记录只SELECT引用原支出，不创建另一份费用、付款或报销；余额不复用累计充值冒充运营商实数。旧ZIP未挂载，本轮使用已解包参考。
