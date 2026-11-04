@@ -1,3 +1,4 @@
+import {operatingPage,operatingDetail,operatingQuery,operatingPayload,operatingVoid} from './operating-finance-contract.mjs';
 import {referenceState,referencePayload,dropshipList,dropshipOptions,dropshipDetail,dropshipPayload,dropshipRefundPayload} from './cost-sources-contract.mjs';
 import {openingState,openingHistory,openingPayload} from './product-opening-contract.mjs';
 import {costMonth,costCatalog,costReview} from './product-cost-contract.mjs';
@@ -150,6 +151,11 @@ export function createCloudApi(fetcher=globalThis.fetch,{allowWrites=false}={}){
     async tasks(profile,user,signal){if(!profile)return [];return ownTasks(await get('/api/tasks',signal),profile,user.role);},
     async task(id,signal){return read('/api/tasks/'+endpointId(id),signal,taskModel);},
     async todos(signal){return read('/api/workbench/todos',signal,v=>list(v).map(todoModel));},
+    async operatingRecords(params={},signal){return read('/api/finance/operating-records?'+operatingQuery(params),signal,operatingPage);},
+    async operatingRecord(id,offset=0,signal){return read('/api/finance/operating-records/'+endpointId(id)+'?offset='+offset,signal,v=>operatingDetail(v,id));},
+    async saveOperatingRecord(id,value){return mutations.send('/api/finance/operating-records'+(id?'/'+endpointId(id):''),'POST',operatingPayload(value,!!id));},
+    async voidOperatingRecord(id,value){return mutations.send('/api/finance/operating-records/'+endpointId(id)+'/void','POST',operatingVoid(value));},
+    async operatingReceipt(key,operation,target=null){if(!['create','revise','void'].includes(operation)||(operation==='create')!==(target===null))throw new ContractError();const path='/api/finance/operating-records'+(target?'/'+endpointId(target):'')+(operation==='void'?'/void':'');try{const r=await get('/api/finance/operating-records/receipts/'+endpointId(key)+'?'+new URLSearchParams({operation,...(target?{target}:{})}));if(!r||target&&r.id!==target||!Number.isSafeInteger(r.version)||r.version<1)throw new ContractError();endpointId(r.id);mutations.confirmRead(path);return r;}catch(e){if(e.status===404){mutations.confirmRead(path);return null;}throw e;}},
     async finance(signal){return read('/api/finance',signal,financeRecord);},
     async competitors(signal){return namedList(await get('/api/competitors',signal));},
     async referenceCost(id,month,offset=0,signal){costMonth(month);return read('/api/product-reference-costs/'+endpointId(id)+'?month='+month+'&offset='+offset,signal,v=>referenceState(v,id,month));},

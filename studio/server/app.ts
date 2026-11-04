@@ -1,3 +1,4 @@
+import {OperatingFinance} from './operating-finance';
 import {DropshipCosts} from './dropship-costs';
 import {ProductReferenceCosts} from './product-reference-costs';
 import {EmploymentDates} from './employment-dates';
@@ -136,6 +137,7 @@ export async function createStudioApp(
   const templates = new Templates(database);
   const competitors = new Competitors(database);
   const finance = new Finance(database);
+  const operatingFinance=new OperatingFinance(database);
   const cookie = 'studio_session';
   @Controller('api')
   class InfrastructureController {
@@ -1224,6 +1226,18 @@ export async function createStudioApp(
       return knowledge.clearCover(r.identity!, id, b);
     }
 
+    @Get('finance/operating-records')
+    operatingFinanceList(@Req() r:AuthRequest){return operatingFinance.list(r.identity!,r.query);}
+    @Get('finance/operating-records/receipts/:key')
+    operatingFinanceReceipt(@Req() r:AuthRequest,@Param('key') key:string){const q=objectInput(r.query,['operation','target']);return operatingFinance.receipt(r.identity!,key,String(q.operation),q.target?String(q.target):null);}
+    @Get('finance/operating-records/:id')
+    operatingFinanceDetail(@Req() r:AuthRequest,@Param('id') id:string){return operatingFinance.detail(r.identity!,id,r.query);}
+    @Post('finance/operating-records')
+    operatingFinanceCreate(@Req() r:AuthRequest,@Body() b:unknown){return operatingFinance.save(r.identity!,null,b);}
+    @Post('finance/operating-records/:id')
+    operatingFinanceRevise(@Req() r:AuthRequest,@Param('id') id:string,@Body() b:unknown){return operatingFinance.save(r.identity!,id,b);}
+    @Post('finance/operating-records/:id/void')
+    operatingFinanceVoid(@Req() r:AuthRequest,@Param('id') id:string,@Body() b:unknown){return operatingFinance.void(r.identity!,id,b);}
     @Get('finance')
     financeList(@Req() r: AuthRequest) {
       return finance.list(r.identity!);

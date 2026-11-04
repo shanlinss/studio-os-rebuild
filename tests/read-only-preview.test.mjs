@@ -182,3 +182,11 @@ test('reference and dropship preview supports exact reads while refusing cost wr
  for(const p of ['/cost-sources-contract.mjs','/cost-sources-view.mjs','/cost-sources-editors.mjs'])assert.equal((await request(port,p)).status,200);
  }finally{await close(preview);await close(upstream);}
 });
+test('operating finance preview forwards only daily record reads and never private recovery or void actions',async()=>{
+ const id='11111111-1111-4111-8111-111111111111',seen=[];
+ const upstream=http.createServer((req,res)=>{seen.push(req.url);res.writeHead(200,{'Content-Type':'application/json'});res.end('{}');});await listen(upstream);const preview=createPreviewServer({upstreamPort:upstream.address().port});await listen(preview);const port=preview.address().port,path='/api/finance/operating-records';
+ try{for(const p of [path+'?month=2026-01&kind=refund&status=all&storeId='+id+'&q=source&offset=50',path+'/'+id+'?offset=50'])assert.equal((await request(port,p)).status,200);
+ assert.equal((await request(port,path+'/receipts/'+id+'?operation=create')).status,404);assert.equal((await request(port,path+'/'+id+'/void',{method:'POST'})).status,405);assert.equal((await request(port,path+'/'+id+'?month=2026-01')).status,400);assert.equal(seen.length,2);
+ for(const p of ['/operating-finance-contract.mjs','/operating-finance-view.mjs','/operating-finance-editors.mjs'])assert.equal((await request(port,p)).status,200);
+ }finally{await close(preview);await close(upstream);}
+});
