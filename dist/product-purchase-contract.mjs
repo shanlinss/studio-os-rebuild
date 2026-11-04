@@ -24,7 +24,7 @@ export function productPurchaseHistory(v){
  v.rows.forEach(record);return v;
 }
 export function productPurchasePayload(v){
- if(!v||Object.keys(v).some(k=>!['requestKey','expectedVersion','code','purchaseDate','supplier','expenseId','expenseVersion','reason','lines'].includes(k))||!validDate(v.purchaseDate)||!Array.isArray(v.lines)||!v.lines.length||v.lines.length>100)throw new ContractError();
+ if(!v||Object.keys(v).some(k=>!['requestKey','expectedVersion','code','purchaseDate','supplier','expenseId','expenseVersion','reason','lines','stockCorrectionVersion'].includes(k))||!validDate(v.purchaseDate)||!Array.isArray(v.lines)||!v.lines.length||v.lines.length>100)throw new ContractError();
  const expectedVersion=integer(v.expectedVersion),lines=v.lines.map(line=>{
   if(!line||Object.keys(line).some(k=>!['movementId','unitPrice','additionalAmount'].includes(k)))throw new ContractError();
   for(const key of ['unitPrice','additionalAmount'])if(typeof line[key]!=='string'||!/^\d{1,8}(?:\.\d{1,2})?$/.test(line[key]))throw new ContractError('采购金额最多填写两位小数，实际为零请填 0。');
@@ -33,5 +33,5 @@ export function productPurchasePayload(v){
  if(new Set(lines.map(line=>line.movementId)).size!==lines.length)throw new ContractError('采购明细不能重复。');
  const expenseId=v.expenseId===null?null:id(v.expenseId);
  if(expenseId?(integer(v.expenseVersion)===0):v.expenseVersion!==null)throw new ContractError();
- return {requestKey:id(v.requestKey),expectedVersion,code:text(v.code,64),purchaseDate:v.purchaseDate,supplier:text(v.supplier,150),expenseId,expenseVersion:v.expenseVersion,reason:text(v.reason,2000),lines};
+ return {requestKey:id(v.requestKey),expectedVersion,code:text(v.code,64),purchaseDate:v.purchaseDate,supplier:text(v.supplier,150),expenseId,expenseVersion:v.expenseVersion,reason:text(v.reason,2000),lines,...(v.stockCorrectionVersion===undefined?{}:{stockCorrectionVersion:integer(v.stockCorrectionVersion)})};
 }

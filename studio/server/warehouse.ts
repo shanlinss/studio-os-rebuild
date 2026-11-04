@@ -483,17 +483,17 @@ export class Warehouse {
  }
  private async returnShipment(tx:TransactionSql,who:Identity,id:string){
   const manager=await this.consumptionManager(tx,who);
-  const [document]=await tx`SELECT id,business_date::text AS "businessDate" FROM studio_os.product_stock_documents
-   WHERE id=${id} AND operation='shipment' AND (${manager} OR actor_id=${who.id})`;
+  const [document]=await tx`SELECT id,business_date::text AS "businessDate",correction_version AS "correctionVersion" FROM studio_os.product_stock_effective_documents
+   WHERE id=${id} AND operation='shipment' AND status='active' AND (${manager} OR actor_id=${who.id})`;
   if(!document)throw new NotFoundException();
   const lines=await tx`SELECT id,item_id,packaging_balance_id AS "balanceId",quantity,business_store_id AS "businessStoreId",item_snapshot AS snapshot
-   FROM studio_os.warehouse_movements WHERE product_stock_document_id=${id} ORDER BY id`;
+   FROM studio_os.product_stock_cost_movements WHERE product_stock_document_id=${id} ORDER BY id`;
   if(!manager)await this.consumptionSources(tx,who,lines.map(row=>row.balanceId),false,'product');
   return {document,lines};
  }
  async returnProductStock(who:Identity,shipmentId:string,value:unknown){
   shipmentId=uuid(shipmentId);
-  const b=objectInput(value,['requestKey','businessDate','sourceReference','reason','resellableConfirmed','lines']);
+  const b=objectInput(value,['requestKey','businessDate','sourceReference','reason','resellableConfirmed','lines','sourceDocumentVersion']);
   if(b.resellableConfirmed!==true||!Array.isArray(b.lines)||!b.lines.length||b.lines.length>100)throw new BadRequestException('请确认实物已验收且可重新销售');
   const date=purchaseDay(b.businessDate),reference=optionalLongText(b.sourceReference,200),reason=longText(b.reason,2000);
   const lines=b.lines.map(value=>{
@@ -503,6 +503,7 @@ export class Warehouse {
   if(new Set(lines.map(row=>row.shipmentMovementId)).size!==lines.length)throw new BadRequestException('同一发货明细只能填写一次');
   let original:Awaited<ReturnType<Warehouse['returnShipment']>>;
   return this.write(who,'product-stock:return:'+shipmentId,b,async tx=>{
+   if((b.sourceDocumentVersion??0)!==original.document.correctionVersion)throw new ConflictException('原发货单已更正，请重新读取后登记退货');
    if(date<original.document.businessDate)throw new BadRequestException('退货日期不能早于原发货日期');
    const selected=lines.map(line=>({line,source:original.lines.find(row=>row.id===line.shipmentMovementId)!}));
    const itemIds=[...new Set(selected.map(row=>row.source.item_id))];
@@ -514,8 +515,8 @@ export class Warehouse {
     WHERE k.warehouse_item_id=ANY(${tx.array(itemIds)}::uuid[]) AND k.active AND p.active ORDER BY k.id FOR SHARE OF k,p`;
    if(skus.length!==itemIds.length)throw new ConflictException('商品 SKU 已变化');
    const previous=await tx`SELECT r.shipment_movement_id AS id,sum(m.quantity)::text AS quantity
-    FROM studio_os.product_stock_returns r JOIN studio_os.warehouse_movements m ON m.id=r.return_movement_id
-    WHERE r.shipment_movement_id=ANY(${tx.array(lines.map(row=>row.shipmentMovementId))}::uuid[]) GROUP BY r.shipment_movement_id`;
+    FROM studio_os.product_stock_returns r JOIN studio_os.product_stock_cost_movements m ON m.id=r.return_movement_id
+    WHERE NOT m.cost_excluded AND r.shipment_movement_id=ANY(${tx.array(lines.map(row=>row.shipmentMovementId))}::uuid[]) GROUP BY r.shipment_movement_id`;
    const returned=new Map(previous.map(row=>[row.id,Number(row.quantity)])),totals=new Map<string,number>();
    for(const {line,source} of selected){
     const balance=byBalance.get(source.balanceId)!;
@@ -538,6 +539,7 @@ export class Warehouse {
    for(const [id,count] of totals)await tx`UPDATE studio_os.warehouse_items SET quantity=quantity+${count},version=version+1,updated_at=now() WHERE id=${id}`;
    return {id:document.id};
   },async tx=>{
+   await tx`SELECT pg_advisory_xact_lock(hashtextextended(${'product-stock-document:'+shipmentId},0))`;
    original=await this.returnShipment(tx,who,shipmentId);
    const selected=lines.map(line=>original.lines.find(row=>row.id===line.shipmentMovementId));
    if(selected.some(row=>!row))throw new BadRequestException('退货明细不属于原发货单');
@@ -549,16 +551,16 @@ export class Warehouse {
   return this.db.client.begin(async tx=>{
    await tx`SET TRANSACTION ISOLATION LEVEL REPEATABLE READ READ ONLY`;
    const manager=await this.consumptionManager(tx,who);
-   const [document]=await tx`SELECT d.id,d.operation,d.business_date::text AS "businessDate",d.source_reference AS "sourceReference",d.reason,d.source_shipment_id AS "sourceShipmentId",d.resellable_confirmed AS "resellableConfirmed",d.created_at AS "createdAt",a.username AS actor
-    FROM studio_os.product_stock_documents d JOIN studio_os.accounts a ON a.id=d.actor_id WHERE d.id=${id} AND (${manager} OR d.actor_id=${who.id})`;
+   const [document]=await tx`SELECT d.id,d.operation,d.business_date::text AS "businessDate",d.source_reference AS "sourceReference",d.reason,d.source_shipment_id AS "sourceShipmentId",d.resellable_confirmed AS "resellableConfirmed",d.created_at AS "createdAt",a.username AS actor,d.status,d.correction_version AS "correctionVersion"
+    FROM studio_os.product_stock_effective_documents d JOIN studio_os.accounts a ON a.id=d.actor_id WHERE d.id=${id} AND (${manager} OR d.actor_id=${who.id})`;
    if(!document)throw new NotFoundException();
-   const lines=await tx`SELECT m.id,m.quantity,m.packaging_balance_id AS "balanceId",m.item_snapshot AS snapshot,
+   const lines=await tx`SELECT m.id,m.quantity,raw.quantity AS "originalQuantity",m.packaging_balance_id AS "balanceId",m.item_snapshot AS snapshot,
     m.before_quantity AS "beforeQuantity",m.after_quantity AS "afterQuantity",b.version AS "currentVersion",
-    (${document.operation==='shipment'} AND w.active AND ${stockKind(tx,'product')} AND (b.store_id IS NULL OR s.active) AND (${manager} OR EXISTS(
+    (${document.operation==='shipment'&&document.status==='active'} AND w.active AND ${stockKind(tx,'product')} AND (b.store_id IS NULL OR s.active) AND (${manager} OR EXISTS(
       SELECT 1 FROM studio_os.inventory_access_grants g WHERE g.account_id=${who.id} AND g.store_id IS NOT DISTINCT FROM b.store_id AND g.can_move))) AS "canReturn",
-    coalesce((SELECT sum(returned.quantity) FROM studio_os.product_stock_returns r JOIN studio_os.warehouse_movements returned ON returned.id=r.return_movement_id
-     WHERE r.shipment_movement_id=m.id),0)::int AS "returnedQuantity"
-    FROM studio_os.warehouse_movements m JOIN studio_os.packaging_balances b ON b.id=m.packaging_balance_id
+    coalesce((SELECT sum(returned.quantity) FROM studio_os.product_stock_returns r JOIN studio_os.product_stock_cost_movements returned ON returned.id=r.return_movement_id
+     WHERE NOT returned.cost_excluded AND r.shipment_movement_id=m.id),0)::int AS "returnedQuantity"
+    FROM studio_os.product_stock_cost_movements m JOIN studio_os.warehouse_movements raw ON raw.id=m.id JOIN studio_os.packaging_balances b ON b.id=m.packaging_balance_id
     JOIN studio_os.warehouse_items w ON w.id=b.item_id LEFT JOIN studio_os.stores s ON s.id=b.store_id
     WHERE m.product_stock_document_id=${id} ORDER BY m.id`;
    if(!manager)await this.consumptionSources(tx,who,lines.map(row=>row.balanceId),false,'product');
@@ -643,6 +645,7 @@ export class Warehouse {
    }
    if(type==='opening'?old.opening_confirmed:!old.opening_confirmed)throw new ConflictException('请先登记期初数量，且只能登记一次');
    if(corrects&&!(await tx`SELECT id FROM studio_os.warehouse_movements WHERE id=${corrects} AND item_id=${itemId} AND packaging_balance_id IS NOT DISTINCT FROM ${balanceId}::uuid FOR SHARE`).length)throw new BadRequestException('纠错流水不属于此库存项目');
+   if(corrects&&(await tx`SELECT id FROM studio_os.warehouse_movements WHERE id=${corrects} AND (product_stock_document_id IS NOT NULL OR EXISTS(SELECT 1 FROM studio_os.product_stock_correction_adjustments a WHERE a.movement_id=${corrects}))`).length)throw new ConflictException('商品单据及其纠错差额请从原单据更正，不使用普通盘点引用来撤销成本');
    if(corrects&&(await tx`SELECT id FROM studio_os.warehouse_sample_transfers WHERE movement_id=${corrects}`).length)throw new ConflictException('转样品记录不支持单边引用撤销，请核对双方实际数量');
    if(corrects&&(await tx`SELECT id FROM studio_os.packaging_stock_transfers WHERE outbound_movement_id=${corrects} OR inbound_movement_id=${corrects}`).length)
     throw new ConflictException('调拨记录需核对双方数量，不能只引用一侧纠错');

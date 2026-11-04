@@ -42,14 +42,15 @@ export function createWarehouseViews({api,h,heading,showPanel,localTime,writable
   await showPanel('商品单据',async signal=>{
    const doc=await api.productStockDocument(id,signal),label=doc.operation==='return'?'商品退货入库单':doc.operation==='inbound'?'商品入库单':'商品发货单';
    return `<div class="dialog-header"><h2>${label}</h2><button class="icon-button" data-warehouse-close aria-label="关闭商品单据">×</button></div>
-    ${writable&&doc.operation==='shipment'&&doc.lines.some(line=>line.canReturn&&line.returnedQuantity<line.quantity)?`<button class="secondary" data-product-stock-return="${h(id)}">登记可重新销售退货</button>`:''}
+    ${doc.status==='void'?'<p class="save-error">本单据已作废，原流水保留，不再计入有效库存成本，也不可继续登记退货。</p>':''}${hasSensitive(getUser(),'finance')&&hasSensitive(getUser(),'resources')?`<button class="secondary" data-stock-correction="${h(id)}">商品单据纠错与历史</button>`:''}
+    ${writable&&doc.status!=='void'&&doc.operation==='shipment'&&doc.lines.some(line=>line.canReturn&&line.returnedQuantity<line.quantity)?`<button class="secondary" data-product-stock-return="${h(id)}">登记可重新销售退货</button>`:''}
     ${doc.operation==='inbound'&&hasSensitive(getUser(),'finance')?`<button class="secondary" data-product-purchase="${h(id)}">采购批次与成本</button>`:''}
     ${doc.sourceShipmentId?`<button class="text-button" data-product-stock-document="${h(doc.sourceShipmentId)}">查看原发货单</button>`:''}
     <p>业务日期 ${h(doc.businessDate)} · ${h(doc.actor)} · 登记 ${h(localTime(doc.createdAt))}</p><p>${h(doc.sourceReference||'未填写来源参考')}</p><p class="preserve-text">${h(doc.reason)}</p>
     ${doc.lines.map(line=>`<article class="observation"><b>${h(line.snapshot.skuCode)} · ${h(line.snapshot.name)} · ${line.quantity} ${h(line.snapshot.unit)}</b>
      <p>库存归属 ${h(line.snapshot.storeName||'公共库存')} · 业务店铺 ${h(line.snapshot.businessStoreName||'公共备货')}</p>
      ${doc.operation==='shipment'?`<p>累计退货 ${line.returnedQuantity??0} · 尚可退 ${line.quantity-(line.returnedQuantity??0)} ${h(line.snapshot.unit)}</p>`:''}
-     <p>余额 ${line.beforeQuantity} → ${line.afterQuantity} ${h(line.snapshot.unit)}</p>
+     <p>原登记余额 ${line.beforeQuantity} → ${line.afterQuantity} ${h(line.snapshot.unit)}${doc.correctionVersion?'；数量差额与当前结余见纠错历史':''}</p>
      ${canWrite()?`<button class="text-button" data-warehouse-detail="${h(line.snapshot.itemId)}">查看原商品库存</button>`:`<button class="text-button" data-scoped-stock-detail="${h(line.balanceId)}" data-stock-kind="product">查看此归属库存</button>`}</article>`).join('')}`;
   });
  }

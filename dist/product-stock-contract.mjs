@@ -26,17 +26,17 @@ export function productStockDetail(v,owner){
   id(line.id);id(line.balanceId);quantity(line.quantity);quantity(line.beforeQuantity);quantity(line.afterQuantity);
   const s=line.snapshot;
   if(!s||typeof s.name!=='string'||typeof s.skuCode!=='string'||!warehouseUnits.includes(s.unit)||(s.businessStoreName!==null&&typeof s.businessStoreName!=='string')||
-    (v.operation==='shipment'&&!s.businessStoreName)||line.afterQuantity-line.beforeQuantity!==(v.operation==='shipment'?-line.quantity:line.quantity))throw new ContractError('商品数量明细不完整。');
+    (v.operation==='shipment'&&!s.businessStoreName)||line.afterQuantity-line.beforeQuantity!==(v.operation==='shipment'?-(line.originalQuantity??line.quantity):(line.originalQuantity??line.quantity)))throw new ContractError('商品数量明细不完整。');
  }
  return v;
 }
 
 export function productReturnPayload(v){
- if(!v||Object.keys(v).some(k=>!['requestKey','businessDate','sourceReference','reason','resellableConfirmed','lines'].includes(k))||v.resellableConfirmed!==true||!validDate(v.businessDate)||!Array.isArray(v.lines)||!v.lines.length||v.lines.length>100)throw new ContractError('请填写退货明细并确认实物可重新销售。');
+ if(!v||Object.keys(v).some(k=>!['requestKey','businessDate','sourceReference','reason','resellableConfirmed','lines','sourceDocumentVersion'].includes(k))||v.resellableConfirmed!==true||!validDate(v.businessDate)||!Array.isArray(v.lines)||!v.lines.length||v.lines.length>100)throw new ContractError('请填写退货明细并确认实物可重新销售。');
  const lines=v.lines.map(line=>{
   if(!line||Object.keys(line).some(k=>!['shipmentMovementId','expectedVersion','quantity'].includes(k))||quantity(line.quantity)===0)throw new ContractError('退货数量须大于零。');
   return {shipmentMovementId:id(line.shipmentMovementId),expectedVersion:expectedVersion(line.expectedVersion),quantity:line.quantity};
  });
  if(new Set(lines.map(line=>line.shipmentMovementId)).size!==lines.length)throw new ContractError('同一发货明细只能填写一次。');
- return {requestKey:id(v.requestKey),businessDate:v.businessDate,sourceReference:text(v.sourceReference,200),reason:text(v.reason,2000,true),resellableConfirmed:true,lines};
+ return {requestKey:id(v.requestKey),businessDate:v.businessDate,sourceReference:text(v.sourceReference,200),reason:text(v.reason,2000,true),resellableConfirmed:true,lines,...(v.sourceDocumentVersion===undefined?{}:{sourceDocumentVersion:quantity(v.sourceDocumentVersion)})};
 }

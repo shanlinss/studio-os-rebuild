@@ -41,6 +41,7 @@ export function createProductStockEditors({api,h,mount,input,area,select}){
  }
  async function productStockReturn(id){
   const doc=await api.productStockDocument(id);
+  if(doc.status==='void')throw new ContractError('原发货已作废。');
   if(doc.operation!=='shipment')throw new ContractError('请从原发货单登记退货。');
   const lines=doc.lines.filter(line=>line.canReturn&&line.returnedQuantity<line.quantity);
   if(!lines.length)throw new ContractError('没有当前获授权且仍可退的发货明细。');
@@ -54,7 +55,7 @@ export function createProductStockEditors({api,h,mount,input,area,select}){
    '<label><input type="checkbox" name="resellableConfirmed" required>实物已收到并验收，确认可重新销售。</label><p class="muted">留空的明细本次不退货。保存后退回原发货库存归属。</p>';
   mount('可重新销售退货入库',body,f=>{
    const selected=lines.flatMap((line,i)=>{const raw=f.get('return'+i);return raw===''?[]:[{shipmentMovementId:line.id,expectedVersion:line.currentVersion,quantity:Number(raw)}];});
-   return api.saveProductStockReturn(id,{requestKey:key,businessDate:f.get('businessDate'),sourceReference:f.get('sourceReference'),reason:f.get('reason'),resellableConfirmed:f.get('resellableConfirmed')==='on',lines:selected});
+   return api.saveProductStockReturn(id,{requestKey:key,sourceDocumentVersion:doc.correctionVersion??0,businessDate:f.get('businessDate'),sourceReference:f.get('sourceReference'),reason:f.get('reason'),resellableConfirmed:f.get('resellableConfirmed')==='on',lines:selected});
   },{kind:'product-stock-document'},()=>api.productStockReceipt(key,id));
  }
  return {productStock,productStockReturn};

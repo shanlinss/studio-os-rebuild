@@ -8,17 +8,17 @@ import {objectInput,uuid,version,shortText,longText} from './validation';
 import {purchaseDay,purchaseExpense} from './equipment-purchase';
 import {optionalMoney} from './money';
 const MAX=2147483647;
-const projection=`v.id,v.version,v.purchase_date::text AS "purchaseDate",v.supplier,v.goods_cents AS "goodsCents",
+const projection=`v.id,v.version,v.stock_correction_version AS "stockCorrectionVersion",v.purchase_date::text AS "purchaseDate",v.supplier,v.goods_cents AS "goodsCents",
  v.additional_cents AS "additionalCents",v.total_cents AS "totalCents",v.expense_id AS "expenseId",v.expense_snapshot AS "expenseSnapshot",
  v.reason,v.actor_name AS actor,v.created_at AS "createdAt",
  (SELECT jsonb_agg(jsonb_build_object('movementId',l.movement_id,'quantity',l.quantity,'unitCents',l.unit_cents,'goodsCents',l.goods_cents,
   'additionalCents',l.additional_cents,'totalCents',l.total_cents,'snapshot',l.item_snapshot) ORDER BY l.movement_id)
   FROM studio_os.product_purchase_lines l WHERE l.version_id=v.id) AS lines`;
-async function inbound(tx:TransactionSql,id:string){
- const [document]=await tx`SELECT id,business_date::text AS "businessDate",source_reference AS "sourceReference" FROM studio_os.product_stock_documents WHERE id=${id} AND operation='inbound'`;
- if(!document)throw new NotFoundException('请引用已保存的商品入库单');
- const lines=await tx`SELECT id,quantity,item_snapshot AS snapshot FROM studio_os.warehouse_movements WHERE product_stock_document_id=${id} ORDER BY id`;
- return {...document,lines};
+async function inbound(tx:TransactionSql,id:string,readOnly=false):Promise<{id:string,businessDate:string,sourceReference:string,status:string,correctionVersion:number,lines:{id:string,quantity:number,snapshot:any}[]}>{
+ const [document]=await tx`SELECT id,business_date::text AS "businessDate",source_reference AS "sourceReference",status,correction_version AS "correctionVersion" FROM studio_os.product_stock_effective_documents WHERE id=${id} AND operation='inbound'`;
+ if(!document)throw new NotFoundException('请引用已保存的商品入库单');if(!readOnly&&document.status!=='active')throw new ConflictException('该入库单已作废，原采购金额保留历史，不能继续确认成本');
+ const lines=await tx`SELECT id,quantity,item_snapshot AS snapshot FROM studio_os.product_stock_cost_movements WHERE product_stock_document_id=${id} ORDER BY id`;
+ return {...document,lines} as unknown as {id:string,businessDate:string,sourceReference:string,status:string,correctionVersion:number,lines:{id:string,quantity:number,snapshot:any}[]};
 }
 function canonical(value:unknown):unknown {
  if(Array.isArray(value))return value.map(canonical);
@@ -31,16 +31,16 @@ export class ProductPurchases {
   await currentPermission(this.db,who,'finance');id=uuid(id);
   return this.db.client.begin(async tx=>{
    await tx`SET TRANSACTION ISOLATION LEVEL REPEATABLE READ READ ONLY`;
-   const document=await inbound(tx,id);
+   const document=await inbound(tx,id,true);
    const [batch]=await tx`SELECT id,code FROM studio_os.product_purchase_batches WHERE inbound_document_id=${id}`;
    const [record]=batch?await tx`SELECT ${tx.unsafe(projection)} FROM studio_os.product_purchase_versions v WHERE v.batch_id=${batch.id} ORDER BY v.version DESC LIMIT 1`:[];
    const expense=record?.expenseId?await purchaseExpense(tx,record.expenseId):null;
-   return {document,batch:batch??null,record:record??null,linkedExpense:expense,sourceChanged:!!expense&&expense.version!==record.expenseSnapshot.version};
+   return {document,batch:batch??null,record:record??null,linkedExpense:expense,sourceChanged:document.status==='void'||!!record&&record.stockCorrectionVersion!==document.correctionVersion||!!expense&&expense.version!==record.expenseSnapshot.version};
   });
  }
  async save(who:Identity,id:string,value:unknown){
   id=uuid(id);
-  const b=objectInput(value,['requestKey','expectedVersion','code','purchaseDate','supplier','expenseId','expenseVersion','reason','lines']);
+  const b=objectInput(value,['requestKey','expectedVersion','code','purchaseDate','supplier','expenseId','expenseVersion','reason','lines','stockCorrectionVersion']);
   const key=uuid(b.requestKey),code=shortText(b.code,64),date=purchaseDay(b.purchaseDate),supplier=shortText(b.supplier,150),reason=longText(b.reason,2000);
   if(!Number.isSafeInteger(b.expectedVersion)||Number(b.expectedVersion)<0||Number(b.expectedVersion)>MAX||!Array.isArray(b.lines)||!b.lines.length||b.lines.length>100)throw new BadRequestException();
   const expenseId=b.expenseId===null?null:uuid(b.expenseId),expenseVersion=expenseId?version(b.expenseVersion):null;
@@ -57,8 +57,10 @@ export class ProductPurchases {
    await tx`SELECT pg_advisory_xact_lock(hashtextextended(${'product-purchase:'+who.id+':'+key},0))`;
    const [old]=await tx`SELECT inbound_document_id,request_hash,result FROM studio_os.product_purchase_receipts WHERE actor_id=${who.id} AND request_key=${key}`;
    if(old){if(old.inbound_document_id!==id||old.request_hash!==hash)throw new ConflictException('请求标识已用于其他采购内容');return old.result;}
+   await tx`SELECT pg_advisory_xact_lock(hashtextextended(${'product-stock-document:'+id},0))`;
    await tx`SELECT pg_advisory_xact_lock(hashtextextended(${'product-purchase-document:'+id},0))`;
    const document=await inbound(tx,id);
+   if((b.stockCorrectionVersion??0)!==document.correctionVersion)throw new ConflictException('入库单数量或业务事实已更正，请重新核对采购金额');
    const byId=new Map(document.lines.map(line=>[line.id,line]));
    if(lines.length!==document.lines.length||lines.some(line=>!byId.has(line.movementId)))throw new BadRequestException('采购成本须覆盖该入库单的全部原明细');
    let [batch]=await tx`SELECT id,code FROM studio_os.product_purchase_batches WHERE inbound_document_id=${id}`;
@@ -81,8 +83,8 @@ export class ProductPurchases {
     if(owner.batch_id!==batch.id)throw new ConflictException('该支出已引用到其他商品采购批次');
    }
    const [record]=await tx`INSERT INTO studio_os.product_purchase_versions(batch_id,version,purchase_date,supplier,goods_cents,additional_cents,total_cents,
-    expense_id,expense_snapshot,reason,actor_id,actor_name) VALUES(${batch.id},${Number(b.expectedVersion)+1},${date},${supplier},${goods},${additional},${goods+additional},
-    ${expenseId},${expense?JSON.stringify(expense):null}::jsonb,${reason},${who.id},${actor.username}) RETURNING id,version`;
+    expense_id,expense_snapshot,reason,actor_id,actor_name,stock_correction_version) VALUES(${batch.id},${Number(b.expectedVersion)+1},${date},${supplier},${goods},${additional},${goods+additional},
+    ${expenseId},${expense?JSON.stringify(expense):null}::jsonb,${reason},${who.id},${actor.username},${document.correctionVersion}) RETURNING id,version`;
    for(const line of priced)await tx`INSERT INTO studio_os.product_purchase_lines(version_id,movement_id,quantity,unit_cents,goods_cents,additional_cents,total_cents,item_snapshot)
     VALUES(${record.id},${line.movementId},${line.quantity},${line.unit},${line.goods},${line.additional},${line.total},${JSON.stringify(line.snapshot)}::jsonb)`;
    const result={id,batchId:batch.id,recordId:record.id,version:record.version};

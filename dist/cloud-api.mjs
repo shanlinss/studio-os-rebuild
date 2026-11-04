@@ -1,3 +1,4 @@
+import {stockCorrectionState,stockCorrectionPayload} from './product-stock-corrections-contract.mjs';
 import {cashPage,cashSourcePage,cashState,cashPayload,cashVoidPayload} from './cash-correspondence-contract.mjs';
 import {sampleCostPage,sampleCostState,sampleCostPayload} from './sample-cost-contract.mjs';
 import {inventoryCostPage,inventoryCostState,inventoryCostPayload} from './inventory-cost-contract.mjs';
@@ -210,6 +211,9 @@ export function createCloudApi(fetcher=globalThis.fetch,{allowWrites=false}={}){
     },
     async productStockOptions(offset=0,signal){return read('/api/product-stock-documents/options?offset='+offset,signal,productStockOptions);},
     async saveProductStockDocument(value){return mutations.send('/api/product-stock-documents','POST',productStockPayload(value));},
+    async stockCorrection(id,offset=0,signal){return read('/api/product-stock-documents/'+endpointId(id)+'/corrections?offset='+offset,signal,v=>stockCorrectionState(v,id));},
+    async saveStockCorrection(id,value,voided=false){return mutations.send('/api/product-stock-documents/'+endpointId(id)+(voided?'/void':'/corrections'),'POST',stockCorrectionPayload(value,voided));},
+    async stockCorrectionReceipt(id,key,voided=false){const path='/api/product-stock-documents/'+endpointId(id)+(voided?'/void':'/corrections');try{const r=await get('/api/product-stock-documents/'+endpointId(id)+'/corrections/receipts/'+endpointId(key));if(r?.id!==id||!Number.isSafeInteger(r.version)||r.version<1)throw new ContractError();endpointId(r.recordId);mutations.confirmRead(path);return r;}catch(e){if(e.status===404){mutations.confirmRead(path);return null;}throw e;}},
     async productStockDocument(id,signal){return read('/api/product-stock-documents/'+endpointId(id),signal,v=>productStockDetail(v,id));},
     async saveProductStockReturn(id,value){return mutations.send('/api/product-stock-documents/'+endpointId(id)+'/returns','POST',productReturnPayload(value));},
     async productStockReceipt(key,shipmentId=null){

@@ -57,6 +57,12 @@ export async function checkReadiness(
     await tx`SELECT id,product_id,code,specification,unit,active,warehouse_item_id FROM product_skus LIMIT 0`;
     await tx`SELECT id,operation,business_date,source_reference,reason,actor_id,source_shipment_id,resellable_confirmed FROM product_stock_documents LIMIT 0`;
     await tx`SELECT document_id,sku_id,store_id FROM dropship_business_references LIMIT 0`;
+    await tx`SELECT id,document_id,version,status,business_date,source_reference,lines,actor_id FROM product_stock_correction_versions LIMIT 0`;
+    await tx`SELECT movement_id,version_id,source_movement_id FROM product_stock_correction_adjustments LIMIT 0`;
+    await tx`SELECT actor_id,request_key,document_id,operation,request_hash,result FROM product_stock_correction_receipts LIMIT 0`;
+    await tx`SELECT id,status,correction_version FROM product_stock_effective_documents LIMIT 0`;
+    await tx`SELECT id,quantity,delta,cost_excluded FROM product_stock_cost_movements LIMIT 0`;
+    await tx`SELECT stock_correction_version FROM product_purchase_versions LIMIT 0`;
     await tx`SELECT document_id,cost_version,business_date,supplier,source_reference,lines,actor_id FROM dropship_business_versions LIMIT 0`;
     await tx`SELECT id,business_date,supplier,source_reference FROM dropship_effective_documents LIMIT 0`;
     await tx`SELECT id,sku_id,store_id,quantity,snapshot FROM dropship_effective_lines LIMIT 0`;

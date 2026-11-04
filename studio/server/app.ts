@@ -1,3 +1,4 @@
+import {ProductStockCorrections} from './product-stock-corrections';
 import {CashCorrespondence} from './cash-correspondence';
 import {SampleCostEvidence} from './sample-cost-evidence';
 import {InventoryCostEvidence} from './inventory-cost-evidence';
@@ -140,6 +141,7 @@ export async function createStudioApp(
   const accountLifecycle = new AccountLifecycle(database);
   const equipment = new Equipment(database);
   const warehouse = new Warehouse(database);
+  const productStockCorrections=new ProductStockCorrections(database);
   const templates = new Templates(database);
   const competitors = new Competitors(database);
   const finance = new Finance(database);
@@ -424,6 +426,14 @@ export async function createStudioApp(
     productPurchaseReceipt(@Req() r:AuthRequest,@Param('id') id:string,@Param('key') key:string){return productPurchases.receipt(r.identity!,id,key);}
     @Post('product-purchases/:id')
     productPurchaseSave(@Req() r:AuthRequest,@Param('id') id:string,@Body() b:unknown){return productPurchases.save(r.identity!,id,b);}
+    @Get('product-stock-documents/:id/corrections')
+    productStockCorrectionState(@Req() r:AuthRequest,@Param('id') id:string){return productStockCorrections.state(r.identity!,id,r.query);}
+    @Get('product-stock-documents/:id/corrections/receipts/:key')
+    productStockCorrectionReceipt(@Req() r:AuthRequest,@Param('id') id:string,@Param('key') key:string){return productStockCorrections.receipt(r.identity!,id,key);}
+    @Post('product-stock-documents/:id/corrections')
+    productStockCorrect(@Req() r:AuthRequest,@Param('id') id:string,@Body() b:unknown){return productStockCorrections.save(r.identity!,id,b);}
+    @Post('product-stock-documents/:id/void')
+    productStockVoid(@Req() r:AuthRequest,@Param('id') id:string,@Body() b:unknown){return productStockCorrections.save(r.identity!,id,b,true);}
     @Get('product-stock-documents/options')
     productStockOptions(@Req() r:AuthRequest){return warehouse.productStockOptions(r.identity!,r.query);}
     @Get('product-stock-documents/receipts/:key')
@@ -1991,6 +2001,7 @@ export async function createStudioApp(
       }
       if(req.path==='/api/product-stock-documents'||req.path.startsWith('/api/product-stock-documents/')){
         requireContributor(req.identity);
+        if(/^\/api\/product-stock-documents\/[^/]+\/(?:corrections(?:\/receipts\/[^/]+)?|void)$/.test(req.path)){requirePermission(req.identity,'finance');requirePermission(req.identity,'resources');if(req.method!=='GET')auth.csrf(req);return ['GET','POST'].includes(req.method);}
         if(req.method==='GET'&&/^\/api\/product-stock-documents\/[^/]+(?:\/[^/]+)?$/.test(req.path))return true;
         if(req.method==='POST'&&(req.path==='/api/product-stock-documents'||/^\/api\/product-stock-documents\/[^/]+\/returns$/.test(req.path))){auth.csrf(req);return true;}
         throw new ForbiddenException();

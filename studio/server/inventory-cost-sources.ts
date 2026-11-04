@@ -22,8 +22,8 @@ export async function inventoryCostSources(tx:TransactionSql,itemId?:string){
   d.operation AS "documentOperation",EXISTS(SELECT 1 FROM studio_os.warehouse_sample_transfers t WHERE t.movement_id=m.id) AS "sampleTransfer",
   ev.id AS "evidenceId",ev.version AS "attributionVersion",ev.scope,ev.store_id AS "costStoreId",ev.expense_id AS "expenseId",ev.expense_snapshot AS "expenseSnapshot",
   EXISTS(SELECT 1 FROM studio_os.operating_finance_records f JOIN LATERAL(SELECT status FROM studio_os.operating_finance_versions fv WHERE fv.record_id=f.id ORDER BY version DESC LIMIT 1) fv ON true WHERE f.expense_id=ev.expense_id AND fv.status='active') AS "expenseLinkedElsewhere",e.version AS "currentExpenseVersion",e.amount_cents AS "currentExpenseCents",e.expense_scope AS "currentExpenseScope",e.expense_use AS "currentExpenseUse",e.store_id AS "currentExpenseStoreId",to_char(e.expense_date,'YYYY-MM') AS "expenseMonth"
-  FROM studio_os.warehouse_movements m JOIN studio_os.warehouse_items w ON w.id=m.item_id LEFT JOIN studio_os.product_skus k ON k.warehouse_item_id=w.id
-  LEFT JOIN studio_os.product_stock_documents d ON d.id=m.product_stock_document_id
+  FROM studio_os.product_stock_cost_movements m JOIN studio_os.warehouse_items w ON w.id=m.item_id LEFT JOIN studio_os.product_skus k ON k.warehouse_item_id=w.id
+  LEFT JOIN studio_os.product_stock_effective_documents d ON d.id=m.product_stock_document_id
   LEFT JOIN LATERAL(SELECT * FROM studio_os.inventory_cost_evidence_versions v WHERE v.movement_id=m.id ORDER BY version DESC LIMIT 1) ev ON true
   LEFT JOIN studio_os.expense_records e ON e.id=ev.expense_id WHERE (${itemId??null}::uuid IS NULL OR w.id=${itemId??null})`;
  const byId=new Map(facts.map(f=>[f.id,f]));
