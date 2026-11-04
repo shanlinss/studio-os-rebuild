@@ -51,3 +51,7 @@ test('sample transfers retain asset value without operating expense or blocking 
 test('recorded sample losses remain unresolved costs instead of being silently treated as free asset transfers',()=>{
  const d=data();d.incomes=[income('a',10000)];d.inventoryCosts=[{id:'loss-event',mode:'sample-loss',scope:'unclassified',storeId:null}];const r=operatingOverview(d,month);assert.equal(r.summary.studioProfitCents,null);assert.equal(r.rows[0].profitCents,null);assert.equal(r.publicPending[0].kind,'sample');
 });
+test('confirmed sample losses charge explicit public or store scope once and link back to original sample evidence',()=>{
+ const d=data();d.incomes=[income('a',10000)];d.inventoryCosts=[{id:'sample-loss-a',mode:'sample-loss',sourceKind:'sample-cost',scope:'store',storeId:'a',exact:{n:'100',d:'3'},costCents:'33',sourceChanged:false},{id:'sample-loss-public',mode:'sample-loss',sourceKind:'sample-cost',scope:'public',storeId:null,exact:{n:'200',d:'1'},costCents:'200',sourceChanged:false}];
+ let r=operatingOverview(d,month);assert.equal(r.rows[0].otherInventoryCents,'33');assert.equal(r.publicCents,'200');assert.equal(r.summary.studioProfitCents,'9767');assert.equal(r.rows[0].sources[0].kind,'sample-cost');d.inventoryCosts[0].sourceChanged=true;r=operatingOverview(d,month);assert.equal(r.rows[0].otherInventoryCents,null);assert.equal(r.rows[0].pending[0].kind,'sample-cost');assert.equal(r.summary.studioProfitCents,null);
+});

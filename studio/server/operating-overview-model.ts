@@ -36,13 +36,13 @@ export function operatingOverview(data:{stores:any[],incomes:any[],expenses:any[
   for(const m of list)if(m.day.slice(0,7)<=month&&m.sourceChanged&&result.storeCosts.length)for(const b of result.storeCosts)if(b.storeId)issue(get(b.storeId),'stock',skuId,'采购引用支出已变化，请核对成本来源版本');
  }
  for(const p of data.packaging)issue(get(p.storeId),'packaging',p.id,'包材领用金额尚未接入经营汇总，需核对成本');
- for(const c of data.inventoryCosts??[]){if(c.mode==='sample-loss'){issue(null,'sample',c.id,'样品盘亏的成本与费用归属待核对');continue;}if(c.mode==='asset'){sampleAssetSources.push({kind:'inventory',id:c.id});if(c.exact&&!c.sourceChanged)sampleAssets=plus(sampleAssets,fraction(BigInt(c.exact.n),BigInt(c.exact.d)));else sampleAssetPending++;continue;}const row=c.storeId?get(c.storeId):null,target=c.scope==='public'?null:row;
-  const label=c.mode==='automatic'?'包材领用':'其他库存出库';
-  if(c.scope==='unclassified'||c.scope==='store'&&!row){issue(row,'inventory',c.id,label+'费用归属待核对');continue;}
-  if(!c.exact||c.sourceChanged){issue(target,'inventory',c.id,label+'成本依据缺失或原来源有新版本');continue;}
-  if(c.expenseId){const e=expenseById.get(c.expenseId);if(!e||e.month!==month||c.expenseLinkedElsewhere||e.purchaseLinked||e.expenseUse!=='operating'||e.expenseScope!==c.scope||e.storeId!==c.storeId||e.amountCents.toString()!==c.costCents||c.expenseSnapshot?.version!==e.version)issue(target,'inventory',c.id,'关联支出的金额、用途、归属或版本待核对');if(target)source(target,'inventory',c.id);continue;}
+ for(const c of data.inventoryCosts??[]){if(c.mode==='sample-loss'&&!c.sourceKind){issue(null,'sample',c.id,'样品盘亏的成本与费用归属待核对');continue;}if(c.mode==='asset'){sampleAssetSources.push({kind:'inventory',id:c.id});if(c.exact&&!c.sourceChanged)sampleAssets=plus(sampleAssets,fraction(BigInt(c.exact.n),BigInt(c.exact.d)));else sampleAssetPending++;continue;}const row=c.storeId?get(c.storeId):null,target=c.scope==='public'?null:row;
+  const sourceKind=c.sourceKind??'inventory',label=c.mode==='sample-loss'?'样品损耗或报废':c.mode==='automatic'?'包材领用':'其他库存出库';
+  if(c.scope==='unclassified'||c.scope==='store'&&!row){issue(row,sourceKind,c.id,label+'费用归属待核对');continue;}
+  if(!c.exact||c.sourceChanged){issue(target,sourceKind,c.id,label+'成本依据缺失或原来源有新版本');continue;}
+  if(c.expenseId){const e=expenseById.get(c.expenseId);if(!e||e.month!==month||c.expenseLinkedElsewhere||e.purchaseLinked||e.expenseUse!=='operating'||e.expenseScope!==c.scope||e.storeId!==c.storeId||e.amountCents.toString()!==c.costCents||c.expenseSnapshot?.version!==e.version)issue(target,sourceKind,c.id,'关联支出的金额、用途、归属或版本待核对');if(target)source(target,sourceKind,c.id);continue;}
   const amount=fraction(BigInt(c.exact.n),BigInt(c.exact.d));
-  if(target){if(c.mode==='automatic')target.packaging=plus(target.packaging,amount);else target.otherInventory=plus(target.otherInventory,amount);source(target,'inventory',c.id);}else publicInventory=plus(publicInventory,amount);
+  if(target){if(c.mode==='automatic')target.packaging=plus(target.packaging,amount);else target.otherInventory=plus(target.otherInventory,amount);source(target,sourceKind,c.id);}else publicInventory=plus(publicInventory,amount);
  }
  publicCents+=rounded(publicInventory);
  const unallocated=data.expenses.some(e=>e.month===month&&e.expenseScope==='unclassified'&&!e.storeId)||(data.inventoryCosts??[]).some(c=>c.mode!=='asset'&&c.scope==='unclassified'&&!c.storeId);
@@ -50,7 +50,7 @@ export function operatingOverview(data:{stores:any[],incomes:any[],expenses:any[
   if(unallocated)issue(row,'unassigned',row.storeId,'存在未归属支出，本店专属成本待核对');
   const stock=rounded(row.stock),packaging=rounded(row.packaging),otherInventory=rounded(row.otherInventory),pending=row.pending as any[],total=row.operating+stock+row.drop+row.fee+packaging+otherInventory;
   const income=row.income?cents(row.income.amountCents):null;
-  return {storeId:row.storeId,name:row.name,active:row.active,income:row.income,operatingCents:signed(row.operating),stockCents:pending.some(p=>p.kind==='stock')?null:signed(stock),dropshipCents:pending.some(p=>p.kind==='dropship')?null:signed(row.drop),feeCents:signed(row.fee),packagingCents:pending.some(p=>p.kind==='inventory')?null:signed(packaging),otherInventoryCents:pending.some(p=>p.kind==='inventory')?null:signed(otherInventory),directCostCents:pending.length?null:signed(total),profitCents:income===null||pending.length?null:signed(income-total),dailySaleCents:signed(row.dailySale),dailyRefundCents:signed(row.dailyRefund),pendingCount:pending.length,pending:pending.slice(0,50),sourceCount:row.sources.length,sources:row.sources.slice(0,50)};
+  return {storeId:row.storeId,name:row.name,active:row.active,income:row.income,operatingCents:signed(row.operating),stockCents:pending.some(p=>p.kind==='stock')?null:signed(stock),dropshipCents:pending.some(p=>p.kind==='dropship')?null:signed(row.drop),feeCents:signed(row.fee),packagingCents:pending.some(p=>p.kind==='inventory')?null:signed(packaging),otherInventoryCents:pending.some(p=>['inventory','sample-cost'].includes(p.kind))?null:signed(otherInventory),directCostCents:pending.length?null:signed(total),profitCents:income===null||pending.length?null:signed(income-total),dailySaleCents:signed(row.dailySale),dailyRefundCents:signed(row.dailyRefund),pendingCount:pending.length,pending:pending.slice(0,50),sourceCount:row.sources.length,sources:row.sources.slice(0,50)};
  }).sort((a,b)=>a.name.localeCompare(b.name,'zh-CN'));
  const sum=(key:string)=>list.reduce((n,r)=>n+cents((r as any)[key]),0n);
  const complete=list.length>0&&list.every(r=>r.profitCents!==null),shopProfit=complete?sum('profitCents'):null;

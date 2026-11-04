@@ -1,3 +1,4 @@
+import {SampleCostEvidence} from './sample-cost-evidence';
 import {InventoryCostEvidence} from './inventory-cost-evidence';
 import {StoreMonthIncome} from './store-month-income';
 import {OperatingOverview} from './operating-overview';
@@ -141,6 +142,7 @@ export async function createStudioApp(
   const templates = new Templates(database);
   const competitors = new Competitors(database);
   const finance = new Finance(database);
+  const sampleCostEvidence=new SampleCostEvidence(database);
   const inventoryCostEvidence=new InventoryCostEvidence(database);
   const storeMonthIncome=new StoreMonthIncome(database);
   const operatingOverview=new OperatingOverview(database);
@@ -1234,6 +1236,14 @@ export async function createStudioApp(
       return knowledge.clearCover(r.identity!, id, b);
     }
 
+    @Get('finance/sample-costs')
+    sampleCosts(@Req() r:AuthRequest,@Query() q:unknown){return sampleCostEvidence.list(r.identity!,q);}
+    @Get('finance/sample-costs/:id')
+    sampleCost(@Req() r:AuthRequest,@Param('id') id:string,@Query() q:unknown){return sampleCostEvidence.state(r.identity!,id,q);}
+    @Get('finance/sample-costs/:id/receipts/:key')
+    sampleCostReceipt(@Req() r:AuthRequest,@Param('id') id:string,@Param('key') key:string){return sampleCostEvidence.receipt(r.identity!,id,key);}
+    @Post('finance/sample-costs/:id')
+    saveSampleCost(@Req() r:AuthRequest,@Param('id') id:string,@Body() b:unknown){return sampleCostEvidence.save(r.identity!,id,b);}
     @Get('finance/inventory-costs')
     inventoryCostList(@Req() r:AuthRequest){return inventoryCostEvidence.list(r.identity!,r.query);}
     @Get('finance/inventory-costs/:id')

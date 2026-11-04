@@ -56,6 +56,9 @@ export async function checkReadiness(
     await tx`SELECT product_id,code,version FROM commercial_products LIMIT 0`;
     await tx`SELECT id,product_id,code,specification,unit,active,warehouse_item_id FROM product_skus LIMIT 0`;
     await tx`SELECT id,operation,business_date,source_reference,reason,actor_id,source_shipment_id,resellable_confirmed FROM product_stock_documents LIMIT 0`;
+    await tx`SELECT id,event_id,version,mode,amount_cents,scope,store_id,loss_kind,expense_id,expense_snapshot,source_reference,reason,event_snapshot,actor_id,actor_name FROM sample_cost_evidence_versions LIMIT 0`;
+    await tx`SELECT expense_id,event_id FROM sample_cost_expense_links LIMIT 0`;
+    await tx`SELECT actor_id,request_key,event_id,request_hash,result FROM sample_cost_evidence_receipts LIMIT 0`;
     await tx`SELECT id,movement_id,version,mode,amount_cents,scope,store_id,expense_id,expense_snapshot,source_reference,reason,movement_snapshot,actor_id,actor_name FROM inventory_cost_evidence_versions LIMIT 0`;
     await tx`SELECT expense_id,movement_id FROM inventory_cost_expense_links LIMIT 0`;
     await tx`SELECT actor_id,request_key,movement_id,request_hash,result FROM inventory_cost_evidence_receipts LIMIT 0`;

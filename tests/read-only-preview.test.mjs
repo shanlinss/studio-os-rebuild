@@ -212,3 +212,9 @@ test('inventory-cost preview forwards cost history and scoped queries while refu
  for(const p of ['/inventory-cost-contract.mjs','/inventory-cost-editors.mjs','/inventory-cost-view.mjs'])assert.equal((await request(port,p)).status,200);
  }finally{await close(preview);await close(upstream);}
 });
+test('sample-cost preview exposes only exact reads and static modules, never evidence writes or private receipts',async()=>{
+ const id='11111111-1111-4111-8111-111111111111',seen=[];
+ const upstream=http.createServer((req,res)=>{seen.push(req.url);res.writeHead(200,{'Content-Type':'application/json'});res.end('{}');});await listen(upstream);const preview=createPreviewServer({upstreamPort:upstream.address().port});await listen(preview);const port=preview.address().port,path='/api/finance/sample-costs';
+ try{for(const p of [path+'?month=2026-11&q=sample&offset=50',path+'/'+id+'?offset=50'])assert.equal((await request(port,p)).status,200);assert.equal((await request(port,path+'/'+id+'?month=2026-11')).status,400);assert.equal((await request(port,path+'/'+id+'/receipts/'+id)).status,404);assert.equal((await request(port,path+'/'+id,{method:'POST'})).status,405);assert.equal(seen.length,2);for(const p of ['/sample-cost-contract.mjs','/sample-cost-editors.mjs','/sample-cost-view.mjs'])assert.equal((await request(port,p)).status,200);
+ }finally{await close(preview);await close(upstream);}
+});

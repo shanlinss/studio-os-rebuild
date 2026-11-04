@@ -61,12 +61,14 @@ export class InventoryCostEvidence{
     if(source.purchaseExpenseId){const locked=await purchaseExpense(tx,source.purchaseExpenseId,true);if(locked.version!==b.purchaseSourceVersion)throw new ConflictException('原采购支出版本已变化');}
    }else if(b.amount!==null||typeof b.scope!=='string'||!['public','store','unclassified'].includes(b.scope)||b.scope==='public'&&store!==null||b.scope==='store'&&!store||b.purchaseSourceVersion!==null)throw new BadRequestException('出库只核对归属，成本按原库存依据自动计算');
    if(store&&!(await tx`SELECT id FROM studio_os.stores WHERE id=${store} FOR SHARE`).length)throw new BadRequestException();
+   if(expenseId)await tx`SELECT pg_advisory_xact_lock(hashtextextended(${'inventory-sample-cost-expense:'+expenseId},0))`;
    const expense=expenseId?await purchaseExpense(tx,expenseId,true):null;
    if(expense){
     if(expense.version!==b.expenseVersion)throw new ConflictException('引用支出已变化');
     const [classification]=await tx`SELECT expense_scope,expense_use,store_id FROM studio_os.expense_records WHERE id=${expenseId}`;
     if(source.mode==='basis'){if(classification.expense_use!=='inventory'||expense.amountCents!==amount)throw new ConflictException('入库依据引用整笔库存采购支出，请先核对用途和金额');}
     else {if(!expense.expenseDate.startsWith(source.day.slice(0,7)))throw new ConflictException('出库费用引用支出须在同一业务月份，避免跨月重复核算');if(classification.expense_use!=='operating'||classification.expense_scope!==b.scope||classification.store_id!==store)throw new ConflictException('原支出的运营用途与归属须一致');const priced=priceInventorySources(rows,source.day.slice(0,7)).find(r=>r.id===id),cost=roundedCost(priced?.priced?.exactCost??null);if(cost!==null&&cost!==String(expense.amountCents))throw new ConflictException('原支出金额须与该出库的实际成本一致');}
+    if((await tx`SELECT expense_id FROM studio_os.sample_cost_expense_links WHERE expense_id=${expenseId}`).length)throw new ConflictException('该支出已关联样品成本流水');
     await tx`INSERT INTO studio_os.inventory_cost_expense_links(expense_id,movement_id) VALUES(${expenseId},${id}) ON CONFLICT(expense_id) DO NOTHING`;
     const [link]=await tx`SELECT movement_id FROM studio_os.inventory_cost_expense_links WHERE expense_id=${expenseId}`;if(link.movement_id!==id)throw new ConflictException('该整笔支出已核对到其他库存流水');
    }else if(b.expenseVersion!==null)throw new BadRequestException();

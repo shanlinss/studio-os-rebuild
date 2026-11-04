@@ -1,0 +1,24 @@
+import {chinaDate} from './cloud-contract.mjs';
+import {signedCostMoney} from './cost-sources-contract.mjs';
+import {hasSensitive} from './admin-permissions.mjs';
+export function createSampleCostViews({api,h,showPanel,getUser,writable,notify,localTime}){
+ let current={month:chinaDate().slice(0,7),q:'',offset:0};
+ const amount=v=>v===null?'待核对':h(signedCostMoney(v)),labels={basis:'样品增加成本',transfer:'商品转入资产',outflow:'损耗／报废费用'};
+ const head=t=>`<div class="dialog-header"><h2>${h(t)}</h2><button class="icon-button" data-sample-cost-close aria-label="关闭样品成本">×</button></div>`;
+ async function list(params=current){current={...params};const q={...current};await showPanel('样品资产与损耗',async signal=>{
+  const d=await api.sampleCosts(q,signal);
+  return head('样品资产与损耗')+(hasSensitive(getUser(),'resources')?'<button class="secondary" data-open-samples>打开样品目录与盘点</button>':'')+'<p>复用原样品入库和盘点记录。商品转样品保留资产，借出和归还不计费用。损耗或报废请先在样品目录按实际剩余数量盘点，再核对本次费用归属。</p>'+`<form data-sample-cost-filter class="module-toolbar"><label>月份<input name="month" type="month" value="${h(q.month)}" required min="1900-01" max="2199-12"></label><label>查找样品<input name="q" maxlength="100" value="${h(q.q)}"></label><button class="secondary">筛选</button></form><p>截至所选月末，全部样品剩余资产 ${amount(d.assetCents)} · ${d.pendingAssets} 个样品成本待补。包含借出未归还数量；金额按已录来源动态核对，尚未月结。查找仅筛选下方流水。</p>`+
+   d.rows.map(r=>`<button class="account-row" data-sample-cost="${h(r.id)}"><span><b>${h(r.snapshot.name)} · ${h(labels[r.mode])}</b><small>${h(r.day)} · ${r.delta>0?'+':''}${r.delta} 件${r.sourceChanged||r.attributionChanged&&r.mode==='outflow'?' · 待核对':''}</small></span><span>${amount(r.costCents)} ›</span></button>`).join('')+(!d.rows.length?'<p class="muted">该月暂无匹配的样品数量变化。</p>':'')+`<div class="pager"><button class="secondary" data-sample-cost-page="${Math.max(0,q.offset-50)}" ${q.offset===0?'disabled':''}>上一页</button><span>${d.total} 条流水</span><button class="secondary" data-sample-cost-page="${q.offset+50}" ${q.offset+50>=d.total?'disabled':''}>下一页</button></div>`;
+ });}
+ async function detail(id,offset=0){await showPanel('样品成本核对',async signal=>{
+  const d=await api.sampleCost(id,offset,signal),s=d.source,r=d.record,maintain=writable&&hasSensitive(getUser(),'finance')&&(s.mode==='outflow'||s.mode==='basis'&&hasSensitive(getUser(),'resources'));
+  return head(s.snapshot.name+' · '+labels[s.mode])+`<button class="text-button" data-sample-cost-list>返回样品资产与损耗</button><p>${h(s.day)} · ${s.delta>0?'+':''}${s.delta} 件 · 本次成本 ${amount(s.costCents)}</p><p class="preserve-text">原记录说明：${h(s.note)}</p><p>截至该月末，该样品资产 ${amount(d.balance.costCents)}，共 ${d.balance.quantity} 件（含借出未还）。</p>`+
+   (s.mode==='transfer'?`<p>沿用原商品出库的实际成本，暂不扣利润。</p><button class="text-button" data-inventory-cost="${h(s.movementId)}">核对原商品转样品成本</button>`:'')+
+   (s.sourceChanged||s.mode==='outflow'&&s.attributionChanged?'<p class="save-error">成本依据不完整、原来源变化或本次费用尚未确认，请核对后追加新版本；费用未确认时不展示确定利润。</p>':'')+
+   (maintain?`<button class="secondary" data-sample-cost-edit="${h(id)}">${s.mode==='basis'?'登记或修正增加成本':'确认或修正损耗／报废归属'}</button>`:'')+
+   '<h3>核对历史</h3>'+d.history.rows.map(v=>`<article class="observation"><b>第 ${v.version} 版 · ${v.mode==='basis'?amount(String(v.amountCents)):(v.lossKind==='scrap'?'报废':'损耗／盘亏')+' · '+(v.scope==='public'?'工作室公共':v.scope==='store'?'店铺专属':'待核对')}</b><p>${h(v.sourceReference)}${v.storeId?' · '+h(d.stores.find(s=>s.id===v.storeId)?.name||'原店铺'):''}</p><p class="preserve-text">${h(v.reason)}</p>${v.expenseSnapshot?`<p>引用原支出 ${h(v.expenseSnapshot.description)} · ${amount(String(v.expenseSnapshot.amountCents))} · 第 ${v.expenseSnapshot.version} 版</p>`:''}<small>${h(v.actor)} · ${h(localTime(v.createdAt))}</small></article>`).join('')+(!d.history.rows.length?'<p class="muted">尚无人工核对版本。</p>':'')+`<div class="pager"><button class="secondary" data-sample-cost="${h(id)}" data-offset="${Math.max(0,offset-50)}" ${offset===0?'disabled':''}>上一页</button><span>${d.history.total} 条版本</span><button class="secondary" data-sample-cost="${h(id)}" data-offset="${offset+50}" ${offset+50>=d.history.total?'disabled':''}>下一页</button></div>`;
+ });}
+ document.addEventListener('click',e=>{if(e.target.closest('[data-sample-cost-close]'))document.querySelector('#cloud-detail').close();const l=e.target.closest('[data-sample-cost-list]'),p=e.target.closest('[data-sample-cost-page]'),r=e.target.closest('[data-sample-cost]');if(l)list().catch(e=>notify(e.message));if(p)list({...current,offset:Number(p.dataset.sampleCostPage)}).catch(e=>notify(e.message));if(r)detail(r.dataset.sampleCost,Number(r.dataset.offset||0)).catch(e=>notify(e.message));});
+ document.addEventListener('submit',e=>{if(e.target.matches('[data-sample-cost-filter]')){e.preventDefault();const f=new FormData(e.target);list({month:f.get('month'),q:f.get('q').trim(),offset:0}).catch(e=>notify(e.message));}});
+ return {list,detail};
+}

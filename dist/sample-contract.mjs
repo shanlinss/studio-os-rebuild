@@ -16,15 +16,16 @@ export function samplePage(v,loans=false){
  }return v;
 }
 export function samplePayload(action,value,version){
- const keys={register:['name','warehouseLocation','productId','keeperMemberId','notes'],stock:['quantity','note'],borrow:['quantity','location','shootingRequestId','note'],return:['quantity','note'],relocate:['location','note']}[action];
+ const keys={register:['name','warehouseLocation','productId','keeperMemberId','notes'],stock:['quantity','note'],count:['quantity','note'],borrow:['quantity','location','shootingRequestId','note'],return:['quantity','note'],relocate:['location','note']}[action];
  if(!keys||!value||Object.keys(value).some(k=>!['requestKey',...keys].includes(k))||keys.some(k=>!Object.hasOwn(value,k)))throw new ContractError('样品填写信息不完整。');
  const out={requestKey:id(value.requestKey)};
  if(action==='register'){out.name=text(value.name,120,true);out.warehouseLocation=text(value.warehouseLocation,150,true);out.productId=value.productId===null?null:id(value.productId);out.keeperMemberId=value.keeperMemberId===null?null:id(value.keeperMemberId);out.notes=text(value.notes,2000);}
- else{out.note=text(value.note,2000);if(action!=='relocate')out.quantity=qty(value.quantity);if(['borrow','relocate'].includes(action))out.location=text(value.location,150,true);if(action==='borrow')out.shootingRequestId=value.shootingRequestId===null?null:id(value.shootingRequestId);}
- if(['stock','return','relocate'].includes(action))out.expectedVersion=qty(version);return out;
+ else{out.note=text(value.note,2000,action==='count');if(action!=='relocate')out.quantity=qty(value.quantity,action==='count');if(['borrow','relocate'].includes(action))out.location=text(value.location,150,true);if(action==='borrow')out.shootingRequestId=value.shootingRequestId===null?null:id(value.shootingRequestId);}
+ if(['stock','count','return','relocate'].includes(action))out.expectedVersion=qty(version);return out;
 }
 export function sampleOperationPath(action,owner){
  if(action==='register')return '/api/samples/catalog';id(owner);
+ if(action==='count')return '/api/samples/catalog/'+owner+'/stocktake';
  if(action==='stock')return '/api/samples/catalog/'+owner+'/stock-in';
  if(action==='borrow')return '/api/samples/catalog/'+owner+'/borrow';
  if(action==='return')return '/api/samples/loans/'+owner+'/return';
