@@ -503,6 +503,10 @@ export async function createStudioApp(
     listBusinessAccounts(@Req() r:AuthRequest) {
       return businessAccounts.list(r.identity!);
     }
+    @Get('admin/business-accounts/:id/history')
+    businessAccountHistory(@Req() req: AuthRequest, @Param('id') id: string) {
+      return businessAccounts.history(req.identity!, id);
+    }
     @Post('admin/business-accounts')
     createBusinessAccount(@Req() req: AuthRequest, @Body() body: unknown) {
       return businessAccounts.save(body, req.identity!.id);
@@ -1835,6 +1839,7 @@ export async function createStudioApp(
         return true;
       }
       if (
+        (req.method === 'GET' && /^\/api\/admin\/business-accounts\/[^/]+\/history$/.test(req.path)) ||
         (['GET', 'POST'].includes(req.method) &&
           [
             '/api/admin/stores',

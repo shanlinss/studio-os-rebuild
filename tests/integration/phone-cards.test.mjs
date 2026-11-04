@@ -50,6 +50,29 @@ test('code and active normalized numbers are unique while retired numbers may be
 test('changing references records original before and after names and never silently reassigns the platform account owner',async()=>{
  const r=await state();await clients[1].savePhoneCard(card.id,{...dto(r),userMemberId:people[6].memberId,notes:'换使用人，实名保持原值'},r.version);const h=await clients[1].phoneCardHistory(card.id);assert.equal(h.rows[0].beforeValue.userName,people[5].username);assert.equal(h.rows[0].afterValue.userName,people[6].username);const frozen=h.rows[0];await db.client`UPDATE studio_os.members SET display_name='新显示姓名' WHERE id=${people[6].memberId}`;assert.deepEqual((await clients[1].phoneCardHistory(card.id)).rows[0],frozen);assert.equal((await clients[0].businessAccounts()).find(a=>a.id===account.id).responsibleMemberId,people[1].memberId);assert.equal((await clients[2].phoneCardIdentity(card.id)).rows[0].version,1);
 });
+test('account profiles reuse equipment and store records with exclusive primary assignments and protected history',async()=>{
+ const path='/admin/business-accounts', profile={platform:'小红书',platformAccountId:'studio-01',avatarUrl:'https://example.com/avatar',purpose:'内容测试',storeId:store.id,primaryDeviceId:device.id,extraDeviceIds:[]};
+ const current=(await clients[1].businessAccounts()).find(a=>a.id===account.id);
+ const saved=await req(1,path+'/'+account.id,'PATCH',{...profile,expectedVersion:current.version});
+ assert.equal(saved.status,200);
+ const other={name:'另一账号',responsibleMemberId:people[1].memberId};
+ assert.equal((await req(1,path,'POST',{...other,...profile})).status,409);
+ assert.equal((await req(1,path,'POST',{...other,primaryDeviceId:device.id,extraDeviceIds:[device.id]})).status,400);
+ assert.equal((await req(1,path,'POST',{...other,extraDeviceIds:[device.id]})).status,201);
+ assert.equal((await req(1,path+'/'+account.id,'PATCH',{remark:'兼容旧表单',expectedVersion:current.version+1})).status,200);
+ const updated=(await clients[1].businessAccounts()).find(a=>a.id===account.id);
+ assert.equal(updated.primaryDeviceId,device.id);
+ assert.equal(updated.storeName,'原店铺');
+ assert.equal(updated.platformAccountId,'studio-01');
+ const limited=(await clients[3].businessAccounts()).find(a=>a.id===account.id);
+ assert.equal(limited.primaryDeviceId,null);
+ assert.equal(limited.platformAccountId,null);
+ assert.equal((await req(3,path+'/'+account.id+'/history')).status,403);
+ const history=await clients[1].businessAccountHistory(account.id);
+ assert.equal(history[0].afterValue.primaryDeviceId,device.id);
+ assert.equal(history[1].beforeValue.primaryDeviceId,null);
+});
+
 test('inactive original references are retained when unchanged, removable and never newly linked after removal',async()=>{
  await db.client`UPDATE studio_os.equipment_assets SET status='retired' WHERE id=${device.id}`;await db.client`UPDATE studio_os.business_accounts SET active=false WHERE id=${account.id}`;await db.client`UPDATE studio_os.stores SET active=false WHERE id=${store.id}`;await db.client`UPDATE studio_os.members SET active=false WHERE id=${people[6].memberId}`;
  let r=await state();await clients[1].savePhoneCard(card.id,{...dto(r),notes:'保留历史关联'},r.version);r=await state();await clients[1].savePhoneCard(card.id,{...dto(r),userMemberId:null,deviceId:null,storeId:null,accountIds:[]},r.version);r=await state();

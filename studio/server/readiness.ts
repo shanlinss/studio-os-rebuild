@@ -29,7 +29,8 @@ export async function checkReadiness(
       throw new Error('Installation is not ready');
     await tx`SELECT id, display_name, login_account_id, active, version FROM members LIMIT 0`;
     await tx`SELECT entity_type, entity_id, actor_id, before_value, after_value FROM identity_events LIMIT 0`;
-    await tx`SELECT id, name, profile_url, bound_phone, actual_phone, remark, responsible_member_id, active, version FROM business_accounts LIMIT 0`;
+    await tx`SELECT account_id, device_id FROM business_account_extra_devices LIMIT 0`;
+    await tx`SELECT id, name, profile_url, bound_phone, actual_phone, remark, responsible_member_id, active, version, platform, platform_account_id, avatar_url, purpose, store_id, primary_device_id FROM business_accounts LIMIT 0`;
     await tx`SELECT account_id, actor_id, before_value, after_value FROM business_account_events LIMIT 0`;
     await tx`SELECT id,author_id,body,version,created_at,updated_at FROM operational_observations LIMIT 0`;
     await tx`SELECT id,observation_id,added_version,name,mime,content,digest FROM operational_observation_assets LIMIT 0`;

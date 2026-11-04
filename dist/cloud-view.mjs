@@ -42,7 +42,7 @@ const localTime=value=>{const d=new Date(value);return value&&Number.isFinite(d.
 const empty=(text,desc)=>`<div class="empty"><h3>${h(text)}</h3><p>${h(desc)}</p></div>`;
 const text=(value,fallback='未填写')=>h(typeof value==='string'&&value?value:fallback);
 function safeSource(value){try{const u=new URL(value);if(!['http:','https:'].includes(u.protocol)||u.username||u.password)return '';return u.href;}catch{return '';}}
-function source(value){const url=safeSource(value);return url?`<a class="secondary source-link" href="${h(url)}" target="_blank" rel="noopener noreferrer">查看来源 ↗</a>`:'<span class="muted">未填写有效来源链接</span>';}
+function source(value,label='查看来源 ↗'){const url=safeSource(value);return url?`<a class="secondary source-link" href="${h(url)}" target="_blank" rel="noopener noreferrer">${h(label)}</a>`:'<span class="muted">未填写有效来源链接</span>';}
 function navigation(){
   lookupIds.clear();
   $('nav[aria-label="主要模块"]').innerHTML=navigationForRole(user.role,user).map((g,i)=>{

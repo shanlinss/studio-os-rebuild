@@ -253,6 +253,7 @@ export function createCloudApi(fetcher=globalThis.fetch,{allowWrites=false}={}){
     async createKnowledgeNavigation(value){return mutations.send('/api/knowledge/navigation','POST',knowledgeNavigationPayload(value));},
     async updateKnowledgeNavigation(id,value,version){return mutations.send('/api/knowledge/'+endpointId(id)+'/navigation','PATCH',knowledgeNavigationPayload(value,version));},
     async members(signal){return read('/api/admin/members',signal,v=>namedList(v,'displayName'));},
+    async businessAccountHistory(id,signal){return read('/api/admin/business-accounts/'+endpointId(id)+'/history',signal,v=>{if(!Array.isArray(v)||v.some(e=>!e?.afterValue||typeof e.createdAt!=='string'))throw new ContractError('账号变更记录不完整。');return v;});},
     async businessAccounts(signal){return read('/api/admin/business-accounts',signal,namedList);},
     async stores(signal){return read('/api/admin/stores',signal,namedList);},
     async workTasks(signal){return executionRows(await get('/api/tasks',signal));},

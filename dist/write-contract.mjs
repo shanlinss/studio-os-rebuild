@@ -70,10 +70,23 @@ export function nextRoundPayload(value,version){
 }
 export function directoryPayload(kind,value,version){
  const keys={member:['displayName','jobTitle','startDate','employmentStatus'],account:['name','profileUrl','responsibleMemberId','boundPhone','actualPhone','remark'],store:['name']}[kind];if(!keys)throw new ContractError();
- const b=fields(value,[...keys,...(version===undefined?[]:['active'])]);if(keys.some(k=>!Object.hasOwn(b,k)))throw new ContractError('请保留完整基础资料。');let out;
+ const profile=kind==='account'?['platform','platformAccountId','avatarUrl','purpose','storeId','primaryDeviceId','extraDeviceIds']:[];
+ const b=fields(value,[...keys,...profile,...(version===undefined?[]:['active'])]);if(keys.some(k=>!Object.hasOwn(b,k)))throw new ContractError('请保留完整基础资料。');let out;
  if(kind==='member'){if(b.startDate!==null&&!validDate(b.startDate))throw new ContractError('入职日期无效。');out={displayName:text(b.displayName,100,true),jobTitle:text(b.jobTitle,100),startDate:b.startDate,employmentStatus:text(b.employmentStatus,40)};}
  else if(kind==='account')out={name:text(b.name,100,true),profileUrl:https(b.profileUrl),responsibleMemberId:uuid(b.responsibleMemberId),boundPhone:text(b.boundPhone,100),actualPhone:text(b.actualPhone,100),remark:text(b.remark,2000)};
  else out={name:text(b.name,100,true)};
+ if(kind==='account'){
+  if(b.platform!==undefined)out.platform=text(b.platform,40,true);
+  if(b.platformAccountId!==undefined)out.platformAccountId=text(b.platformAccountId,100);
+  if(b.avatarUrl!==undefined)out.avatarUrl=https(b.avatarUrl);
+  if(b.purpose!==undefined)out.purpose=text(b.purpose,1000);
+  for(const key of ['storeId','primaryDeviceId'])if(b[key]!==undefined)out[key]=b[key]===null?null:uuid(b[key]);
+  if(b.extraDeviceIds!==undefined){
+   if(!Array.isArray(b.extraDeviceIds)||b.extraDeviceIds.length>100)throw new ContractError('额外设备最多关联 100 台。');
+   out.extraDeviceIds=b.extraDeviceIds.map(uuid);
+   if(new Set(out.extraDeviceIds).size!==out.extraDeviceIds.length||out.extraDeviceIds.includes(out.primaryDeviceId))throw new ContractError('主设备和额外设备请分别选择。');
+  }
+ }
  if(version!==undefined){if(typeof b.active!=='boolean')throw new ContractError();out.active=b.active;out.expectedVersion=expectedVersion(version);}return out;
 }
 const day=v=>{if(!validDate(v))throw new ContractError('日期无效。');return v;};
