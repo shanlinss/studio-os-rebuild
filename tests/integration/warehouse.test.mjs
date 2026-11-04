@@ -90,3 +90,31 @@ test('employee reads/writes, missing CSRF and stale administrator identities can
  await api.updateAccountAccess(sessions[2].user.id,{role:'employee',active:true},1);await assert.rejects(new Warehouse(db).move(sessions[2].user,stock.id,{...move('inbound',1),expectedVersion:row.version}),e=>e.status===403);
  assert.equal((await api.warehouseItem(stock.id)).quantity,row.quantity);await checkReadiness(db);
 });
+
+test('packaging allocation preserves legacy quantity and ledger while fencing scoped movements',async()=>{
+ const api=clients[0],item=await api.warehouseWrite('register',undefined,{
+  requestKey:randomUUID(),itemCode:'PACK-SCOPED',kind:'packaging',productId:null,name:'分账包材',
+  specification:'',unit:'包',location:'包材架',notes:''
+ });
+ const store=await api.saveDirectory('store',undefined,{name:'库存测试店'});
+ const opening=await api.warehouseWrite('move',item.id,move('opening',10),1);
+ const input={requestKey:randomUUID(),reason:'按实盘核对归属',allocations:[{storeId:null,quantity:4},{storeId:store.id,quantity:6}]};
+ assert.deepEqual((await api.warehouseItem(item.id)).balances,[]);
+ await assert.rejects(api.warehouseWrite('allocate-packaging',item.id,{...input,allocations:[{storeId:null,quantity:9}]},2),e=>e.status===409);
+ assert.equal((await request(sessions[1],'/warehouse/items/'+item.id+'/packaging-balances','POST',{...input,expectedVersion:2})).status,403);
+ const result=await api.warehouseWrite('allocate-packaging',item.id,input,2);
+ assert.deepEqual(await api.warehouseWrite('allocate-packaging',item.id,input,2),result);
+ assert.deepEqual(await api.warehouseReceipt(input.requestKey,'allocate-packaging',item.id),result);
+ const allocated=await api.warehouseItem(item.id),shared=allocated.balances.find(b=>b.storeId===null);
+ assert.equal(allocated.quantity,10);
+ assert.equal(allocated.balances.find(b=>b.storeId===store.id).quantity,6);
+ assert.equal((await api.warehouseMovement(item.id,opening.movementId)).packagingBalanceId,null);
+ await assert.rejects(api.warehouseWrite('move',item.id,move('outbound',1),allocated.version),e=>e.status===409);
+ await assert.rejects(api.warehouseWrite('move',item.id,move('outbound',5,{packagingBalanceId:shared.id}),allocated.version),e=>e.status===409);
+ await api.warehouseWrite('move',item.id,move('outbound',2,{packagingBalanceId:shared.id}),allocated.version);
+ const updated=await api.warehouseItem(item.id);
+ assert.equal(updated.quantity,8);
+ assert.equal(updated.balances.find(b=>b.id===shared.id).quantity,2);
+ assert.equal(updated.balances.find(b=>b.storeId===store.id).quantity,6);
+ assert.equal((await api.warehouseHistory(item.id)).total,4);
+});

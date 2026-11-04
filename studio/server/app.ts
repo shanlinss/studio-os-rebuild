@@ -389,6 +389,10 @@ export async function createStudioApp(
     @Get('warehouse/receipts/:key') warehouseReceipt(@Req() r: AuthRequest,@Param('key') key: string) { return warehouse.receipt(r.identity!,key); }
     @Post('warehouse/items') warehouseCreate(@Req() r: AuthRequest,@Body() b: unknown) { return warehouse.save(r.identity!,b); }
     @Patch('warehouse/items/:id') warehouseEdit(@Req() r: AuthRequest,@Param('id') id: string,@Body() b: unknown) { return warehouse.save(r.identity!,b,id); }
+    @Post('warehouse/items/:id/packaging-balances')
+    allocatePackaging(@Req() r:AuthRequest,@Param('id') id:string,@Body() b:unknown){
+      return warehouse.allocatePackaging(r.identity!,id,b);
+    }
     @Post('warehouse/items/:id/movements') warehouseMove(@Req() r: AuthRequest,@Param('id') id: string,@Body() b: unknown) { return warehouse.move(r.identity!,id,b); }
     @Get('equipment/catalog') equipmentCatalog(@Req() r: AuthRequest) { return equipment.catalog(r.identity!,r.query); }
     @Get('equipment/catalog/:id') equipmentDetail(@Req() r: AuthRequest,@Param('id') id: string) { return equipment.detail(r.identity!,id); }
@@ -1757,7 +1761,7 @@ export async function createStudioApp(
       if(req.path.startsWith('/api/warehouse/')){
         requirePermission(req.identity,'resources');
         const route=req.path.slice('/api/warehouse/'.length),allowed=(req.method==='GET' && /^(items|items\/[^/]+(?:\/(?:movements(?:\/[^/]+)?|events|transfers|sample-targets))?|receipts\/[^/]+)$/.test(route)) ||
-          (req.method==='POST' && /^(items|items\/[^/]+\/(?:movements|to-samples))$/.test(route)) || (req.method==='PATCH' && /^items\/[^/]+$/.test(route));
+          (req.method==='POST' && /^(items|items\/[^/]+\/(?:movements|to-samples|packaging-balances))$/.test(route)) || (req.method==='PATCH' && /^items\/[^/]+$/.test(route));
         if(!allowed)throw new ForbiddenException();if(req.method!=='GET')auth.csrf(req);return true;
       }
       if(req.path.startsWith('/api/equipment/')){

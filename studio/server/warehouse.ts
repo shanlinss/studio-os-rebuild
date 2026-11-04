@@ -8,8 +8,8 @@ import type {Identity} from './auth';
 import {requireAdministrator} from './access';
 import {objectInput,shortText,longText,optionalLongText,uuid,version} from './validation';
 const MAX=2147483647,units=['件','个','套','包','卷','箱'];
-const projection=`w.id,w.item_code AS "itemCode",w.kind,w.product_id AS "productId",p.name AS "productName",w.name,w.specification,w.unit,w.location,w.notes,w.opening_confirmed AS "openingConfirmed",w.quantity,w.active,w.version,w.created_at AS "createdAt",w.updated_at AS "updatedAt"`;
-const movementProjection=`m.id,m.item_id AS "itemId",m.type,m.quantity,m.delta,m.before_quantity AS "beforeQuantity",m.after_quantity AS "afterQuantity",m.reason,m.source_reference AS "sourceReference",m.corrects_movement_id AS "correctsMovementId",m.item_snapshot AS "itemSnapshot",m.created_at AS "createdAt",coalesce(n.display_name,a.username) AS actor,t.id AS "transferId",t.sample_id AS "targetSampleId",t.target_snapshot AS "transferTargetSnapshot"`;
+const projection=`w.id,w.item_code AS "itemCode",w.kind,w.product_id AS "productId",p.name AS "productName",w.name,w.specification,w.unit,w.location,w.notes,w.opening_confirmed AS "openingConfirmed",w.quantity,w.active,w.version,w.created_at AS "createdAt",w.updated_at AS "updatedAt",EXISTS(SELECT 1 FROM studio_os.packaging_balances b WHERE b.item_id=w.id) AS "packagingScoped"`;
+const movementProjection=`m.id,m.item_id AS "itemId",m.type,m.quantity,m.delta,m.before_quantity AS "beforeQuantity",m.after_quantity AS "afterQuantity",m.reason,m.source_reference AS "sourceReference",m.corrects_movement_id AS "correctsMovementId",m.item_snapshot AS "itemSnapshot",m.packaging_balance_id AS "packagingBalanceId",m.created_at AS "createdAt",coalesce(n.display_name,a.username) AS actor,t.id AS "transferId",t.sample_id AS "targetSampleId",t.target_snapshot AS "transferTargetSnapshot"`;
 function canonical(v:unknown):unknown {if(Array.isArray(v))return v.map(canonical);if(v&&typeof v==='object')return Object.fromEntries(Object.keys(v).sort().map(k=>[k,canonical((v as Record<string,unknown>)[k])]));return v;}
 function quantity(v:unknown,zero=false){if(!Number.isSafeInteger(v)||Number(v)<(zero?0:1)||Number(v)>MAX)throw new BadRequestException('数量须为有效整数');return Number(v);}
 async function item(tx:TransactionSql,id:string){const [r]=await tx`SELECT * FROM studio_os.warehouse_items WHERE id=${id} FOR UPDATE`;if(!r)throw new NotFoundException();return r;}
@@ -42,7 +42,56 @@ export class Warehouse {
    return {rows,total:count.n,offset:q.offset,limit:50,summary};
   });
  }
- async detail(who:Identity,id:string){await currentPermission(this.db,who,'resources');requireAdministrator(who);uuid(id);const [r]=await this.db.client`SELECT ${this.db.client.unsafe(projection)} FROM studio_os.warehouse_items w LEFT JOIN studio_os.products p ON p.id=w.product_id WHERE w.id=${id}`;if(!r)throw new NotFoundException();return r;}
+ async detail(who:Identity,id:string){
+  await currentPermission(this.db,who,'resources');
+  requireAdministrator(who);
+  id=uuid(id);
+  return this.db.client.begin(async tx=>{
+   await tx`SET TRANSACTION ISOLATION LEVEL REPEATABLE READ READ ONLY`;
+   const [row]=await tx`SELECT ${tx.unsafe(projection)} FROM studio_os.warehouse_items w LEFT JOIN studio_os.products p ON p.id=w.product_id WHERE w.id=${id}`;
+   if(!row)throw new NotFoundException();
+   if(row.kind!=='packaging')return row;
+   const balances=await tx`SELECT b.id,b.store_id AS "storeId",s.name AS "storeName",s.active AS "storeActive",b.quantity,b.version
+     FROM studio_os.packaging_balances b LEFT JOIN studio_os.stores s ON s.id=b.store_id WHERE b.item_id=${id} ORDER BY s.name NULLS FIRST,b.id`;
+   return {...row,balances};
+  });
+ }
+ async allocatePackaging(who:Identity,id:string,value:unknown){
+  id=uuid(id);
+  const b=objectInput(value,['requestKey','expectedVersion','reason','allocations']);
+  const expected=version(b.expectedVersion),reason=longText(b.reason,2000);
+  if(!Array.isArray(b.allocations)||!b.allocations.length||b.allocations.length>100)throw new BadRequestException('请填写 1 至 100 个库存归属');
+  const allocations=b.allocations.map(value=>{
+   const row=objectInput(value,['storeId','quantity']);
+   return {storeId:row.storeId===null?null:uuid(row.storeId),quantity:quantity(row.quantity,true)};
+  });
+  if(new Set(allocations.map(row=>row.storeId)).size!==allocations.length)throw new BadRequestException('同一库存归属只能填写一次');
+  const total=allocations.reduce((sum,row)=>sum+row.quantity,0);
+  if(total>MAX)throw new BadRequestException('包材合计超过容量');
+  return this.write(who,'allocate-packaging:'+id,b,async tx=>{
+   const old=await item(tx,id);
+   if(old.kind!=='packaging'||!old.active||old.version!==expected)throw new ConflictException('包材资料已变化或已停用');
+   const existing=await tx`SELECT store_id FROM studio_os.packaging_balances WHERE item_id=${id}`;
+   const used=new Set(existing.map(row=>row.store_id));
+   if(allocations.some(row=>used.has(row.storeId)))throw new ConflictException('该包材已登记此归属');
+   if(existing.length&&total!==0)throw new ConflictException('新归属从零开始，已有库存须通过调拨分配');
+   if(!existing.length&&old.opening_confirmed&&old.quantity!==total)
+    throw new ConflictException('分配合计须等于旧库存，请先核对并盘点旧库存');
+   const stores=allocations.flatMap(row=>row.storeId?[row.storeId]:[]);
+   const found=await tx`SELECT id,name FROM studio_os.stores WHERE id=ANY(${tx.array(stores)}::uuid[]) AND active ORDER BY id FOR SHARE`;
+   if(found.length!==stores.length)throw new ConflictException('只能选择启用的店铺');
+   const names=new Map(found.map(store=>[store.id,store.name]));
+   for(const row of allocations){
+    const [balance]=await tx`INSERT INTO studio_os.packaging_balances(item_id,store_id,quantity)
+     VALUES(${id},${row.storeId},${row.quantity}) RETURNING id`;
+    const snapshot={itemCode:old.item_code,kind:old.kind,productId:null,productName:null,name:old.name,specification:old.specification,unit:old.unit,location:old.location,storeId:row.storeId,storeName:names.get(row.storeId)??null};
+    await tx`INSERT INTO studio_os.warehouse_movements(item_id,packaging_balance_id,type,quantity,delta,after_quantity,reason,item_snapshot,actor_id)
+     VALUES(${id},${balance.id},'opening',${row.quantity},${row.quantity},${row.quantity},${reason},${JSON.stringify(snapshot)}::jsonb,${who.id})`;
+   }
+   await tx`UPDATE studio_os.warehouse_items SET opening_confirmed=true,quantity=${existing.length?old.quantity:total},version=version+1,updated_at=now() WHERE id=${id}`;
+   return {id};
+  });
+ }
  async save(who:Identity,value:unknown,id?:string){
   requireAdministrator(who);if(id)uuid(id);const b=objectInput(value,['requestKey','itemCode','kind','productId','name','specification','unit','location','notes',...(id?['active','expectedVersion']:[])]);
   if(['requestKey','itemCode','kind','productId','name','specification','unit','location','notes',...(id?['active','expectedVersion']:[])].some(k=>!Object.hasOwn(b,k))||typeof b.kind!=='string'||typeof b.unit!=='string')throw new BadRequestException('库存资料不完整');
@@ -57,19 +106,33 @@ export class Warehouse {
   });
  }
  async move(who:Identity,id:string,value:unknown){
-  requireAdministrator(who);uuid(id);const b=objectInput(value,['requestKey','expectedVersion','type','quantity','reason','sourceReference','correctsMovementId']),expected=version(b.expectedVersion),type=String(b.type),qty=quantity(b.quantity,['opening','stocktake'].includes(type)),reason=longText(b.reason,2000),reference=optionalLongText(b.sourceReference,200),corrects=b.correctsMovementId===null?null:uuid(b.correctsMovementId);
+  requireAdministrator(who);uuid(id);const b=objectInput(value,['requestKey','expectedVersion','type','quantity','reason','sourceReference','correctsMovementId','packagingBalanceId']),expected=version(b.expectedVersion),type=String(b.type),qty=quantity(b.quantity,['opening','stocktake'].includes(type)),reason=longText(b.reason,2000),reference=optionalLongText(b.sourceReference,200),corrects=b.correctsMovementId===null?null:uuid(b.correctsMovementId);
   if(typeof b.type!=='string'||!['opening','inbound','outbound','stocktake'].includes(type)||!reason.trim()||(corrects&&type!=='stocktake'))throw new BadRequestException();
+  const balanceId=b.packagingBalanceId===undefined?null:uuid(b.packagingBalanceId);
   return this.write(who,'move:'+id,b,async tx=>{
    const old=await item(tx,id);if(old.version!==expected||!old.active)throw new ConflictException('库存资料已变化或已停用');
+   const balances=await tx`SELECT b.id,b.quantity,b.store_id FROM studio_os.packaging_balances b WHERE b.item_id=${id}`;
+   const balance=balances.find(row=>row.id===balanceId);
+   if((balances.length&&!balance)||(balanceId&&!balance)||(balance&&type==='opening'))
+    throw new ConflictException('请选择已登记期初的包材归属');
+   let storeName=null;
+   if(balance?.store_id){
+    const [store]=await tx`SELECT name,active FROM studio_os.stores WHERE id=${balance.store_id} FOR SHARE`;
+    if(!store?.active)throw new ConflictException('该店铺已停用');
+    storeName=store.name;
+   }
    if(type==='opening'?old.opening_confirmed:!old.opening_confirmed)throw new ConflictException('请先登记期初数量，且只能登记一次');
-   if(corrects&&!(await tx`SELECT id FROM studio_os.warehouse_movements WHERE id=${corrects} AND item_id=${id} FOR SHARE`).length)throw new BadRequestException('纠错流水不属于此库存项目');
+   if(corrects&&!(await tx`SELECT id FROM studio_os.warehouse_movements WHERE id=${corrects} AND item_id=${id} AND packaging_balance_id IS NOT DISTINCT FROM ${balanceId}::uuid FOR SHARE`).length)throw new BadRequestException('纠错流水不属于此库存项目');
    if(corrects&&(await tx`SELECT id FROM studio_os.warehouse_sample_transfers WHERE movement_id=${corrects}`).length)throw new ConflictException('转样品记录不支持单边引用撤销，请核对双方实际数量');
-   const before=old.quantity as number|null,after=type==='opening'||type==='stocktake'?qty:type==='inbound'?before!+qty:before!-qty;
+   const before=(balance?.quantity??old.quantity) as number|null,after=type==='opening'||type==='stocktake'?qty:type==='inbound'?before!+qty:before!-qty;
    if(after<0||after>MAX)throw new ConflictException('不能超额出库或超过整数容量');const delta=after-(before??0);
+   const total=balance?old.quantity+delta:after;
+   if(total>MAX)throw new ConflictException('包材合计超过容量');
    const [p]=old.product_id?await tx`SELECT name FROM studio_os.products WHERE id=${old.product_id} FOR SHARE`:[];
-   const snapshot={itemCode:old.item_code,kind:old.kind,productId:old.product_id,productName:p?.name||null,name:old.name,specification:old.specification,unit:old.unit,location:old.location};
-   const [movement]=await tx`INSERT INTO studio_os.warehouse_movements(item_id,type,quantity,delta,before_quantity,after_quantity,reason,source_reference,corrects_movement_id,item_snapshot,actor_id) VALUES(${id},${type},${qty},${delta},${before},${after},${reason},${reference},${corrects},${JSON.stringify(snapshot)}::jsonb,${who.id}) RETURNING id`;
-   await tx`UPDATE studio_os.warehouse_items SET opening_confirmed=true,quantity=${after},version=version+1,updated_at=now() WHERE id=${id}`;return {id,movementId:movement.id};
+   const snapshot={itemCode:old.item_code,kind:old.kind,productId:old.product_id,productName:p?.name||null,name:old.name,specification:old.specification,unit:old.unit,location:old.location,...(balance?{storeId:balance.store_id,storeName}:{})};
+   const [movement]=await tx`INSERT INTO studio_os.warehouse_movements(item_id,packaging_balance_id,type,quantity,delta,before_quantity,after_quantity,reason,source_reference,corrects_movement_id,item_snapshot,actor_id) VALUES(${id},${balanceId},${type},${qty},${delta},${before},${after},${reason},${reference},${corrects},${JSON.stringify(snapshot)}::jsonb,${who.id}) RETURNING id`;
+   if(balance)await tx`UPDATE studio_os.packaging_balances SET quantity=${after},version=version+1 WHERE id=${balance.id}`;
+   await tx`UPDATE studio_os.warehouse_items SET opening_confirmed=true,quantity=${total},version=version+1,updated_at=now() WHERE id=${id}`;return {id,movementId:movement.id};
   });
  }
  async sampleTargets(who:Identity,id:string,value:unknown){await currentPermission(this.db,who,'resources');
