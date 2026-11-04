@@ -1,4 +1,4 @@
-import {productStockOptions,productStockPayload,productStockDetail} from './product-stock-contract.mjs';
+import {productStockOptions,productStockPayload,productStockDetail,productReturnPayload} from './product-stock-contract.mjs';
 import {commercialState,commercialPayload,commercialHistory} from './commercial-products-contract.mjs';
 import {financeState,rechargeRecord,rechargePage,rechargeHistory,balancePage,reminderState,reminderHistory,reminderPage,rechargePayload,voidPayload,balancePayload,reminderPayload,operationPath,operationAction,operationResult} from './phone-card-finance-contract.mjs';
 import {phoneCard,phoneCardPage,phoneCardHistory,phoneCardIdentity,phoneCardOptions,phoneCardPayload,phoneCardIdentityPayload,phoneCardResult} from './phone-cards-contract.mjs';
@@ -151,9 +151,10 @@ export function createCloudApi(fetcher=globalThis.fetch,{allowWrites=false}={}){
     async productStockOptions(offset=0,signal){return read('/api/product-stock-documents/options?offset='+offset,signal,productStockOptions);},
     async saveProductStockDocument(value){return mutations.send('/api/product-stock-documents','POST',productStockPayload(value));},
     async productStockDocument(id,signal){return read('/api/product-stock-documents/'+endpointId(id),signal,v=>productStockDetail(v,id));},
-    async productStockReceipt(key){
-      const path='/api/product-stock-documents';
-      try{const result=await get(path+'/receipts/'+endpointId(key));endpointId(result?.id);mutations.confirmRead(path);return result;}
+    async saveProductStockReturn(id,value){return mutations.send('/api/product-stock-documents/'+endpointId(id)+'/returns','POST',productReturnPayload(value));},
+    async productStockReceipt(key,shipmentId=null){
+      const path='/api/product-stock-documents'+(shipmentId?'/'+endpointId(shipmentId)+'/returns':'');
+      try{const result=await get('/api/product-stock-documents/receipts/'+endpointId(key));endpointId(result?.id);mutations.confirmRead(path);return result;}
       catch(e){if(e.status===404){mutations.confirmRead(path);return null;}throw e;}
     },
     async commercialProduct(id,signal){return read('/api/commercial-products/'+endpointId(id),signal,v=>commercialState(v,id));},

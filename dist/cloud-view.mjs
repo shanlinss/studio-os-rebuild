@@ -184,6 +184,8 @@ document.addEventListener('click',async e=>{
  if(consume&&editors){consume.disabled=true;try{await editors.consumePackaging();}catch(err){notify(err.message);}finally{if(consume.isConnected)consume.disabled=false;}return;}
  const commercial=e.target.closest('button[data-commercial-edit]');
  if(commercial&&editors){commercial.disabled=true;try{await editors.commercialProduct(commercial.dataset.commercialEdit,commercial.dataset.productId,commercial.dataset.skuId||null,commercial.dataset.storeId||null);}catch(err){notify(err.message);}finally{if(commercial.isConnected)commercial.disabled=false;}return;}
+ const productReturn=e.target.closest('button[data-product-stock-return]');
+ if(productReturn&&editors){productReturn.disabled=true;try{await editors.productStockReturn(productReturn.dataset.productStockReturn);}catch(err){notify(err.message);}finally{if(productReturn.isConnected)productReturn.disabled=false;}return;}
  const productStock=e.target.closest('button[data-product-stock-action]');
  if(productStock&&editors){productStock.disabled=true;try{await editors.productStock(productStock.dataset.productStockAction,productStock.dataset.balanceId||null);}catch(err){notify(err.message);}finally{if(productStock.isConnected)productStock.disabled=false;}return;}
  const scoped=e.target.closest('button[data-scoped-warehouse-move]');

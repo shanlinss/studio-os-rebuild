@@ -481,16 +481,86 @@ export class Warehouse {
    return {id:document.id};
   },async tx=>{await this.consumptionSources(tx,who,ids,true,'product');});
  }
+ private async returnShipment(tx:TransactionSql,who:Identity,id:string){
+  const manager=await this.consumptionManager(tx,who);
+  const [document]=await tx`SELECT id,business_date::text AS "businessDate" FROM studio_os.product_stock_documents
+   WHERE id=${id} AND operation='shipment' AND (${manager} OR actor_id=${who.id})`;
+  if(!document)throw new NotFoundException();
+  const lines=await tx`SELECT id,item_id,packaging_balance_id AS "balanceId",quantity,business_store_id AS "businessStoreId",item_snapshot AS snapshot
+   FROM studio_os.warehouse_movements WHERE product_stock_document_id=${id} ORDER BY id`;
+  if(!manager)await this.consumptionSources(tx,who,lines.map(row=>row.balanceId),false,'product');
+  return {document,lines};
+ }
+ async returnProductStock(who:Identity,shipmentId:string,value:unknown){
+  shipmentId=uuid(shipmentId);
+  const b=objectInput(value,['requestKey','businessDate','sourceReference','reason','resellableConfirmed','lines']);
+  if(b.resellableConfirmed!==true||!Array.isArray(b.lines)||!b.lines.length||b.lines.length>100)throw new BadRequestException('请确认实物已验收且可重新销售');
+  const date=purchaseDay(b.businessDate),reference=optionalLongText(b.sourceReference,200),reason=longText(b.reason,2000);
+  const lines=b.lines.map(value=>{
+   const line=objectInput(value,['shipmentMovementId','expectedVersion','quantity']);
+   return {shipmentMovementId:uuid(line.shipmentMovementId),expected:version(line.expectedVersion),quantity:quantity(line.quantity)};
+  });
+  if(new Set(lines.map(row=>row.shipmentMovementId)).size!==lines.length)throw new BadRequestException('同一发货明细只能填写一次');
+  let original:Awaited<ReturnType<Warehouse['returnShipment']>>;
+  return this.write(who,'product-stock:return:'+shipmentId,b,async tx=>{
+   if(date<original.document.businessDate)throw new BadRequestException('退货日期不能早于原发货日期');
+   const selected=lines.map(line=>({line,source:original.lines.find(row=>row.id===line.shipmentMovementId)!}));
+   const itemIds=[...new Set(selected.map(row=>row.source.item_id))];
+   const items=await tx`SELECT * FROM studio_os.warehouse_items WHERE id=ANY(${tx.array(itemIds)}::uuid[]) ORDER BY id FOR UPDATE`;
+   const byItem=new Map(items.map(row=>[row.id,row]));
+   const balances=await this.consumptionSources(tx,who,selected.map(row=>row.source.balanceId),true,'product');
+   const byBalance=new Map(balances.map(row=>[row.id,row]));
+   const skus=await tx`SELECT k.id FROM studio_os.product_skus k JOIN studio_os.products p ON p.id=k.product_id
+    WHERE k.warehouse_item_id=ANY(${tx.array(itemIds)}::uuid[]) AND k.active AND p.active ORDER BY k.id FOR SHARE OF k,p`;
+   if(skus.length!==itemIds.length)throw new ConflictException('商品 SKU 已变化');
+   const previous=await tx`SELECT r.shipment_movement_id AS id,sum(m.quantity)::text AS quantity
+    FROM studio_os.product_stock_returns r JOIN studio_os.warehouse_movements m ON m.id=r.return_movement_id
+    WHERE r.shipment_movement_id=ANY(${tx.array(lines.map(row=>row.shipmentMovementId))}::uuid[]) GROUP BY r.shipment_movement_id`;
+   const returned=new Map(previous.map(row=>[row.id,Number(row.quantity)])),totals=new Map<string,number>();
+   for(const {line,source} of selected){
+    const balance=byBalance.get(source.balanceId)!;
+    if(balance.version!==line.expected||line.quantity>source.quantity-(returned.get(source.id)??0)||balance.quantity+line.quantity>MAX)
+     throw new ConflictException('库存或可退数量已变化，请重新核对');
+    totals.set(source.item_id,(totals.get(source.item_id)??0)+line.quantity);
+   }
+   for(const [id,count] of totals)if(byItem.get(id)!.quantity+count>MAX)throw new ConflictException('商品数量超过容量');
+   const [document]=await tx`INSERT INTO studio_os.product_stock_documents(operation,business_date,source_reference,reason,actor_id,source_shipment_id,resellable_confirmed)
+    VALUES('return',${date},${reference},${reason},${who.id},${shipmentId},true) RETURNING id`;
+   for(const {line,source} of selected){
+    const balance=byBalance.get(source.balanceId)!,after=balance.quantity+line.quantity;
+    const snapshot={...source.snapshot,returnOfMovementId:source.id};
+    const [movement]=await tx`INSERT INTO studio_os.warehouse_movements(item_id,packaging_balance_id,product_stock_document_id,business_store_id,type,quantity,delta,
+     before_quantity,after_quantity,reason,item_snapshot,actor_id) VALUES(${source.item_id},${balance.id},${document.id},${source.businessStoreId},'inbound',${line.quantity},${line.quantity},
+     ${balance.quantity},${after},'商品退货入库',${JSON.stringify(snapshot)}::jsonb,${who.id}) RETURNING id`;
+    await tx`INSERT INTO studio_os.product_stock_returns(return_movement_id,shipment_movement_id) VALUES(${movement.id},${source.id})`;
+    await tx`UPDATE studio_os.packaging_balances SET quantity=${after},version=version+1 WHERE id=${balance.id}`;
+   }
+   for(const [id,count] of totals)await tx`UPDATE studio_os.warehouse_items SET quantity=quantity+${count},version=version+1,updated_at=now() WHERE id=${id}`;
+   return {id:document.id};
+  },async tx=>{
+   original=await this.returnShipment(tx,who,shipmentId);
+   const selected=lines.map(line=>original.lines.find(row=>row.id===line.shipmentMovementId));
+   if(selected.some(row=>!row))throw new BadRequestException('退货明细不属于原发货单');
+   await this.consumptionSources(tx,who,selected.map(row=>row!.balanceId),true,'product');
+  });
+ }
  async productStockDocumentDetail(who:Identity,id:string){
   id=uuid(id);
   return this.db.client.begin(async tx=>{
    await tx`SET TRANSACTION ISOLATION LEVEL REPEATABLE READ READ ONLY`;
    const manager=await this.consumptionManager(tx,who);
-   const [document]=await tx`SELECT d.id,d.operation,d.business_date::text AS "businessDate",d.source_reference AS "sourceReference",d.reason,d.created_at AS "createdAt",a.username AS actor
+   const [document]=await tx`SELECT d.id,d.operation,d.business_date::text AS "businessDate",d.source_reference AS "sourceReference",d.reason,d.source_shipment_id AS "sourceShipmentId",d.resellable_confirmed AS "resellableConfirmed",d.created_at AS "createdAt",a.username AS actor
     FROM studio_os.product_stock_documents d JOIN studio_os.accounts a ON a.id=d.actor_id WHERE d.id=${id} AND (${manager} OR d.actor_id=${who.id})`;
    if(!document)throw new NotFoundException();
-   const lines=await tx`SELECT id,quantity,packaging_balance_id AS "balanceId",item_snapshot AS snapshot,
-    before_quantity AS "beforeQuantity",after_quantity AS "afterQuantity" FROM studio_os.warehouse_movements WHERE product_stock_document_id=${id} ORDER BY id`;
+   const lines=await tx`SELECT m.id,m.quantity,m.packaging_balance_id AS "balanceId",m.item_snapshot AS snapshot,
+    m.before_quantity AS "beforeQuantity",m.after_quantity AS "afterQuantity",b.version AS "currentVersion",
+    (${document.operation==='shipment'} AND w.active AND ${stockKind(tx,'product')} AND (b.store_id IS NULL OR s.active) AND (${manager} OR EXISTS(
+      SELECT 1 FROM studio_os.inventory_access_grants g WHERE g.account_id=${who.id} AND g.store_id IS NOT DISTINCT FROM b.store_id AND g.can_move))) AS "canReturn",
+    coalesce((SELECT sum(returned.quantity) FROM studio_os.product_stock_returns r JOIN studio_os.warehouse_movements returned ON returned.id=r.return_movement_id
+     WHERE r.shipment_movement_id=m.id),0)::int AS "returnedQuantity"
+    FROM studio_os.warehouse_movements m JOIN studio_os.packaging_balances b ON b.id=m.packaging_balance_id
+    JOIN studio_os.warehouse_items w ON w.id=b.item_id LEFT JOIN studio_os.stores s ON s.id=b.store_id
+    WHERE m.product_stock_document_id=${id} ORDER BY m.id`;
    if(!manager)await this.consumptionSources(tx,who,lines.map(row=>row.balanceId),false,'product');
    return {...document,lines};
   });

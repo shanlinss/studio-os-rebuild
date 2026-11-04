@@ -476,3 +476,62 @@ test('authorized product batches preserve SKU, business dates and store facts wi
  await assert.rejects(employee.api.productStockReceipt(shipment.requestKey),e=>e.status===403);
  assert.equal((await admin.productStockDocument(saved.id)).lines.length,2);
 });
+
+test('resellable returns retain shipment provenance and cannot exceed the shipped quantity under concurrent retries',async()=>{
+ const admin=clients[0],auth=new Authentication(db),username='returns_'+randomBytes(6).toString('hex'),password=randomBytes(24).toString('hex');
+ const [actor]=await db.client`INSERT INTO studio_os.accounts(username,password_hash,role) VALUES(${username},${await hashPassword(password)},'employee') RETURNING id`;
+ await db.client`INSERT INTO studio_os.members(display_name,login_account_id) VALUES(${username},${actor.id})`;
+ async function grant(canMove){const current=await admin.inventoryAccess(actor.id);await admin.saveInventoryAccess(actor.id,{requestKey:randomUUID(),reason:'退货职责授权',grants:[{storeId:null,canMove}]},current.version);}
+ async function login(){
+  const session=await auth.login(username,password,'returns-'+randomUUID());
+  const api=createCloudApi((path,options)=>{const headers=new Headers(options?.headers);headers.set('Cookie','studio_session='+session.token);headers.set('Origin',base);return fetch(base+path,{...options,headers});},{allowWrites:true});
+  await api.session();return {api,session};
+ }
+ await grant(true);let employee=await login();
+ const product=await admin.createProduct({name:'退货原商品',storeId:null,notes:'',stages:['测试']});
+ const item=await admin.warehouseWrite('register',undefined,{requestKey:randomUUID(),itemCode:'RETURN-STOCK',kind:'product',productId:product.id,name:'可再销售商品',specification:'标准',unit:'件',location:'工作室',notes:''});
+ await admin.saveCommercialProduct(product.id,'formal',{requestKey:randomUUID(),code:'RETURN-PRODUCT',reason:'登记正式商品'},0);
+ await admin.saveCommercialProduct(product.id,'sku',{requestKey:randomUUID(),id:null,code:'RETURN-SKU',specification:'标准',unit:'件',active:true,warehouseItemId:item.id,reason:'绑定原库存'},1);
+ await admin.warehouseWrite('allocate-product',item.id,{requestKey:randomUUID(),reason:'实盘',allocations:[{storeId:null,quantity:8}]},1);
+ const balance=(await admin.warehouseItem(item.id)).balances[0],store=await admin.saveDirectory('store',undefined,{name:'原发货业务店铺'});
+ const shipment=await employee.api.saveProductStockDocument({requestKey:randomUUID(),operation:'shipment',businessDate:'2020-02-01',sourceReference:'原发货批次',reason:'实际发货',lines:[{balanceId:balance.id,expectedVersion:1,quantity:5,businessStoreId:store.id}]});
+ const source=(await employee.api.productStockDocument(shipment.id)).lines[0];
+ const originalMovement=await admin.warehouseMovement(item.id,source.id),before=await admin.warehouseItem(item.id);
+ assert.equal(source.returnedQuantity,0);assert.equal(source.canReturn,true);
+ const value={requestKey:randomUUID(),businessDate:'2020-02-02',sourceReference:'退货实物来源',reason:'验收可重新销售',resellableConfirmed:true,lines:[{shipmentMovementId:source.id,expectedVersion:source.currentVersion,quantity:2}]};
+ const post=(body,csrf=true)=>fetch(base+'/api/product-stock-documents/'+shipment.id+'/returns',{method:'POST',headers:{Origin:base,Cookie:'studio_session='+employee.session.token,'Content-Type':'application/json',...(csrf?{'x-csrf-token':employee.session.csrf}:{})},body:JSON.stringify(body)});
+ assert.equal((await post({...value,resellableConfirmed:false})).status,400);
+ assert.equal((await post({...value,businessDate:'2020-01-31'})).status,400);
+ assert.equal((await post({...value,lines:[{...value.lines[0],shipmentMovementId:randomUUID()}]})).status,400);
+ assert.equal((await post(value,false)).status,403);
+ await db.client.unsafe(`CREATE FUNCTION studio_os.fail_product_return_receipt() RETURNS trigger LANGUAGE plpgsql AS $$
+  BEGIN IF NEW.action LIKE 'product-stock:return:%' THEN RAISE EXCEPTION 'test return rollback'; END IF; RETURN NEW; END; $$;
+  CREATE TRIGGER fail_product_return_receipt BEFORE INSERT ON studio_os.warehouse_receipts FOR EACH ROW EXECUTE FUNCTION studio_os.fail_product_return_receipt();`);
+ try{
+  assert.equal((await post(value)).status,500);
+  assert.deepEqual(await admin.warehouseItem(item.id),before);
+  assert.equal((await employee.api.productStockDocument(shipment.id)).lines[0].returnedQuantity,0);
+ }finally{await db.client.unsafe('DROP TRIGGER fail_product_return_receipt ON studio_os.warehouse_receipts; DROP FUNCTION studio_os.fail_product_return_receipt()');}
+ const returned=await employee.api.saveProductStockReturn(shipment.id,value);
+ assert.deepEqual(await employee.api.saveProductStockReturn(shipment.id,value),returned);
+ assert.deepEqual(await employee.api.productStockReceipt(value.requestKey,shipment.id),returned);
+ const receipt=await employee.api.productStockDocument(returned.id);
+ assert.equal(receipt.operation,'return');assert.equal(receipt.sourceShipmentId,shipment.id);assert.equal(receipt.resellableConfirmed,true);
+ assert.equal(receipt.lines[0].snapshot.returnOfMovementId,source.id);assert.equal(receipt.lines[0].snapshot.businessStoreName,'原发货业务店铺');
+ assert.equal((await admin.warehouseItem(item.id)).quantity,5);
+ let remaining=(await employee.api.productStockDocument(shipment.id)).lines[0];
+ const second={...value,lines:[{shipmentMovementId:source.id,expectedVersion:remaining.currentVersion,quantity:2}]};
+ const replies=await Promise.all([post({...second,requestKey:randomUUID()}),post({...second,requestKey:randomUUID()})]);
+ assert.deepEqual(replies.map(r=>r.status).sort(),[201,409]);
+ remaining=(await employee.api.productStockDocument(shipment.id)).lines[0];
+ assert.equal(remaining.returnedQuantity,4);
+ assert.equal((await post({...value,requestKey:randomUUID(),lines:[{shipmentMovementId:source.id,expectedVersion:remaining.currentVersion,quantity:2}]})).status,409);
+ await employee.api.saveProductStockReturn(shipment.id,{...value,requestKey:randomUUID(),lines:[{shipmentMovementId:source.id,expectedVersion:remaining.currentVersion,quantity:1}]});
+ assert.equal((await admin.warehouseItem(item.id)).quantity,8);
+ assert.deepEqual(await admin.warehouseMovement(item.id,source.id),originalMovement);
+ await grant(false);employee=await login();
+ assert.equal((await employee.api.productStockDocument(shipment.id)).lines[0].canReturn,false);
+ assert.equal((await post({...value,requestKey:randomUUID()})).status,403);
+ await assert.rejects(employee.api.productStockReceipt(value.requestKey,shipment.id),e=>e.status===403);
+ assert.equal((await admin.productStockDocument(returned.id)).sourceShipmentId,shipment.id);
+});

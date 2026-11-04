@@ -358,6 +358,8 @@ export async function createStudioApp(
     productStockOptions(@Req() r:AuthRequest){return warehouse.productStockOptions(r.identity!,r.query);}
     @Get('product-stock-documents/receipts/:key')
     productStockReceipt(@Req() r:AuthRequest,@Param('key') key:string){return warehouse.productStockReceipt(r.identity!,key);}
+    @Post('product-stock-documents/:id/returns')
+    productStockReturn(@Req() r:AuthRequest,@Param('id') id:string,@Body() b:unknown){return warehouse.returnProductStock(r.identity!,id,b);}
     @Get('product-stock-documents/:id')
     productStockDocumentDetail(@Req() r:AuthRequest,@Param('id') id:string){return warehouse.productStockDocumentDetail(r.identity!,id);}
     @Post('product-stock-documents')
@@ -1837,7 +1839,7 @@ export async function createStudioApp(
       if(req.path==='/api/product-stock-documents'||req.path.startsWith('/api/product-stock-documents/')){
         requireContributor(req.identity);
         if(req.method==='GET'&&/^\/api\/product-stock-documents\/[^/]+(?:\/[^/]+)?$/.test(req.path))return true;
-        if(req.method==='POST'&&req.path==='/api/product-stock-documents'){auth.csrf(req);return true;}
+        if(req.method==='POST'&&(req.path==='/api/product-stock-documents'||/^\/api\/product-stock-documents\/[^/]+\/returns$/.test(req.path))){auth.csrf(req);return true;}
         throw new ForbiddenException();
       }
       if(req.method==='GET'&&/^\/api\/product-stock(?:\/[^/]+)?$/.test(req.path)){requireContributor(req.identity);return true;}
