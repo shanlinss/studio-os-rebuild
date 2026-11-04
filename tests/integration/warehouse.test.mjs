@@ -265,3 +265,43 @@ test('packaging transfers preserve total stock, pair both journals and reject pa
  await db.client`UPDATE studio_os.stores SET name='店铺改名后' WHERE id=${store.id}`;
  assert.deepEqual(await api.packagingTransferDetail(item.id,doc.id),doc);
 });
+
+test('reorder alerts use each active balance, refresh with stock, and preserve threshold history',async()=>{
+ const api=clients[0],item=await api.warehouseWrite('register',undefined,{
+  requestKey:randomUUID(),itemCode:'PACK-REORDER',kind:'packaging',productId:null,name:'补货阈值包材',
+  specification:'',unit:'包',location:'包材架',notes:''
+ });
+ const store=await api.saveDirectory('store',undefined,{name:'补货阈值店铺'});
+ await api.warehouseWrite('allocate-packaging',item.id,{requestKey:randomUUID(),reason:'核对期初',
+  allocations:[{storeId:null,quantity:0},{storeId:store.id,quantity:3}]},1);
+ const row=await api.warehouseItem(item.id),shared=row.balances.find(b=>b.storeId===null),shop=row.balances.find(b=>b.storeId===store.id);
+ const alerts=async()=>(await api.warehouseReorderAlerts()).rows.filter(r=>r.itemId===item.id);
+ assert.deepEqual(await alerts(),[]);
+ assert.equal(shared.reorderThreshold,null);
+ const value={requestKey:randomUUID(),threshold:0,reason:'公共库存缺货才提醒'};
+ const path='/warehouse/items/'+item.id+'/packaging-balances/'+shared.id+'/reorder-threshold';
+ assert.equal((await request(sessions[1],'/warehouse/reorder-alerts')).status,403);
+ assert.equal((await request(sessions[1],path,'POST',{...value,expectedVersion:1})).status,403);
+ const saved=await api.saveWarehouseReorderThreshold(item.id,shared.id,value,1);
+ assert.deepEqual(await api.saveWarehouseReorderThreshold(item.id,shared.id,value,1),saved);
+ assert.deepEqual(await api.warehouseReceipt(value.requestKey,'reorder-threshold',item.id,shared.id),saved);
+ assert.equal((await request(sessions[0],path,'POST',{...value,requestKey:randomUUID(),expectedVersion:1})).status,409);
+ await api.saveWarehouseReorderThreshold(item.id,shop.id,{requestKey:randomUUID(),threshold:3,reason:'到线补货'},1);
+ assert.deepEqual((await alerts()).map(r=>r.id),[shared.id,shop.id]);
+ const catalog=await api.warehouseCatalog({reorder:true,q:'PACK-REORDER'});
+ assert.equal(catalog.total,1);
+ assert.equal(catalog.rows[0].reorderAlertCount,2);
+ assert.equal((await api.warehouseHistory(item.id)).total,2);
+ const events=await api.warehouseHistory(item.id,0,true);
+ assert.equal(events.rows[0].beforeValue.reorderChange.threshold,null);
+ assert.equal(events.rows[0].afterValue.reorderChange.threshold,3);
+ const configured=await api.warehouseItem(item.id);
+ await api.warehouseWrite('move',item.id,move('inbound',1,{packagingBalanceId:shared.id}),configured.version);
+ assert.deepEqual((await alerts()).map(r=>r.id),[shop.id]);
+ await db.client`UPDATE studio_os.stores SET active=false WHERE id=${store.id}`;
+ assert.deepEqual(await alerts(),[]);
+ assert.equal((await api.warehouseCatalog({reorder:true,q:'PACK-REORDER'})).total,0);
+ await db.client`UPDATE studio_os.stores SET active=true WHERE id=${store.id}`;
+ await api.saveWarehouseReorderThreshold(item.id,shop.id,{requestKey:randomUUID(),threshold:null,reason:'取消店铺提醒'},2);
+ assert.deepEqual(await alerts(),[]);
+});

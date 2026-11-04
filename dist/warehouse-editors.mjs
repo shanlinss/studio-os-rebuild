@@ -52,6 +52,18 @@ export function createWarehouseEditors({api,h,mount,input,area,select}){
    return api.warehouseWrite(operation,id,value,row?.version);
   },{kind:'warehouse',id},async()=>api.warehouseReceipt(key,operation,id),setup);
  }
+ async function reorderThreshold(id,balanceId){
+  const row=await api.warehouseItem(id),balance=row.balances?.find(b=>b.id===balanceId);
+  if(!row.active||!balance||balance.reorderThreshold===undefined||balance.storeActive===false)throw new ContractError('该归属暂不能设置补货阈值。');
+  const key=crypto.randomUUID();
+  const body=`<p>${h(row.name)} · ${h(balance.storeName||'公共库存')} · 当前 ${h(balance.quantity)} ${h(row.unit)}</p>`+
+   input('threshold','补货阈值',balance.reorderThreshold??'','type="number" min="0" max="2147483647" step="1"')+
+   '<p class="muted">库存达到或低于阈值时提醒。填 0 表示仅缺货时提醒，留空关闭提醒。</p>'+area('reason','设置原因（必填）');
+  mount('设置补货阈值',body,f=>{
+   const raw=f.get('threshold');
+   return api.saveWarehouseReorderThreshold(id,balanceId,{requestKey:key,threshold:raw===''?null:Number(raw),reason:f.get('reason')},balance.version);
+  },{kind:'reorder-threshold',id},()=>api.warehouseReceipt(key,'reorder-threshold',id,balanceId));
+ }
  async function transferPackaging(id){
   const row=await api.warehouseItem(id);
   const balances=(row.balances||[]).filter(b=>b.storeId===null||b.storeActive);
@@ -137,5 +149,5 @@ export function createWarehouseEditors({api,h,mount,input,area,select}){
   mount('登记'+movementLabels[type],body,f=>api.scopedWarehouseMove(id,{requestKey:key,type,quantity:Number(f.get('quantity')),reason:f.get('reason')},balance.version),
    {kind:'scoped-warehouse',id},()=>api.scopedWarehouseReceipt(id,key));
  }
- return {warehouse,scopedWarehouse,packagingPurchase,consumePackaging,transferPackaging};
+ return {warehouse,scopedWarehouse,packagingPurchase,consumePackaging,transferPackaging,reorderThreshold};
 }

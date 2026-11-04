@@ -11,10 +11,10 @@ const qty=(v,zero=true)=>{if(!Number.isSafeInteger(v)||v<(zero?0:1)||v>MAX)throw
 const page=v=>{pagedRows(v);if(v.rows.some(r=>!r||typeof r!=='object'||typeof r.id!=='string')||v.limit!==50||v.rows.length>50||(v.rows.length&&v.offset+v.rows.length>v.total)||new Set(v.rows.map(r=>r.id)).size!==v.rows.length)throw new ContractError();return v;};
 export function warehouseItem(v){
  if(!v||typeof v.kind!=='string'||!Object.hasOwn(warehouseKinds,v.kind)||!warehouseUnits.includes(v.unit)||typeof v.itemCode!=='string'||typeof v.name!=='string'||typeof v.specification!=='string'||typeof v.location!=='string'||typeof v.notes!=='string'||typeof v.active!=='boolean'||typeof v.openingConfirmed!=='boolean')throw new ContractError('库存资料不完整。');
- id(v.id);expectedVersion(v.version);if(v.kind==='product')id(v.productId);else if(v.productId!==null)throw new ContractError();
+ id(v.id);expectedVersion(v.version);if(v.reorderAlertCount!==undefined)qty(v.reorderAlertCount);if(v.kind==='product')id(v.productId);else if(v.productId!==null)throw new ContractError();
  if(v.balances!==undefined){
   if(v.kind!=='packaging'||!Array.isArray(v.balances)||v.packagingScoped!==(v.balances.length>0))throw new ContractError();
-  for(const b of v.balances){id(b.id);if(b.storeId!==null){id(b.storeId);if(typeof b.storeName!=='string'||typeof b.storeActive!=='boolean')throw new ContractError();}qty(b.quantity);expectedVersion(b.version);}
+  for(const b of v.balances){id(b.id);if(b.storeId!==null){id(b.storeId);if(typeof b.storeName!=='string'||typeof b.storeActive!=='boolean')throw new ContractError();}qty(b.quantity);expectedVersion(b.version);if(b.reorderThreshold!==undefined&&b.reorderThreshold!==null)qty(b.reorderThreshold);}
   if(v.packagingScoped&&v.balances.reduce((sum,b)=>sum+b.quantity,0)!==v.quantity)throw new ContractError('包材分账与总量不一致，请重新读取。');
  }
  if(v.openingConfirmed)qty(v.quantity);else if(v.quantity!==null)throw new ContractError('未登记期初不能作为零库存展示。');return v;
@@ -50,7 +50,7 @@ export function warehousePayload(action,value,version){
   if(typeof value.kind!=='string'||!Object.hasOwn(warehouseKinds,value.kind)||!warehouseUnits.includes(value.unit))throw new ContractError('请选择库存类型和整数基础单位。');out.itemCode=text(value.itemCode,64,true);out.kind=value.kind;out.productId=value.productId===null?null:id(value.productId);if((out.kind==='product'&&!out.productId)||(out.kind==='packaging'&&out.productId))throw new ContractError('产品库存须关联原产品，包材独立建档。');out.name=text(value.name,120,true);out.specification=text(value.specification,200);out.unit=value.unit;out.location=text(value.location,150,true);out.notes=text(value.notes,2000);if(action==='edit'){if(typeof value.active!=='boolean')throw new ContractError();out.active=value.active;}
  }if(action!=='register')out.expectedVersion=expectedVersion(version);return out;
 }
-export function warehousePath(action,owner){if(action==='register')return '/api/warehouse/items';id(owner);if(action==='edit')return '/api/warehouse/items/'+owner;if(action==='move')return '/api/warehouse/items/'+owner+'/movements';if(action==='allocate-packaging')return '/api/warehouse/items/'+owner+'/packaging-balances';if(action==='transfer-packaging')return '/api/warehouse/items/'+owner+'/packaging-transfers';if(action==='transfer')return '/api/warehouse/items/'+owner+'/to-samples';throw new ContractError();}
+export function warehousePath(action,owner,balance){if(action==='register')return '/api/warehouse/items';id(owner);if(action==='reorder-threshold')return '/api/warehouse/items/'+owner+'/packaging-balances/'+id(balance)+'/reorder-threshold';if(action==='edit')return '/api/warehouse/items/'+owner;if(action==='move')return '/api/warehouse/items/'+owner+'/movements';if(action==='allocate-packaging')return '/api/warehouse/items/'+owner+'/packaging-balances';if(action==='transfer-packaging')return '/api/warehouse/items/'+owner+'/packaging-transfers';if(action==='transfer')return '/api/warehouse/items/'+owner+'/to-samples';throw new ContractError();}
 
 export function sampleTargetPage(v){
  page(v);for(const r of v.rows){id(r.id);id(r.productId);if(typeof r.name!=='string'||typeof r.warehouseLocation!=='string'||r.active!==true)throw new ContractError('目标样品资料不完整。');qty(r.availableQuantity);expectedVersion(r.version);if(r.sourceItemId!==null)id(r.sourceItemId);if(r.keeperMemberId!==null)id(r.keeperMemberId);}return v;
@@ -157,4 +157,19 @@ export function packagingTransferDetail(v,owner,transfer){
  if(v.source.beforeQuantity-v.source.afterQuantity!==v.quantity||v.target.afterQuantity-v.target.beforeQuantity!==v.quantity)
   throw new ContractError('调出和调入数量不一致。');
  return v;
+}
+
+export function reorderAlerts(v){
+ page(v);
+ for(const row of v.rows){
+  id(row.id);id(row.itemId);qty(row.quantity);qty(row.reorderThreshold);
+  if(row.quantity>row.reorderThreshold||typeof row.name!=='string'||typeof row.itemCode!=='string'||!warehouseUnits.includes(row.unit))throw new ContractError('补货提醒不完整。');
+  if(row.storeId===null){if(row.storeName!==null)throw new ContractError();}else{id(row.storeId);if(typeof row.storeName!=='string')throw new ContractError();}
+ }
+ return v;
+}
+export function reorderThresholdPayload(v,version){
+ if(!v||Object.keys(v).some(k=>!['requestKey','threshold','reason'].includes(k)))throw new ContractError();
+ return {requestKey:id(v.requestKey),expectedVersion:expectedVersion(version),
+  threshold:v.threshold===null?null:qty(v.threshold),reason:text(v.reason,2000,true)};
 }

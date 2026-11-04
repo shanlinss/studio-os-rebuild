@@ -10,7 +10,7 @@ import type {Identity} from './auth';
 import {requireAdministrator} from './access';
 import {objectInput,shortText,longText,optionalLongText,uuid,version} from './validation';
 const MAX=2147483647,units=['件','个','套','包','卷','箱'];
-const projection=`w.id,w.item_code AS "itemCode",w.kind,w.product_id AS "productId",p.name AS "productName",w.name,w.specification,w.unit,w.location,w.notes,w.opening_confirmed AS "openingConfirmed",w.quantity,w.active,w.version,w.created_at AS "createdAt",w.updated_at AS "updatedAt",EXISTS(SELECT 1 FROM studio_os.packaging_balances b WHERE b.item_id=w.id) AS "packagingScoped"`;
+const projection=`w.id,w.item_code AS "itemCode",w.kind,w.product_id AS "productId",p.name AS "productName",w.name,w.specification,w.unit,w.location,w.notes,w.opening_confirmed AS "openingConfirmed",w.quantity,w.active,w.version,w.created_at AS "createdAt",w.updated_at AS "updatedAt",(SELECT count(*)::int FROM studio_os.packaging_reorder_alerts ra WHERE ra.item_id=w.id) AS "reorderAlertCount",EXISTS(SELECT 1 FROM studio_os.packaging_balances b WHERE b.item_id=w.id) AS "packagingScoped"`;
 const movementProjection=`m.id,m.item_id AS "itemId",m.type,m.quantity,m.delta,m.before_quantity AS "beforeQuantity",m.after_quantity AS "afterQuantity",m.reason,m.source_reference AS "sourceReference",m.corrects_movement_id AS "correctsMovementId",m.item_snapshot AS "itemSnapshot",m.packaging_balance_id AS "packagingBalanceId",m.packaging_consumption_id AS "packagingConsumptionId",
  (SELECT pt.id FROM studio_os.packaging_stock_transfers pt WHERE pt.outbound_movement_id=m.id OR pt.inbound_movement_id=m.id) AS "packagingTransferId",m.created_at AS "createdAt",coalesce(n.display_name,a.username) AS actor,t.id AS "transferId",t.sample_id AS "targetSampleId",t.target_snapshot AS "transferTargetSnapshot"`;
 const scopedProjection='b.id,b.store_id AS "storeId",s.name AS "storeName",b.quantity,b.version,g.can_move AS "canMove",w.name,w.item_code AS "itemCode",w.specification,w.unit,w.location';
@@ -38,15 +38,16 @@ export class Warehouse {
  }
  async receipt(who:Identity,key:string){await currentPermission(this.db,who,'resources');requireAdministrator(who);uuid(key);const [r]=await this.db.client`SELECT result FROM studio_os.warehouse_receipts WHERE actor_id=${who.id} AND request_key=${key} AND action NOT LIKE 'purchase-packaging:%' AND action<>'consume-packaging'`;if(!r)throw new NotFoundException();return r.result;}
  private query(who:Identity,value:unknown,history=false){
-  requireAdministrator(who);const b=objectInput(value,history?['offset']:['q','kind','active','offset']),offset=b.offset===undefined?0:Number(b.offset);
+  requireAdministrator(who);const b=objectInput(value,history?['offset']:['q','kind','active','offset','reorder']),offset=b.offset===undefined?0:Number(b.offset);
   if(!Number.isSafeInteger(offset)||offset<0||offset>MAX)throw new BadRequestException();const kind=b.kind===undefined?'all':String(b.kind),active=b.active===undefined?'active':String(b.active);
-  if(!['all','product','packaging'].includes(kind)||!['active','inactive','all'].includes(active))throw new BadRequestException();return {offset,kind,active,q:b.q?shortText(b.q,100):''};
+  if(b.reorder!==undefined&&b.reorder!=='low')throw new BadRequestException();
+  if(!['all','product','packaging'].includes(kind)||!['active','inactive','all'].includes(active))throw new BadRequestException();return {offset,kind,active,reorder:b.reorder==='low',q:b.q?shortText(b.q,100):''};
  }
  async catalog(who:Identity,value:unknown){await currentPermission(this.db,who,'resources');
   const q=this.query(who,value);
   return this.db.client.begin(async tx=>{
    await tx`SET TRANSACTION ISOLATION LEVEL REPEATABLE READ READ ONLY`;
-   const where=tx`(${q.kind}='all' OR w.kind=${q.kind}) AND (${q.active}='all' OR w.active=${q.active==='active'}) AND strpos(lower(concat_ws(' ',w.item_code,w.name,w.specification,w.location,p.name)),lower(${q.q}))>0`;
+   const where=tx`(${q.kind}='all' OR w.kind=${q.kind}) AND (${q.active}='all' OR w.active=${q.active==='active'}) AND (NOT ${q.reorder} OR EXISTS(SELECT 1 FROM studio_os.packaging_reorder_alerts ra WHERE ra.item_id=w.id)) AND strpos(lower(concat_ws(' ',w.item_code,w.name,w.specification,w.location,p.name)),lower(${q.q}))>0`;
    const rows=await tx`SELECT ${tx.unsafe(projection)} FROM studio_os.warehouse_items w LEFT JOIN studio_os.products p ON p.id=w.product_id WHERE ${where} ORDER BY w.created_at DESC,w.id LIMIT 50 OFFSET ${q.offset}`;
    const [count]=await tx`SELECT count(*)::int AS n FROM studio_os.warehouse_items w LEFT JOIN studio_os.products p ON p.id=w.product_id WHERE ${where}`;
    const summary=await tx`SELECT w.kind,w.unit,coalesce(sum(w.quantity),0)::text AS quantity,count(*) FILTER(WHERE w.opening_confirmed)::int AS "initializedCount",count(*) FILTER(WHERE NOT w.opening_confirmed)::int AS "pendingCount" FROM studio_os.warehouse_items w LEFT JOIN studio_os.products p ON p.id=w.product_id WHERE ${where} GROUP BY w.kind,w.unit ORDER BY w.kind,w.unit`;
@@ -62,9 +63,46 @@ export class Warehouse {
    const [row]=await tx`SELECT ${tx.unsafe(projection)} FROM studio_os.warehouse_items w LEFT JOIN studio_os.products p ON p.id=w.product_id WHERE w.id=${id}`;
    if(!row)throw new NotFoundException();
    if(row.kind!=='packaging')return row;
-   const balances=await tx`SELECT b.id,b.store_id AS "storeId",s.name AS "storeName",s.active AS "storeActive",b.quantity,b.version
+   const balances=await tx`SELECT b.id,b.store_id AS "storeId",s.name AS "storeName",s.active AS "storeActive",b.quantity,b.version,b.reorder_threshold AS "reorderThreshold"
      FROM studio_os.packaging_balances b LEFT JOIN studio_os.stores s ON s.id=b.store_id WHERE b.item_id=${id} ORDER BY s.name NULLS FIRST,b.id`;
    return {...row,balances};
+  });
+ }
+ async reorderAlerts(who:Identity,value:unknown){
+  await currentPermission(this.db,who,'resources');
+  const {offset}=this.query(who,value,true);
+  return this.db.client.begin(async tx=>{
+   await tx`SET TRANSACTION ISOLATION LEVEL REPEATABLE READ READ ONLY`;
+   const rows=await tx`SELECT balance_id AS id,item_id AS "itemId",item_code AS "itemCode",name,unit,
+     store_id AS "storeId",store_name AS "storeName",quantity,reorder_threshold AS "reorderThreshold"
+    FROM studio_os.packaging_reorder_alerts ORDER BY (quantity=0) DESC,name,store_name NULLS FIRST,balance_id LIMIT 50 OFFSET ${offset}`;
+   const [count]=await tx`SELECT count(*)::int AS total FROM studio_os.packaging_reorder_alerts`;
+   return {rows,total:count.total,offset,limit:50};
+  });
+ }
+ async setReorderThreshold(who:Identity,id:string,balanceId:string,value:unknown){
+  id=uuid(id);balanceId=uuid(balanceId);
+  const b=objectInput(value,['requestKey','expectedVersion','threshold','reason']);
+  const expected=version(b.expectedVersion),threshold=b.threshold===null?null:quantity(b.threshold,true),reason=longText(b.reason,2000);
+  return this.write(who,'reorder-threshold:'+id+':'+balanceId,b,async tx=>{
+   const original=await item(tx,id);
+   const [balance]=await tx`SELECT id,store_id,version,reorder_threshold FROM studio_os.packaging_balances WHERE id=${balanceId} AND item_id=${id}`;
+   if(original.kind!=='packaging'||!original.active||!balance||balance.version!==expected)
+    throw new ConflictException('包材或库存归属已变化，请重新读取');
+   let storeName=null;
+   if(balance.store_id){
+    const [store]=await tx`SELECT name FROM studio_os.stores WHERE id=${balance.store_id} AND active FOR SHARE`;
+    if(!store)throw new ConflictException('库存店铺已停用');
+    storeName=store.name;
+   }
+   if(balance.reorder_threshold===threshold)return {id};
+   const change={balanceId,storeName,reason};
+   await tx`UPDATE studio_os.packaging_balances SET reorder_threshold=${threshold},version=version+1 WHERE id=${balanceId}`;
+   const [after]=await tx`UPDATE studio_os.warehouse_items SET version=version+1,updated_at=now() WHERE id=${id} RETURNING *`;
+   await tx`INSERT INTO studio_os.warehouse_item_events(item_id,actor_id,action,before_value,after_value)
+    VALUES(${id},${who.id},'edited',${JSON.stringify({...original,reorderChange:{...change,threshold:balance.reorder_threshold}})}::jsonb,
+     ${JSON.stringify({...after,reorderChange:{...change,threshold}})}::jsonb)`;
+   return {id};
   });
  }
  async allocatePackaging(who:Identity,id:string,value:unknown){

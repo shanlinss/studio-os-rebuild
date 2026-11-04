@@ -360,6 +360,12 @@ export async function createStudioApp(
     scopedPackagingMove(@Req() r:AuthRequest,@Param('id') id:string,@Body() b:unknown){return warehouse.scopedMove(r.identity!,id,b);}
     @Get('packaging-stock/:id/receipts/:key')
     scopedPackagingReceipt(@Req() r:AuthRequest,@Param('id') id:string,@Param('key') key:string){return warehouse.scopedReceipt(r.identity!,id,key);}
+    @Get('warehouse/reorder-alerts')
+    warehouseReorderAlerts(@Req() r:AuthRequest){return warehouse.reorderAlerts(r.identity!,r.query);}
+    @Post('warehouse/items/:id/packaging-balances/:balance/reorder-threshold')
+    warehouseReorderThreshold(@Req() r:AuthRequest,@Param('id') id:string,@Param('balance') balance:string,@Body() b:unknown){
+      return warehouse.setReorderThreshold(r.identity!,id,balance,b);
+    }
     @Get('warehouse/items') warehouseCatalog(@Req() r: AuthRequest) { return warehouse.catalog(r.identity!,r.query); }
     @Get('phone-cards') phoneCardCatalog(@Req() r:AuthRequest){return phoneCards.catalog(r.identity!,r.query);}
     @Get('phone-card-finance/:id') phoneCardFinanceState(@Req() r:AuthRequest,@Param('id') id:string){return phoneCardFinance.state(r.identity!,id);}
@@ -1806,8 +1812,8 @@ export async function createStudioApp(
           if(req.method==='POST'&&req.path.endsWith('/packaging-purchases')){auth.csrf(req);return true;}
           throw new ForbiddenException();
         }
-        const route=req.path.slice('/api/warehouse/'.length),allowed=(req.method==='GET' && /^(items|items\/[^/]+(?:\/(?:movements(?:\/[^/]+)?|events|transfers|sample-targets|packaging-transfers\/[^/]+))?|receipts\/[^/]+)$/.test(route)) ||
-          (req.method==='POST' && /^(items|items\/[^/]+\/(?:movements|to-samples|packaging-balances|packaging-transfers))$/.test(route)) || (req.method==='PATCH' && /^items\/[^/]+$/.test(route));
+        const route=req.path.slice('/api/warehouse/'.length),allowed=(req.method==='GET' && /^(reorder-alerts|items|items\/[^/]+(?:\/(?:movements(?:\/[^/]+)?|events|transfers|sample-targets|packaging-transfers\/[^/]+))?|receipts\/[^/]+)$/.test(route)) ||
+          (req.method==='POST' && /^(items|items\/[^/]+\/(?:movements|to-samples|packaging-balances|packaging-balances\/[^/]+\/reorder-threshold|packaging-transfers))$/.test(route)) || (req.method==='PATCH' && /^items\/[^/]+$/.test(route));
         if(!allowed)throw new ForbiddenException();if(req.method!=='GET')auth.csrf(req);return true;
       }
       if(req.path.startsWith('/api/equipment/')){

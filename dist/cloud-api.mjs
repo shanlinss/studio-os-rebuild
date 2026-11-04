@@ -14,7 +14,7 @@ import {attendancePage,attendanceDetail,attendanceHistory,attendancePayload,atte
 import {dailyAttendanceState,endWorkPayload,endWorkResult} from './daily-attendance.mjs';
 import {permissionPayload} from './admin-permissions.mjs';
 import {accountLifecyclePayload,accountLifecycleResult} from './account-lifecycle-contract.mjs';
-import {warehouseItem,warehouseCatalog,warehouseMovement,warehouseHistory,warehousePayload,warehousePath,sampleTargetPage,sampleTransferPayload,sampleTransferPage,scopedWarehouseCatalog,scopedWarehouseDetail,scopedWarehousePayload,packagingPurchasePayload,packagingPurchaseHistory,consumptionOptions,consumptionPayload,consumptionDetail,packagingTransferPayload,packagingTransferDetail} from './warehouse-contract.mjs';
+import {warehouseItem,warehouseCatalog,warehouseMovement,warehouseHistory,warehousePayload,warehousePath,sampleTargetPage,sampleTransferPayload,sampleTransferPage,scopedWarehouseCatalog,scopedWarehouseDetail,scopedWarehousePayload,packagingPurchasePayload,packagingPurchaseHistory,consumptionOptions,consumptionPayload,consumptionDetail,packagingTransferPayload,packagingTransferDetail,reorderAlerts,reorderThresholdPayload} from './warehouse-contract.mjs';
 import {equipmentRecord,equipmentPage,equipmentPayload,equipmentPath} from './equipment-contract.mjs';
 import {sampleState,samplePage,samplePayload,sampleOperationPath} from './sample-contract.mjs';
 import {assetPath,mediaUpload,readMedia,expenseReceiptMaxBytes} from './media-contract.mjs';
@@ -146,6 +146,10 @@ export function createCloudApi(fetcher=globalThis.fetch,{allowWrites=false}={}){
     async todos(signal){return read('/api/workbench/todos',signal,v=>list(v).map(todoModel));},
     async finance(signal){return read('/api/finance',signal,financeRecord);},
     async competitors(signal){return namedList(await get('/api/competitors',signal));},
+    async warehouseReorderAlerts(offset=0,signal){return read('/api/warehouse/reorder-alerts?offset='+offset,signal,reorderAlerts);},
+    async saveWarehouseReorderThreshold(id,balance,value,version){
+      return mutations.send(warehousePath('reorder-threshold',id,balance),'POST',reorderThresholdPayload(value,version));
+    },
     async packagingTransferDetail(id,transfer,signal){
       return read(warehousePath('transfer-packaging',id)+'/'+endpointId(transfer),signal,v=>packagingTransferDetail(v,id,transfer));
     },
@@ -173,7 +177,7 @@ export function createCloudApi(fetcher=globalThis.fetch,{allowWrites=false}={}){
       try{const result=await get(path+'/receipts/'+endpointId(key));if(result?.id!==id)throw new ContractError();endpointId(result.movementId);mutations.confirmRead(path);return result;}
       catch(e){if(e.status===404){mutations.confirmRead(path);return null;}throw e;}
     },
-    async warehouseCatalog(params={},signal){const q=new URLSearchParams({q:params.q??'',kind:params.kind??'all',active:params.active??'active',offset:String(params.offset??0)});return read('/api/warehouse/items?'+q,signal,warehouseCatalog);},
+    async warehouseCatalog(params={},signal){const q=new URLSearchParams({q:params.q??'',kind:params.kind??'all',active:params.active??'active',offset:String(params.offset??0)});if(params.reorder)q.set('reorder','low');return read('/api/warehouse/items?'+q,signal,warehouseCatalog);},
     async warehouseItem(id,signal){return read('/api/warehouse/items/'+endpointId(id),signal,warehouseItem);},
     async warehouseHistory(id,offset=0,events=false,signal){return read('/api/warehouse/items/'+endpointId(id)+'/'+(events?'events':'movements')+'?offset='+String(offset),signal,v=>warehouseHistory(v,events));},
     async warehouseMovement(id,movement,signal){return read('/api/warehouse/items/'+endpointId(id)+'/movements/'+endpointId(movement),signal,warehouseMovement);},
@@ -181,7 +185,7 @@ export function createCloudApi(fetcher=globalThis.fetch,{allowWrites=false}={}){
     async warehouseToSamples(id,value,version){return mutations.send(warehousePath('transfer',id),'POST',sampleTransferPayload(value,version));},
     async warehouseTransfers(id,offset=0,bySample=false,signal){const path=bySample?'/api/samples/catalog/'+endpointId(id)+'/transfers':'/api/warehouse/items/'+endpointId(id)+'/transfers';return read(path+'?offset='+String(offset),signal,sampleTransferPage);},
     async warehouseWrite(action,id,value,version){return mutations.send(warehousePath(action,id),action==='edit'?'PATCH':'POST',warehousePayload(action,value,version));},
-    async warehouseReceipt(key,action,id){const path=warehousePath(action,id);try{const result=await get('/api/warehouse/receipts/'+endpointId(key));if(!record(result)||typeof result.id!=='string')throw new ContractError();endpointId(result.id);if(result.movementId!==undefined)endpointId(result.movementId);if(action==='transfer-packaging')endpointId(result.packagingTransferId);if(action==='transfer'){for(const key of ['movementId','transferId','sampleId','sampleEventId'])endpointId(result[key]);}mutations.confirmRead(path);return result;}catch(e){if(e.status===404){mutations.confirmRead(path);return null;}throw e;}},
+    async warehouseReceipt(key,action,id,balance){const path=warehousePath(action,id,balance);try{const result=await get('/api/warehouse/receipts/'+endpointId(key));if(!record(result)||typeof result.id!=='string')throw new ContractError();endpointId(result.id);if(result.movementId!==undefined)endpointId(result.movementId);if(action==='transfer-packaging')endpointId(result.packagingTransferId);if(action==='transfer'){for(const key of ['movementId','transferId','sampleId','sampleEventId'])endpointId(result[key]);}mutations.confirmRead(path);return result;}catch(e){if(e.status===404){mutations.confirmRead(path);return null;}throw e;}},
     async cardFinanceState(id,signal){return financeState(await get('/api/phone-card-finance/'+endpointId(id),signal),id);},
     async cardRecharges(id,params={},signal){const q=new URLSearchParams({offset:String(params.offset||0),status:params.status||'all'});for(const k of ['q','from','to','storeId'])if(params[k])q.set(k,params[k]);return rechargePage(await get('/api/phone-card-finance/'+endpointId(id)+'/recharges?'+q,signal),id);},
     async cardRecharge(id,root,signal){return rechargeRecord(await get('/api/phone-card-finance/'+endpointId(id)+'/recharges/'+endpointId(root),signal),id,root);},
