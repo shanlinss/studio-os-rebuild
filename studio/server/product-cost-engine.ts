@@ -1,14 +1,14 @@
 // Review calculation only. Fractions remain exact until display; rounded values never feed the next movement.
-type Fraction={n:bigint,d:bigint};
+export type Fraction={n:bigint,d:bigint};
 const zero=():Fraction=>({n:0n,d:1n});
-function fraction(n:bigint,d=1n):Fraction{let a=n<0n?-n:n,b=d;while(b){const r=a%b;a=b;b=r;}return {n:n/(a||1n),d:d/(a||1n)};}
-const plus=(a:Fraction,b:Fraction)=>fraction(a.n*b.d+b.n*a.d,a.d*b.d);
+export function fraction(n:bigint,d=1n):Fraction{let a=n<0n?-n:n,b=d;while(b){const r=a%b;a=b;b=r;}return {n:n/(a||1n),d:d/(a||1n)};}
+export const plus=(a:Fraction,b:Fraction)=>fraction(a.n*b.d+b.n*a.d,a.d*b.d);
 const times=(a:Fraction,n:number,d=1)=>fraction(a.n*BigInt(n),a.d*BigInt(d));
 export function costAmount(a:Fraction|null):string|null{if(a===null)return null;const abs=a.n<0n?-a.n:a.n,cents=(abs*2n+a.d)/(2n*a.d);return `${a.n<0n&&cents>0n?'-':''}${cents/100n}.${String(cents%100n).padStart(2,'0')}`;}
 export interface CostMovement{
  id:string;type:string;quantity:number;delta:number;day:string;postedAt:string;documentId:string|null;
  operation:string|null;totalCents:number|null;sourceShipmentId:string|null;purchaseVersion:number|null;
- referenceUnitCents?:number|null;referenceId?:string|null;openingVersion?:number|null;sourceChanged:boolean;snapshot:Record<string,unknown>;duplicateOpening:boolean;internalTransfer:boolean;
+ businessStoreId?:string|null;referenceUnitCents?:number|null;referenceId?:string|null;openingVersion?:number|null;sourceChanged:boolean;snapshot:Record<string,unknown>;duplicateOpening:boolean;internalTransfer:boolean;
 }
 export function movingCosts(movements:CostMovement[],month:string){
  let quantity=0,value:Fraction|null=zero();
@@ -16,7 +16,7 @@ export function movingCosts(movements:CostMovement[],month:string){
  const totals:{shipment:Fraction|null,returns:Fraction|null}={shipment:zero(),returns:zero()};
  let shipmentQuantity=0,returnQuantity=0;
  const indicative:{shipment:Fraction|null,returns:Fraction|null}={shipment:zero(),returns:zero()};let estimatedRows=0;
- const rows=[];
+ const rows=[];const stores=new Map<string|null,{cost:Fraction|null,missing:number}>();
  // Backdated business documents are replayed on their business date; no financial posting is changed.
  const ordered=[...movements].filter(m=>!m.duplicateOpening&&!m.internalTransfer)
   .sort((a,b)=>a.day.localeCompare(b.day)||a.postedAt.localeCompare(b.postedAt)||a.id.localeCompare(b.id));
@@ -60,6 +60,9 @@ export function movingCosts(movements:CostMovement[],month:string){
    if(m.operation==='shipment'){shipmentQuantity+=m.quantity;totals.shipment=totals.shipment===null||cost===null?null:plus(totals.shipment,cost);}
    if(m.operation==='return'){returnQuantity+=m.quantity;totals.returns=totals.returns===null||cost===null?null:plus(totals.returns,cost);}
    if(m.operation==='shipment'||m.operation==='return'){
+    const store=(m.businessStoreId??m.snapshot.businessStoreId??null) as string|null,bucket=stores.get(store)??{cost:zero(),missing:0};
+    if(cost===null){bucket.cost=null;bucket.missing++;}else if(bucket.cost!==null)bucket.cost=plus(bucket.cost,times(cost,m.operation==='return'?-1:1));
+    stores.set(store,bucket);
     const key=m.operation==='shipment'?'shipment':'returns';
     indicative[key]=indicative[key]===null||indicativeCost===null?null:plus(indicative[key]!,indicativeCost);
     if(cost===null&&estimate!==null)estimatedRows++;
@@ -70,7 +73,7 @@ export function movingCosts(movements:CostMovement[],month:string){
   }
   for(const note of notes)issues.add(note);
  }
- return {month,quantity,balanceAmount:costAmount(value),averageAmount:costAmount(value!==null&&quantity>0?times(value,1,quantity):null),
+ return {storeCosts:[...stores].map(([storeId,b])=>({storeId,missing:b.missing,exact:b.cost?{n:String(b.cost.n),d:String(b.cost.d)}:null})),month,quantity,balanceAmount:costAmount(value),averageAmount:costAmount(value!==null&&quantity>0?times(value,1,quantity):null),
   shipmentQuantity,returnQuantity,shipmentAmount:costAmount(totals.shipment),returnAmount:costAmount(totals.returns),
   estimatedRows,indicativeShipmentAmount:costAmount(indicative.shipment),indicativeReturnAmount:costAmount(indicative.returns),indicativeNetAmount:costAmount(indicative.shipment!==null&&indicative.returns!==null?plus(indicative.shipment,times(indicative.returns,-1)):null),
   netAmount:costAmount(totals.shipment!==null&&totals.returns!==null?plus(totals.shipment,times(totals.returns,-1)):null),issues:[...issues],rows};

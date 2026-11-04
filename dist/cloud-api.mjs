@@ -1,3 +1,4 @@
+import {monthIncomeState,monthIncomePayload,overviewRecord} from './operating-overview-contract.mjs';
 import {attributionPayload} from './expense-attribution-model.mjs';
 import {operatingPage,operatingDetail,operatingQuery,operatingPayload,operatingVoid} from './operating-finance-contract.mjs';
 import {referenceState,referencePayload,dropshipList,dropshipOptions,dropshipDetail,dropshipPayload,dropshipRefundPayload} from './cost-sources-contract.mjs';
@@ -152,6 +153,10 @@ export function createCloudApi(fetcher=globalThis.fetch,{allowWrites=false}={}){
     async tasks(profile,user,signal){if(!profile)return [];return ownTasks(await get('/api/tasks',signal),profile,user.role);},
     async task(id,signal){return read('/api/tasks/'+endpointId(id),signal,taskModel);},
     async todos(signal){return read('/api/workbench/todos',signal,v=>list(v).map(todoModel));},
+    async financeOverview(month,signal){costMonth(month);return read('/api/finance/overview?month='+month,signal,v=>overviewRecord(v,month));},
+    async monthIncome(id,month,offset=0,signal){costMonth(month);return read('/api/finance/month-income/'+endpointId(id)+'?month='+month+'&offset='+offset,signal,v=>monthIncomeState(v,id,month));},
+    async saveMonthIncome(id,value){return mutations.send('/api/finance/month-income/'+endpointId(id),'POST',monthIncomePayload(value));},
+    async monthIncomeReceipt(id,key,month){costMonth(month);const path='/api/finance/month-income/'+endpointId(id);try{const r=await get(path+'/receipts/'+endpointId(key)+'?month='+month);if(r?.id!==id||r.month!==month||!Number.isSafeInteger(r.version)||r.version<1)throw new ContractError();endpointId(r.recordId);mutations.confirmRead(path);return r;}catch(e){if(e.status===404){mutations.confirmRead(path);return null;}throw e;}},
     async operatingRecords(params={},signal){return read('/api/finance/operating-records?'+operatingQuery(params),signal,operatingPage);},
     async operatingRecord(id,offset=0,signal){return read('/api/finance/operating-records/'+endpointId(id)+'?offset='+offset,signal,v=>operatingDetail(v,id));},
     async saveOperatingRecord(id,value){return mutations.send('/api/finance/operating-records'+(id?'/'+endpointId(id):''),'POST',operatingPayload(value,!!id));},

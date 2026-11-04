@@ -1,3 +1,5 @@
+import {StoreMonthIncome} from './store-month-income';
+import {OperatingOverview} from './operating-overview';
 import {ExpenseAttribution} from './expense-attribution';
 import {OperatingFinance} from './operating-finance';
 import {DropshipCosts} from './dropship-costs';
@@ -138,6 +140,8 @@ export async function createStudioApp(
   const templates = new Templates(database);
   const competitors = new Competitors(database);
   const finance = new Finance(database);
+  const storeMonthIncome=new StoreMonthIncome(database);
+  const operatingOverview=new OperatingOverview(database);
   const expenseAttribution=new ExpenseAttribution(database);
   const operatingFinance=new OperatingFinance(database);
   const cookie = 'studio_session';
@@ -1228,6 +1232,14 @@ export async function createStudioApp(
       return knowledge.clearCover(r.identity!, id, b);
     }
 
+    @Get('finance/overview')
+    financeOverview(@Req() r:AuthRequest){return operatingOverview.read(r.identity!,r.query);}
+    @Get('finance/month-income/:id')
+    monthIncomeState(@Req() r:AuthRequest,@Param('id') id:string){return storeMonthIncome.state(r.identity!,id,r.query);}
+    @Post('finance/month-income/:id')
+    monthIncomeSave(@Req() r:AuthRequest,@Param('id') id:string,@Body() b:unknown){return storeMonthIncome.save(r.identity!,id,b);}
+    @Get('finance/month-income/:id/receipts/:key')
+    monthIncomeReceipt(@Req() r:AuthRequest,@Param('id') id:string,@Param('key') key:string){const q=objectInput(r.query,['month']);return storeMonthIncome.receipt(r.identity!,id,key,String(q.month));}
     @Get('finance/operating-records')
     operatingFinanceList(@Req() r:AuthRequest){return operatingFinance.list(r.identity!,r.query);}
     @Get('finance/operating-records/receipts/:key')

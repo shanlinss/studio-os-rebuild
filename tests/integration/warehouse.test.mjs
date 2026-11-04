@@ -637,6 +637,8 @@ test('moving SKU costs reuse original stock and latest procurement versions with
  const balances=(await api.warehouseItem(item.id)).balances,source=balances.find(b=>b.storeId===null),target=balances.find(b=>b.storeId===store.id);
  await api.savePackagingTransfer(item.id,{requestKey:randomUUID(),sourceBalanceId:source.id,targetBalanceId:target.id,sourceVersion:source.version,targetVersion:target.version,quantity:3,reason:'分配店铺库存'},'product');
  assert.equal((await api.productCostReview(sku.id,'2026-12')).balanceAmount,'24.00');
+ assert.equal((await api.financeOverview('2026-11')).rows.find(r=>r.storeId===store.id).stockCents,'800');
+ assert.equal((await api.financeOverview('2026-12')).rows.find(r=>r.storeId===store.id).stockCents,'-400');
 });
 
 test('opening valuation references original quantities once, versions evidence and recovers moving costs without stock or finance writes',async()=>{
@@ -776,6 +778,8 @@ test('multi-SKU dropship batches preserve estimates, correct actual costs and re
  await api.saveDropshipRefund(saved.id,adjustment);detail=await api.dropshipDetail(saved.id);const history=detail.refunds.find(r=>r.id===returned.refundId).history;assert.equal(history.length,2);assert.equal(history[0].amountCents,150);assert.equal(history[1].amountCents,123);
  assert.equal((await request(sessions[0],path+'/refunds','POST',{...adjustment,requestKey:randomUUID(),expectedVersion:2,quantity:2})).status,409);
  assert.equal((await api.productCostReview(skus[0].id,'2020-02')).dropship.refundCents,'227');
+ assert.equal((await api.financeOverview('2020-01')).rows.find(r=>r.storeId===store.id).dropshipCents,'1100');
+ assert.equal((await api.financeOverview('2020-02')).rows.find(r=>r.storeId===store.id).dropshipCents,'-227');
  assert.deepEqual(await api.warehouseCatalog(),stockBefore);assert.deepEqual(await api.finance(),ledgerBefore);
  const {DropshipCosts}=await import('../../.build/server/dropship-costs.js');await assert.rejects(new DropshipCosts(db).detail(sessions[2].user,saved.id,{}),e=>e.status===403);
  for(const table of ['dropship_cost_documents','dropship_cost_lines','dropship_cost_versions','dropship_refunds','dropship_refund_versions','dropship_cost_receipts'])await assert.rejects(db.client.unsafe('DELETE FROM studio_os.'+table),e=>e.code==='23514');

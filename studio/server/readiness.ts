@@ -56,6 +56,8 @@ export async function checkReadiness(
     await tx`SELECT product_id,code,version FROM commercial_products LIMIT 0`;
     await tx`SELECT id,product_id,code,specification,unit,active,warehouse_item_id FROM product_skus LIMIT 0`;
     await tx`SELECT id,operation,business_date,source_reference,reason,actor_id,source_shipment_id,resellable_confirmed FROM product_stock_documents LIMIT 0`;
+    await tx`SELECT id,store_id,month,version,amount_cents,source_reference,reason,status,actor_id,actor_name FROM store_month_income_versions LIMIT 0`;
+    await tx`SELECT actor_id,request_key,store_id,month,request_hash,result FROM store_month_income_receipts LIMIT 0`;
     await tx`SELECT id,expense_scope,expense_use,store_id FROM expense_records LIMIT 0`;
     await tx`SELECT actor_id,request_key,expense_id,request_hash,result FROM expense_attribution_receipts LIMIT 0`;
     await tx`SELECT id,kind,store_id,parent_id,expense_id,source_reference,actor_id FROM operating_finance_records LIMIT 0`;

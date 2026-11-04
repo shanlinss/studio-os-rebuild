@@ -196,3 +196,11 @@ test('expense attribution modules load in read-only preview while metadata write
  assert.equal((await request(port,'/api/finance/expenses/'+id+'/attribution',{method:'POST'})).status,405);assert.equal((await request(port,'/api/finance/expenses/'+id+'/attribution/receipts/'+id)).status,404);
  }finally{await close(preview);}
 });
+test('operating overview and income history remain read-only with private income recovery blocked',async()=>{
+ const id='11111111-1111-4111-8111-111111111111',seen=[];
+ const upstream=http.createServer((req,res)=>{seen.push(req.url);res.writeHead(200,{'Content-Type':'application/json'});res.end('{}');});await listen(upstream);const preview=createPreviewServer({upstreamPort:upstream.address().port});await listen(preview);const port=preview.address().port;
+ try{for(const p of ['/api/finance/overview?month=2026-01','/api/finance/month-income/'+id+'?month=2026-01&offset=50'])assert.equal((await request(port,p)).status,200);
+ assert.equal((await request(port,'/api/finance/overview?offset=0')).status,400);assert.equal((await request(port,'/api/finance/month-income/'+id+'/receipts/'+id+'?month=2026-01')).status,404);assert.equal((await request(port,'/api/finance/month-income/'+id,{method:'POST'})).status,405);assert.equal(seen.length,2);
+ for(const p of ['/operating-overview-contract.mjs','/operating-overview-editors.mjs','/operating-overview-view.mjs'])assert.equal((await request(port,p)).status,200);
+ }finally{await close(preview);await close(upstream);}
+});
