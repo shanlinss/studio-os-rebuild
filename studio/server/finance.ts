@@ -215,6 +215,7 @@ export class Finance {
       const before = await mutableExpense(tx, id, v),
         files =
           await tx`SELECT id,name,mime,octet_length(content) AS size FROM studio_os.expense_receipts WHERE expense_id=${id}`;
+      if((await tx`SELECT record_id FROM studio_os.cash_source_references WHERE expense_id=${id} LIMIT 1`).length)throw new ConflictException('该支出已有资金对应历史，请保留原记录并核对修正');
       await tx`DELETE FROM studio_os.expense_records WHERE id=${id}`;
       await tx`INSERT INTO studio_os.expense_events(entity_type,entity_id,actor_id,action,detail) VALUES('expense',${id},${identity.id},'deleted',${JSON.stringify({ before, receipts: files })}::jsonb)`;
       return { ok: true };

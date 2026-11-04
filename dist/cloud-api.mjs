@@ -1,3 +1,4 @@
+import {cashPage,cashSourcePage,cashState,cashPayload,cashVoidPayload} from './cash-correspondence-contract.mjs';
 import {sampleCostPage,sampleCostState,sampleCostPayload} from './sample-cost-contract.mjs';
 import {inventoryCostPage,inventoryCostState,inventoryCostPayload} from './inventory-cost-contract.mjs';
 import {monthIncomeState,monthIncomePayload,overviewRecord} from './operating-overview-contract.mjs';
@@ -155,6 +156,12 @@ export function createCloudApi(fetcher=globalThis.fetch,{allowWrites=false}={}){
     async tasks(profile,user,signal){if(!profile)return [];return ownTasks(await get('/api/tasks',signal),profile,user.role);},
     async task(id,signal){return read('/api/tasks/'+endpointId(id),signal,taskModel);},
     async todos(signal){return read('/api/workbench/todos',signal,v=>list(v).map(todoModel));},
+    async cashMovements(params,signal){costMonth(params.month);return read('/api/finance/cash-movements?'+new URLSearchParams({month:params.month,direction:params.direction??'all',status:params.status??'active',q:params.q??'',offset:params.offset??0}),signal,cashPage);},
+    async cashSources(params,signal){costMonth(params.month);return read('/api/finance/cash-sources?'+new URLSearchParams({month:params.month,kind:params.kind??'income',q:params.q??'',offset:params.offset??0}),signal,cashSourcePage);},
+    async cashMovement(id,offset=0,signal){return read('/api/finance/cash-movements/'+endpointId(id)+'?offset='+offset,signal,v=>cashState(v,id));},
+    async saveCashMovement(id,value){return mutations.send('/api/finance/cash-movements'+(id?'/'+endpointId(id):''),'POST',cashPayload(value,!!id));},
+    async voidCashMovement(id,value){return mutations.send('/api/finance/cash-movements/'+endpointId(id)+'/void','POST',cashVoidPayload(value));},
+    async cashReceipt(key,operation,target=null){if(!['create','revise','void'].includes(operation)||(operation==='create')!==(target===null))throw new ContractError();const path='/api/finance/cash-movements'+(target?'/'+endpointId(target):'')+(operation==='void'?'/void':'');try{const r=await get('/api/finance/cash-movements/receipts/'+endpointId(key)+'?'+new URLSearchParams({operation,...(target?{target}:{})}));if(!r||target&&r.id!==target||!Number.isSafeInteger(r.version)||r.version<1)throw new ContractError();endpointId(r.id);endpointId(r.recordId);mutations.confirmRead(path);return r;}catch(e){if(e.status===404){mutations.confirmRead(path);return null;}throw e;}},
     async sampleCosts(params,signal){costMonth(params.month);const query=new URLSearchParams({month:params.month,q:params.q??'',offset:params.offset??0});return read('/api/finance/sample-costs?'+query,signal,sampleCostPage);},
     async sampleCost(id,offset=0,signal){return read('/api/finance/sample-costs/'+endpointId(id)+'?offset='+offset,signal,v=>sampleCostState(v,id));},
     async saveSampleCost(id,value){return mutations.send('/api/finance/sample-costs/'+endpointId(id),'POST',sampleCostPayload(value));},

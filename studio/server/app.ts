@@ -1,3 +1,4 @@
+import {CashCorrespondence} from './cash-correspondence';
 import {SampleCostEvidence} from './sample-cost-evidence';
 import {InventoryCostEvidence} from './inventory-cost-evidence';
 import {StoreMonthIncome} from './store-month-income';
@@ -142,6 +143,7 @@ export async function createStudioApp(
   const templates = new Templates(database);
   const competitors = new Competitors(database);
   const finance = new Finance(database);
+  const cashCorrespondence=new CashCorrespondence(database);
   const sampleCostEvidence=new SampleCostEvidence(database);
   const inventoryCostEvidence=new InventoryCostEvidence(database);
   const storeMonthIncome=new StoreMonthIncome(database);
@@ -1236,6 +1238,20 @@ export async function createStudioApp(
       return knowledge.clearCover(r.identity!, id, b);
     }
 
+    @Get('finance/cash-sources')
+    cashSources(@Req() r:AuthRequest){return cashCorrespondence.sources(r.identity!,r.query);}
+    @Get('finance/cash-movements')
+    cashMovements(@Req() r:AuthRequest){return cashCorrespondence.list(r.identity!,r.query);}
+    @Get('finance/cash-movements/receipts/:key')
+    cashReceipt(@Req() r:AuthRequest,@Param('key') key:string){const q=objectInput(r.query,['operation','target']);return cashCorrespondence.receipt(r.identity!,key,String(q.operation),q.target===undefined?null:String(q.target));}
+    @Get('finance/cash-movements/:id')
+    cashMovement(@Req() r:AuthRequest,@Param('id') id:string){return cashCorrespondence.detail(r.identity!,id,r.query);}
+    @Post('finance/cash-movements')
+    cashCreate(@Req() r:AuthRequest,@Body() b:unknown){return cashCorrespondence.save(r.identity!,null,b);}
+    @Post('finance/cash-movements/:id')
+    cashRevise(@Req() r:AuthRequest,@Param('id') id:string,@Body() b:unknown){return cashCorrespondence.save(r.identity!,id,b);}
+    @Post('finance/cash-movements/:id/void')
+    cashVoid(@Req() r:AuthRequest,@Param('id') id:string,@Body() b:unknown){return cashCorrespondence.void(r.identity!,id,b);}
     @Get('finance/sample-costs')
     sampleCosts(@Req() r:AuthRequest,@Query() q:unknown){return sampleCostEvidence.list(r.identity!,q);}
     @Get('finance/sample-costs/:id')
