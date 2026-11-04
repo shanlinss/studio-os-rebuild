@@ -397,6 +397,12 @@ export async function createStudioApp(
     @Get('warehouse/receipts/:key') warehouseReceipt(@Req() r: AuthRequest,@Param('key') key: string) { return warehouse.receipt(r.identity!,key); }
     @Post('warehouse/items') warehouseCreate(@Req() r: AuthRequest,@Body() b: unknown) { return warehouse.save(r.identity!,b); }
     @Patch('warehouse/items/:id') warehouseEdit(@Req() r: AuthRequest,@Param('id') id: string,@Body() b: unknown) { return warehouse.save(r.identity!,b,id); }
+    @Get('warehouse/items/:id/packaging-purchases')
+    packagingPurchaseHistory(@Req() r:AuthRequest,@Param('id') id:string){return warehouse.packagingPurchaseHistory(r.identity!,id,r.query);}
+    @Post('warehouse/items/:id/packaging-purchases')
+    packagingPurchase(@Req() r:AuthRequest,@Param('id') id:string,@Body() b:unknown){return warehouse.purchasePackaging(r.identity!,id,b);}
+    @Get('warehouse/items/:id/packaging-purchases/receipts/:key')
+    packagingPurchaseReceipt(@Req() r:AuthRequest,@Param('id') id:string,@Param('key') key:string){return warehouse.packagingPurchaseReceipt(r.identity!,id,key);}
     @Post('warehouse/items/:id/packaging-balances')
     allocatePackaging(@Req() r:AuthRequest,@Param('id') id:string,@Body() b:unknown){
       return warehouse.allocatePackaging(r.identity!,id,b);
@@ -1774,6 +1780,12 @@ export async function createStudioApp(
       }
       if(req.path.startsWith('/api/warehouse/')){
         requirePermission(req.identity,'resources');
+        if(/^\/api\/warehouse\/items\/[^/]+\/packaging-purchases(?:\/receipts\/[^/]+)?$/.test(req.path)){
+          requirePermission(req.identity,'finance');
+          if(req.method==='GET')return true;
+          if(req.method==='POST'&&req.path.endsWith('/packaging-purchases')){auth.csrf(req);return true;}
+          throw new ForbiddenException();
+        }
         const route=req.path.slice('/api/warehouse/'.length),allowed=(req.method==='GET' && /^(items|items\/[^/]+(?:\/(?:movements(?:\/[^/]+)?|events|transfers|sample-targets))?|receipts\/[^/]+)$/.test(route)) ||
           (req.method==='POST' && /^(items|items\/[^/]+\/(?:movements|to-samples|packaging-balances))$/.test(route)) || (req.method==='PATCH' && /^items\/[^/]+$/.test(route));
         if(!allowed)throw new ForbiddenException();if(req.method!=='GET')auth.csrf(req);return true;

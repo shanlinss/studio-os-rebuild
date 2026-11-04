@@ -119,6 +119,8 @@ export async function checkReadiness(
     await tx`SELECT actor_id,request_key,action,request_hash,result FROM phone_card_operation_receipts LIMIT 0`;
     await tx`SELECT id,item_code,kind,product_id,unit,opening_confirmed,quantity,version FROM warehouse_items LIMIT 0`;
     await tx`SELECT id,item_id,store_id,quantity,version FROM packaging_balances LIMIT 0`;
+    await tx`SELECT id,item_id,purchase_date,supplier,quantity,unit_cents,total_cents,expense_id,expense_snapshot,reason,actor_id FROM packaging_purchases LIMIT 0`;
+    await tx`SELECT purchase_id,balance_id,movement_id FROM packaging_purchase_allocations LIMIT 0`;
     await tx`SELECT id,item_id,type,quantity,delta,before_quantity,after_quantity,item_snapshot,corrects_movement_id,packaging_balance_id FROM warehouse_movements LIMIT 0`;
     await tx`SELECT id,item_id,actor_id,action,before_value,after_value FROM warehouse_item_events LIMIT 0`;
     await tx`SELECT actor_id,request_key,request_hash,result FROM warehouse_receipts LIMIT 0`;

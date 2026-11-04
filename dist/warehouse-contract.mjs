@@ -1,4 +1,4 @@
-import {ContractError} from './cloud-contract.mjs';
+import {ContractError,validDate} from './cloud-contract.mjs';
 import {expectedVersion} from './write-contract.mjs';
 import {pagedRows} from './management-model.mjs';
 export const warehouseUnits=['件','个','套','包','卷','箱'];
@@ -88,4 +88,28 @@ export function scopedWarehouseDetail(v,owner){
 export function scopedWarehousePayload(v,version){
  if(!v||Object.keys(v).some(k=>!['requestKey','type','quantity','reason'].includes(k))||!['inbound','outbound'].includes(v.type))throw new ContractError('仅可登记入库或出库。');
  return {requestKey:id(v.requestKey),expectedVersion:expectedVersion(version),type:v.type,quantity:qty(v.quantity,false),reason:text(v.reason,2000,true)};
+}
+
+export function packagingPurchasePayload(v,version){
+ if(!v||Object.keys(v).some(k=>!['requestKey','purchaseDate','supplier','unitPrice','expenseId','expenseVersion','reason','allocations'].includes(k))||!validDate(v.purchaseDate)||
+   typeof v.unitPrice!=='string'||!/^\d{1,8}(?:\.\d{1,2})?$/.test(v.unitPrice)||!Array.isArray(v.allocations)||!v.allocations.length||v.allocations.length>100)
+  throw new ContractError('请核对采购日期、单价和分配数量。');
+ const allocations=v.allocations.map(line=>({balanceId:id(line.balanceId),quantity:qty(line.quantity,false)}));
+ if(new Set(allocations.map(line=>line.balanceId)).size!==allocations.length)throw new ContractError('分配归属不能重复。');
+ if(v.expenseId===null&&v.expenseVersion!==null)throw new ContractError();
+ return {requestKey:id(v.requestKey),expectedVersion:expectedVersion(version),purchaseDate:v.purchaseDate,supplier:text(v.supplier,150,true),
+  unitPrice:v.unitPrice,expenseId:v.expenseId===null?null:id(v.expenseId),expenseVersion:v.expenseId===null?null:expectedVersion(v.expenseVersion),reason:text(v.reason,2000,true),allocations};
+}
+export function packagingPurchaseHistory(v){
+ page(v);
+ for(const row of v.rows){
+  id(row.id);qty(row.quantity,false);qty(row.unitCents);qty(row.totalCents);
+  if(!validDate(row.purchaseDate)||row.totalCents!==row.quantity*row.unitCents||typeof row.supplier!=='string'||
+     typeof row.reason!=='string'||typeof row.actor!=='string'||typeof row.sourceChanged!=='boolean'||!Number.isFinite(Date.parse(row.createdAt))||
+     !Array.isArray(row.allocations)||!row.allocations.length)throw new ContractError('采购记录不完整。');
+  for(const line of row.allocations){id(line.id);qty(line.quantity,false);if(line.storeName!==null&&typeof line.storeName!=='string')throw new ContractError();}
+  if(row.allocations.reduce((sum,line)=>sum+line.quantity,0)!==row.quantity)throw new ContractError('采购分配与合计不一致。');
+  if(row.expenseSnapshot!==null){id(row.expenseSnapshot.id);qty(row.expenseSnapshot.amountCents);if(typeof row.expenseSnapshot.description!=='string')throw new ContractError();}
+ }
+ return v;
 }

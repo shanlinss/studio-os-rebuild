@@ -1,4 +1,5 @@
-import {ContractError} from './cloud-contract.mjs';
+import {money} from './management-model.mjs';
+import {ContractError,chinaDate} from './cloud-contract.mjs';
 import {warehouseUnits,warehouseKinds,movementLabels} from './warehouse-contract.mjs';
 
 export function createWarehouseEditors({api,h,mount,input,area,select}){
@@ -51,6 +52,24 @@ export function createWarehouseEditors({api,h,mount,input,area,select}){
    return api.warehouseWrite(operation,id,value,row?.version);
   },{kind:'warehouse',id},async()=>api.warehouseReceipt(key,operation,id),setup);
  }
+ async function packagingPurchase(id){
+  const [row,{records}]=await Promise.all([api.warehouseItem(id),api.finance()]);
+  const balances=(row.balances||[]).filter(b=>b.storeId===null||b.storeActive);
+  if(row.kind!=='packaging'||!row.active||!balances.length)throw new ContractError('请先为启用的包材建立库存归属。');
+  const key=crypto.randomUUID();
+  const body=`<p>${h(row.name)} · ${h(row.itemCode)} · 按 ${h(row.unit)} 分配。留空表示该归属本次无入库。</p>`+
+   input('purchaseDate','采购日期',chinaDate(),'required type="date"')+input('supplier','供应商','','required maxlength="150"')+
+   input('unitPrice','采购单价（元）','','required inputmode="decimal" maxlength="11"')+
+   balances.map((b,i)=>input('balance'+i,(b.storeName||'公共库存')+' · 当前 '+b.quantity+' '+row.unit,'','type="number" min="1" max="2147483647" step="1"')).join('')+
+   select('expenseId','引用已有支出','',[['','暂不关联'],...records.map(e=>[e.id,`${e.expenseDate} · ${e.description} · ${money(e.amountCents)}`])])+
+   area('reason','采购依据（必填）')+'<p class="muted">总额按单价乘以分配数量合计计算。关联已有支出只保留来源。</p>';
+  mount('包材采购入库',body,f=>{
+   const expense=records.find(e=>e.id===f.get('expenseId'));
+   const allocations=balances.flatMap((b,i)=>{const raw=f.get('balance'+i);return raw===''?[]:[{balanceId:b.id,quantity:Number(raw)}];});
+   return api.savePackagingPurchase(id,{requestKey:key,purchaseDate:f.get('purchaseDate'),supplier:f.get('supplier'),unitPrice:f.get('unitPrice').trim(),
+    reason:f.get('reason'),expenseId:expense?.id??null,expenseVersion:expense?.version??null,allocations},row.version);
+  },{kind:'packaging-purchase',id},()=>api.packagingPurchaseReceipt(id,key));
+ }
  async function scopedWarehouse(type,id){
   if(!['inbound','outbound'].includes(type))throw new ContractError();
   const {balance}=await api.scopedWarehouseDetail(id);
@@ -61,5 +80,5 @@ export function createWarehouseEditors({api,h,mount,input,area,select}){
   mount('登记'+movementLabels[type],body,f=>api.scopedWarehouseMove(id,{requestKey:key,type,quantity:Number(f.get('quantity')),reason:f.get('reason')},balance.version),
    {kind:'scoped-warehouse',id},()=>api.scopedWarehouseReceipt(id,key));
  }
- return {warehouse,scopedWarehouse};
+ return {warehouse,scopedWarehouse,packagingPurchase};
 }

@@ -118,3 +118,56 @@ test('packaging allocation preserves legacy quantity and ledger while fencing sc
  assert.equal(updated.balances.find(b=>b.storeId===store.id).quantity,6);
  assert.equal((await api.warehouseHistory(item.id)).total,4);
 });
+
+test('one packaging purchase distributes stock atomically and references the existing expense once',async()=>{
+ const api=clients[0],item=await api.warehouseWrite('register',undefined,{
+  requestKey:randomUUID(),itemCode:'PACK-PURCHASE',kind:'packaging',productId:null,name:'采购包材',
+  specification:'',unit:'包',location:'包材架',notes:''
+ });
+ const stores=[];
+ for(const name of ['采购甲店','采购乙店'])stores.push(await api.saveDirectory('store',undefined,{name}));
+ await api.warehouseWrite('allocate-packaging',item.id,{requestKey:randomUUID(),reason:'初次核对',
+  allocations:[{storeId:null,quantity:0},...stores.map(s=>({storeId:s.id,quantity:0}))]},1);
+ const category=await api.createExpenseCategory('已有包材支出'),expenseBody={
+  expenseDate:'2020-01-02',storeId:null,categoryId:category.id,description:'原采购财务描述',
+  amount:'9.00',paymentMode:'company',payerId:null,note:'原凭据'
+ };
+ const expense=await api.saveExpense(undefined,{...expenseBody,requestKey:randomUUID()});
+ const row=await api.warehouseItem(item.id),path='/warehouse/items/'+item.id+'/packaging-purchases';
+ const value={requestKey:randomUUID(),purchaseDate:'2020-01-03',supplier:'私有供应商',unitPrice:'1.25',
+  reason:'验收采购',expenseId:expense.id,expenseVersion:1,
+  allocations:row.balances.map((b,i)=>({balanceId:b.id,quantity:i+1}))};
+ assert.equal((await request(sessions[1],path)).status,403);
+ const actorId=sessions[2].user.id;
+ await db.client`UPDATE studio_os.accounts SET superadmin=false,admin_permissions=ARRAY['resources'] WHERE id=${actorId}`;
+ const service=new Warehouse(db);
+ await assert.rejects(service.packagingPurchaseHistory(sessions[2].user,item.id,{}),e=>e.status===403);
+ await assert.rejects(service.purchasePackaging(sessions[2].user,item.id,{...value,expectedVersion:2}),e=>e.status===403);
+ assert.equal((await request(sessions[0],path,'POST',{...value,expectedVersion:2,expenseVersion:2})).status,409);
+ const saved=await api.savePackagingPurchase(item.id,value,2);
+ assert.deepEqual(await api.savePackagingPurchase(item.id,value,2),saved);
+ assert.deepEqual(await api.packagingPurchaseReceipt(item.id,value.requestKey),saved);
+ assert.equal(await api.warehouseReceipt(value.requestKey,'move',item.id),null);
+ assert.equal((await request(sessions[0],path,'POST',{...value,requestKey:randomUUID(),expectedVersion:3})).status,409);
+ const history=await api.packagingPurchaseHistory(item.id),[purchase]=history.rows;
+ assert.equal(history.total,1);assert.equal(purchase.totalCents,750);assert.equal(purchase.expenseSnapshot.amountCents,900);
+ assert.equal(purchase.allocations.length,3);
+ assert.deepEqual((await api.warehouseItem(item.id)).balances.map(b=>b.quantity),[1,2,3]);
+ const ledger=await api.warehouseHistory(item.id);
+ assert.equal(ledger.total,6);
+ assert.equal(ledger.rows.filter(r=>r.reason==='采购入库').length,3);
+ assert.doesNotMatch(JSON.stringify(ledger),/私有供应商|原采购财务描述|totalCents|unitCents/);
+ assert.equal((await api.finance()).records.length,1);
+ await api.saveExpense(expense.id,{...expenseBody,description:'已复核原支出'},1);
+ assert.equal((await api.packagingPurchaseHistory(item.id)).rows[0].sourceChanged,true);
+ assert.equal((await api.packagingPurchaseHistory(item.id)).rows[0].expenseSnapshot.description,'原采购财务描述');
+ await db.client.unsafe(`CREATE FUNCTION studio_os.fail_packaging_purchase_receipt() RETURNS trigger LANGUAGE plpgsql AS $$
+  BEGIN IF NEW.action LIKE 'purchase-packaging:%' THEN RAISE EXCEPTION 'test rollback'; END IF; RETURN NEW; END; $$;
+  CREATE TRIGGER fail_packaging_purchase_receipt BEFORE INSERT ON studio_os.warehouse_receipts FOR EACH ROW EXECUTE FUNCTION studio_os.fail_packaging_purchase_receipt();`);
+ try{
+  assert.equal((await request(sessions[0],path,'POST',{...value,requestKey:randomUUID(),expenseId:null,expenseVersion:null,expectedVersion:3})).status,500);
+  assert.equal((await api.warehouseItem(item.id)).quantity,6);
+  assert.equal((await api.warehouseHistory(item.id)).total,6);
+  assert.equal((await api.packagingPurchaseHistory(item.id)).total,1);
+ }finally{await db.client.unsafe('DROP TRIGGER fail_packaging_purchase_receipt ON studio_os.warehouse_receipts; DROP FUNCTION studio_os.fail_packaging_purchase_receipt()');}
+});

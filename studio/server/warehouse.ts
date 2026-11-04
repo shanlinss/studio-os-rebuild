@@ -1,6 +1,8 @@
 import {livePermission,currentPermission} from './permissions';
 import {BadRequestException,ConflictException,ForbiddenException,NotFoundException,UnauthorizedException} from '@nestjs/common';
 import {createHash,randomUUID} from 'node:crypto';
+import {optionalMoney} from './money';
+import {purchaseDay,purchaseExpense} from './equipment-purchase';
 import {registerSampleRecord,stockInSampleRecord} from './samples';
 import type {TransactionSql} from 'postgres';
 import type {StudioDatabase} from './database';
@@ -22,7 +24,7 @@ function quantity(v:unknown,zero=false){if(!Number.isSafeInteger(v)||Number(v)<(
 async function item(tx:TransactionSql,id:string){const [r]=await tx`SELECT * FROM studio_os.warehouse_items WHERE id=${id} FOR UPDATE`;if(!r)throw new NotFoundException();return r;}
 export class Warehouse {
  constructor(private readonly db:StudioDatabase){}
- private async write(who:Identity,action:string,b:Record<string,unknown>,fn:(tx:TransactionSql)=>Promise<{id:string,movementId?:string,transferId?:string,sampleId?:string,sampleEventId?:string}>,authorize?:(tx:TransactionSql)=>Promise<void>){
+ private async write(who:Identity,action:string,b:Record<string,unknown>,fn:(tx:TransactionSql)=>Promise<{id:string,movementId?:string,purchaseId?:string,transferId?:string,sampleId?:string,sampleEventId?:string}>,authorize?:(tx:TransactionSql)=>Promise<void>){
   if(!authorize)requireAdministrator(who);const key=uuid(b.requestKey),body=canonical(b),hash=createHash('sha256').update(JSON.stringify({action,body})).digest('hex');
   try{return await this.db.client.begin(async tx=>{
    const [actor]=await tx`SELECT active,role FROM studio_os.accounts WHERE id=${who.id} FOR SHARE`;if(!actor?.active)throw new UnauthorizedException();if(authorize)await authorize(tx);else await livePermission(tx,who.id,'resources');
@@ -30,9 +32,10 @@ export class Warehouse {
    const [old]=await tx`SELECT action,request_hash,result FROM studio_os.warehouse_receipts WHERE actor_id=${who.id} AND request_key=${key}`;
    if(old){if(old.action!==action||old.request_hash!==hash)throw new ConflictException('请求标识已用于其他内容');return old.result;}
    const result=await fn(tx);await tx`INSERT INTO studio_os.warehouse_receipts(actor_id,request_key,action,request_hash,result) VALUES(${who.id},${key},${action},${hash},${JSON.stringify(result)}::jsonb)`;return result;
-  });}catch(e){if((e as {code?:string}).code==='23505')throw new ConflictException('库存编码重复');throw e;}
+  });}catch(e){if((e as {constraint_name?:string}).constraint_name==='packaging_purchases_expense_id_key')throw new ConflictException('这笔支出已关联包材采购');
+   if((e as {code?:string}).code==='23505')throw new ConflictException('库存编码重复');throw e;}
  }
- async receipt(who:Identity,key:string){await currentPermission(this.db,who,'resources');requireAdministrator(who);uuid(key);const [r]=await this.db.client`SELECT result FROM studio_os.warehouse_receipts WHERE actor_id=${who.id} AND request_key=${key}`;if(!r)throw new NotFoundException();return r.result;}
+ async receipt(who:Identity,key:string){await currentPermission(this.db,who,'resources');requireAdministrator(who);uuid(key);const [r]=await this.db.client`SELECT result FROM studio_os.warehouse_receipts WHERE actor_id=${who.id} AND request_key=${key} AND action NOT LIKE 'purchase-packaging:%'`;if(!r)throw new NotFoundException();return r.result;}
  private query(who:Identity,value:unknown,history=false){
   requireAdministrator(who);const b=objectInput(value,history?['offset']:['q','kind','active','offset']),offset=b.offset===undefined?0:Number(b.offset);
   if(!Number.isSafeInteger(offset)||offset<0||offset>MAX)throw new BadRequestException();const kind=b.kind===undefined?'all':String(b.kind),active=b.active===undefined?'active':String(b.active);
@@ -98,6 +101,72 @@ export class Warehouse {
    await tx`UPDATE studio_os.warehouse_items SET opening_confirmed=true,quantity=${existing.length?old.quantity:total},version=version+1,updated_at=now() WHERE id=${id}`;
    return {id};
   });
+ }
+ async purchasePackaging(who:Identity,id:string,value:unknown){
+  id=uuid(id);
+  const b=objectInput(value,['requestKey','expectedVersion','purchaseDate','supplier','unitPrice','expenseId','expenseVersion','reason','allocations']);
+  const expected=version(b.expectedVersion),date=purchaseDay(b.purchaseDate),supplier=shortText(b.supplier,150);
+  const unitCents=optionalMoney(b.unitPrice),reason=longText(b.reason,2000),expenseId=b.expenseId===null?null:uuid(b.expenseId);
+  const expenseVersion=expenseId?version(b.expenseVersion):null;
+  if(unitCents===null||(!expenseId&&b.expenseVersion!==null)||!Array.isArray(b.allocations)||!b.allocations.length||b.allocations.length>100)
+   throw new BadRequestException();
+  const allocations=b.allocations.map(value=>{
+   const line=objectInput(value,['balanceId','quantity']);
+   return {balanceId:uuid(line.balanceId),quantity:quantity(line.quantity)};
+  });
+  if(new Set(allocations.map(line=>line.balanceId)).size!==allocations.length)throw new BadRequestException('库存归属重复');
+  const total=allocations.reduce((sum,line)=>sum+line.quantity,0);
+  if(total>MAX||BigInt(total)*BigInt(unitCents)>BigInt(MAX))throw new BadRequestException('采购数量或金额超过容量');
+  return this.write(who,'purchase-packaging:'+id,b,async tx=>{
+   const old=await item(tx,id);
+   if(old.kind!=='packaging'||!old.active||!old.opening_confirmed||old.version!==expected||old.quantity+total>MAX)
+    throw new ConflictException('请核对包材状态、数量和版本');
+   const balances=await tx`SELECT id,quantity,store_id FROM studio_os.packaging_balances
+    WHERE item_id=${id} AND id=ANY(${tx.array(allocations.map(line=>line.balanceId))}::uuid[])`;
+   if(balances.length!==allocations.length)throw new ConflictException('分配归属不属于当前包材');
+   const stores=balances.flatMap(row=>row.store_id?[row.store_id]:[]);
+   const active=await tx`SELECT id,name FROM studio_os.stores WHERE id=ANY(${tx.array(stores)}::uuid[]) AND active ORDER BY id FOR SHARE`;
+   if(active.length!==stores.length)throw new ConflictException('分配店铺已停用');
+   const names=new Map(active.map(row=>[row.id,row.name])),byId=new Map(balances.map(row=>[row.id,row]));
+   const expense=expenseId?await purchaseExpense(tx,expenseId,true):null;
+   if(expense&&expense.version!==expenseVersion)throw new ConflictException('关联支出已变化，请重新核对');
+   const [purchase]=await tx`INSERT INTO studio_os.packaging_purchases(item_id,purchase_date,supplier,quantity,unit_cents,total_cents,expense_id,expense_snapshot,reason,actor_id)
+    VALUES(${id},${date},${supplier},${total},${unitCents},${total*unitCents},${expenseId},${expense?JSON.stringify(expense):null}::jsonb,${reason},${who.id}) RETURNING id`;
+   for(const line of allocations){
+    const balance=byId.get(line.balanceId)!,after=balance.quantity+line.quantity;
+    const snapshot={itemCode:old.item_code,kind:old.kind,productId:null,productName:null,name:old.name,specification:old.specification,unit:old.unit,location:old.location,storeId:balance.store_id,storeName:names.get(balance.store_id)??null};
+    const [movement]=await tx`INSERT INTO studio_os.warehouse_movements(item_id,packaging_balance_id,type,quantity,delta,before_quantity,after_quantity,reason,item_snapshot,actor_id)
+     VALUES(${id},${balance.id},'inbound',${line.quantity},${line.quantity},${balance.quantity},${after},'采购入库',${JSON.stringify(snapshot)}::jsonb,${who.id}) RETURNING id`;
+    await tx`INSERT INTO studio_os.packaging_purchase_allocations(purchase_id,balance_id,movement_id) VALUES(${purchase.id},${balance.id},${movement.id})`;
+    await tx`UPDATE studio_os.packaging_balances SET quantity=${after},version=version+1 WHERE id=${balance.id}`;
+   }
+   await tx`UPDATE studio_os.warehouse_items SET quantity=${old.quantity+total},version=version+1,updated_at=now() WHERE id=${id}`;
+   return {id,purchaseId:purchase.id};
+  },async tx=>{await livePermission(tx,who.id,'finance');await livePermission(tx,who.id,'resources');});
+ }
+ async packagingPurchaseHistory(who:Identity,id:string,value:unknown){
+  await currentPermission(this.db,who,'finance');await currentPermission(this.db,who,'resources');
+  id=uuid(id);const {offset}=this.query(who,value,true);
+  return this.db.client.begin(async tx=>{
+   await tx`SET TRANSACTION ISOLATION LEVEL REPEATABLE READ READ ONLY`;
+   if(!(await tx`SELECT id FROM studio_os.warehouse_items WHERE id=${id} AND kind='packaging'`).length)throw new NotFoundException();
+   const rows=await tx`SELECT p.id,p.purchase_date::text AS "purchaseDate",p.supplier,p.quantity,p.unit_cents AS "unitCents",
+    p.total_cents AS "totalCents",p.expense_snapshot AS "expenseSnapshot",p.reason,p.created_at AS "createdAt",a.username AS actor,
+    (e.version IS DISTINCT FROM (p.expense_snapshot->>'version')::int) AS "sourceChanged",
+    (SELECT jsonb_agg(jsonb_build_object('id',m.id,'quantity',m.quantity,'storeName',m.item_snapshot->>'storeName') ORDER BY m.id)
+     FROM studio_os.packaging_purchase_allocations l JOIN studio_os.warehouse_movements m ON m.id=l.movement_id WHERE l.purchase_id=p.id) AS allocations
+    FROM studio_os.packaging_purchases p JOIN studio_os.accounts a ON a.id=p.actor_id LEFT JOIN studio_os.expense_records e ON e.id=p.expense_id
+    WHERE p.item_id=${id} ORDER BY p.created_at DESC,p.id LIMIT 50 OFFSET ${offset}`;
+   const [count]=await tx`SELECT count(*)::int AS total FROM studio_os.packaging_purchases WHERE item_id=${id}`;
+   return {rows,total:count.total,offset,limit:50};
+  });
+ }
+ async packagingPurchaseReceipt(who:Identity,id:string,key:string){
+  await currentPermission(this.db,who,'finance');await currentPermission(this.db,who,'resources');
+  id=uuid(id);key=uuid(key);
+  const [row]=await this.db.client`SELECT result FROM studio_os.warehouse_receipts WHERE actor_id=${who.id} AND request_key=${key} AND action=${'purchase-packaging:'+id}`;
+  if(!row)throw new NotFoundException();
+  return row.result;
  }
  async save(who:Identity,value:unknown,id?:string){
   requireAdministrator(who);if(id)uuid(id);const b=objectInput(value,['requestKey','itemCode','kind','productId','name','specification','unit','location','notes',...(id?['active','expectedVersion']:[])]);
