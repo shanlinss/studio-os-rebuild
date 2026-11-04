@@ -219,6 +219,8 @@ export async function checkReadiness(
     await tx`SELECT id,month,version,reason,actor_id,actor_name FROM finance_month_scope_versions LIMIT 0`;
     await tx`SELECT version_id,store_id,store_name FROM finance_month_scope_stores LIMIT 0`;
     await tx`SELECT actor_id,request_key,month,request_hash,result FROM finance_month_scope_receipts LIMIT 0`;
+    await tx`SELECT id,month,version,action,source_hash,snapshot FROM finance_month_closures LIMIT 0`;
+    await tx`SELECT actor_id,request_key,month,action,request_hash,result FROM finance_month_closure_receipts LIMIT 0`;
     const layout =
       await tx`SELECT singleton,version FROM material_folder_layout WHERE singleton`;
     if (layout.length !== 1)

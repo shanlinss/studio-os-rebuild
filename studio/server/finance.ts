@@ -283,7 +283,10 @@ export class Finance {
           await tx`INSERT INTO studio_os.expense_settlements(payer_id,start_date,end_date,note,request_key,request_hash,created_by) VALUES(${payer},${start}::date,${end}::date,${note},${key},${requestHash},${identity.id}) RETURNING id,version`;
         for (const item of items) {
           await tx`INSERT INTO studio_os.expense_settlement_items(settlement_id,expense_id,amount_cents) SELECT ${statement.id},id,amount_cents FROM studio_os.expense_records WHERE id=${item.id}`;
-          await tx`UPDATE studio_os.expense_records SET version=version+1,updated_at=now() WHERE id=${item.id}`;
+          // Settling an already locked expense changes reimbursement relations, not its financial facts/version.
+          await tx`UPDATE studio_os.expense_records SET version=version+1,updated_at=now() WHERE id=${item.id}
+           AND NOT EXISTS(SELECT 1 FROM studio_os.finance_locked_months l JOIN studio_os.finance_month_closures c ON c.id=l.id
+            WHERE l.month=to_char(expense_date,'YYYY-MM') OR c.snapshot->'expenseIds' ? ${item.id})`;
         }
         await tx`INSERT INTO studio_os.expense_events(entity_type,entity_id,actor_id,action,detail) VALUES('settlement',${statement.id},${identity.id},'confirmed',${JSON.stringify({ payer, start, end, note, items })}::jsonb)`;
         return statement;

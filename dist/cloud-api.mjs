@@ -1,3 +1,4 @@
+import {closingState,closingRecord,closingPayload,closingResult} from './finance-month-closures-contract.mjs';
 import {scopeState,scopePayload,scopeResult,monthReview} from './finance-month-review-contract.mjs';
 import {stockCorrectionState,stockCorrectionPayload} from './product-stock-corrections-contract.mjs';
 import {cashPage,cashSourcePage,cashState,cashPayload,cashVoidPayload} from './cash-correspondence-contract.mjs';
@@ -158,6 +159,10 @@ export function createCloudApi(fetcher=globalThis.fetch,{allowWrites=false}={}){
     async tasks(profile,user,signal){if(!profile)return [];return ownTasks(await get('/api/tasks',signal),profile,user.role);},
     async task(id,signal){return read('/api/tasks/'+endpointId(id),signal,taskModel);},
     async todos(signal){return read('/api/workbench/todos',signal,v=>list(v).map(todoModel));},
+    async financeClosing(month,offset=0,signal){costMonth(month);return read('/api/finance/month-closures?'+new URLSearchParams({month,offset}),signal,v=>closingState(v,month));},
+    async financeClosingRecord(id,signal){return read('/api/finance/month-closures/'+endpointId(id),signal,v=>{closingRecord(v);if(v.id!==id)throw new ContractError();return v;});},
+    async saveFinanceClosing(value){return mutations.send('/api/finance/month-closures','POST',closingPayload(value));},
+    async financeClosingReceipt(key,month){costMonth(month);const path='/api/finance/month-closures';try{const r=closingResult(await get(path+'/receipts/'+endpointId(key)+'?'+new URLSearchParams({month})),month);mutations.confirmRead(path);return r;}catch(e){if(e.status===404){mutations.confirmRead(path);return null;}throw e;}},
     async financeMonthReview(params,signal){costMonth(params.month);return read('/api/finance/month-review?'+new URLSearchParams({month:params.month,section:params.section??'all',severity:params.severity??'all',offset:params.offset??0}),signal,v=>monthReview(v,params.month));},
     async financeMonthScope(month,offset=0,signal){costMonth(month);return read('/api/finance/month-scope?'+new URLSearchParams({month,offset}),signal,v=>scopeState(v,month));},
     async saveFinanceMonthScope(value){return mutations.send('/api/finance/month-scope','POST',scopePayload(value));},

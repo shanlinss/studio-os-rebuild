@@ -1,3 +1,5 @@
+import {FinanceClosingExceptionFilter} from './finance-closing-filter';
+import {FinanceMonthClosures} from './finance-month-closures';
 import {FinanceMonthScope} from './finance-month-scope';
 import {FinanceMonthReview} from './finance-month-review';
 import {ProductStockCorrections} from './product-stock-corrections';
@@ -147,6 +149,7 @@ export async function createStudioApp(
   const templates = new Templates(database);
   const competitors = new Competitors(database);
   const finance = new Finance(database);
+  const financeMonthClosures=new FinanceMonthClosures(database);
   const financeMonthScope=new FinanceMonthScope(database);
   const financeMonthReview=new FinanceMonthReview(database);
   const cashCorrespondence=new CashCorrespondence(database);
@@ -1260,6 +1263,14 @@ export async function createStudioApp(
 
     @Get('finance/cash-sources')
     cashSources(@Req() r:AuthRequest){return cashCorrespondence.sources(r.identity!,r.query);}
+    @Get('finance/month-closures')
+    financeClosingState(@Req() r:AuthRequest){return financeMonthClosures.state(r.identity!,r.query);}
+    @Post('finance/month-closures')
+    financeClosingAction(@Req() r:AuthRequest,@Body() b:unknown){return financeMonthClosures.action(r.identity!,b);}
+    @Get('finance/month-closures/receipts/:key')
+    financeClosingReceipt(@Req() r:AuthRequest,@Param('key') key:string){const q=objectInput(r.query,['month']);return financeMonthClosures.receipt(r.identity!,key,String(q.month??''));}
+    @Get('finance/month-closures/:id')
+    financeClosingDetail(@Req() r:AuthRequest,@Param('id') id:string){objectInput(r.query,[]);return financeMonthClosures.detail(r.identity!,id);}
     @Get('finance/month-review')
     async financeReview(@Req() r:AuthRequest){return financeMonthReview.read(r.identity!,r.query);}
     @Get('finance/month-scope')
@@ -1906,7 +1917,7 @@ export async function createStudioApp(
     bodyParser: false,
   });
   app.use(requestIdentity);
-  app.useGlobalFilters(new SafeExceptionFilter(options.diagnosticSink));
+  app.useGlobalFilters(new FinanceClosingExceptionFilter(options.diagnosticSink));
   // Explicit route policy: newly introduced controllers are denied by default.
   app.useGlobalGuards({
     async canActivate(context) {

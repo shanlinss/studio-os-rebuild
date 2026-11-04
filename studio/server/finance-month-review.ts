@@ -1,4 +1,5 @@
 import {BadRequestException} from '@nestjs/common';
+import type {TransactionSql} from 'postgres';
 import type {StudioDatabase} from './database';
 import type {Identity} from './auth';
 import {currentPermission} from './permissions';
@@ -24,6 +25,12 @@ export class FinanceMonthReview{
   if(!['all',...reviewSections].includes(section as any)||!['all','blocker','review'].includes(severity)||!Number.isSafeInteger(offset)||offset<0||offset>2147483647)throw new BadRequestException();
   return this.db.client.begin(async tx=>{
    await tx`SET TRANSACTION ISOLATION LEVEL REPEATABLE READ READ ONLY`;
+   return (await financeReviewEvidence(tx,month,section,severity,offset)).report;
+  });
+ }
+}
+
+export async function financeReviewEvidence(tx:TransactionSql,month:string,section='all',severity='all',offset=0){
    const [clock]=await tx`SELECT (clock_timestamp() AT TIME ZONE 'Asia/Shanghai')::date::text AS today,clock_timestamp() AS checked`;
    const items:any[]=[],add=(section:string,kind:string,id:string,label:string,extra:any={})=>items.push({section,kind,id,label,severity:'blocker',...extra});
    const data=await operatingSources(tx,month),overview=operatingOverview(data,month,r=>{if(r.kind!=='unassigned')add('costs',r.kind,r.id,r.label,{storeId:r.storeId});}),scope=await monthScope(tx,month);
@@ -56,7 +63,6 @@ export class FinanceMonthReview{
    // Original reimbursement balances are cumulative. Never allocate a mixed-month statement back into this month.
    const advances=await tx`SELECT m.id,m.display_name AS name,((SELECT coalesce(sum(e.amount_cents),0) FROM studio_os.expense_records e WHERE e.payer_id=m.id AND e.payment_mode='advance')-(SELECT coalesce(sum(p.amount_cents),0) FROM studio_os.expense_reimbursements p WHERE p.payer_id=m.id))::text AS cents FROM studio_os.members m WHERE EXISTS(SELECT 1 FROM studio_os.expense_records e WHERE e.payer_id=m.id AND e.payment_mode='advance') ORDER BY m.id`;
    for(const a of advances)if(a.cents!=='0')add('advances','advances',a.id,a.name+'：当前累计待报销，跨月，非所选月末余额',{severity:'review',amountCents:a.cents});
-   return {month,checkedAt:clock.checked,scope:scope?{version:scope.version,stores:scope.stores}:null,...reviewPage(items,section,severity,offset),section,severity,mode:'recorded-sources-review'};
-  });
- }
+   const report={month,checkedAt:clock.checked,scope:scope?{version:scope.version,stores:scope.stores}:null,...reviewPage(items,section,severity,offset),section,severity,mode:'recorded-sources-review'};
+   return {report,overview,data,scope,inventory,sampleSources,samples,issues:items};
 }

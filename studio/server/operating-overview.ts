@@ -14,6 +14,8 @@ export class OperatingOverview{
   await currentPermission(this.db,who,'finance');const q=objectInput(value,['month']),month=attendanceMonth(q.month);
   return this.db.client.begin(async tx=>{
    await tx`SET TRANSACTION ISOLATION LEVEL REPEATABLE READ READ ONLY`;
+   const [locked]=await tx`SELECT c.id,c.version,c.snapshot,c.created_at AS at FROM studio_os.finance_locked_months h JOIN studio_os.finance_month_closures c ON c.id=h.id WHERE h.month=${month}`;
+   if(locked)return {...locked.snapshot.overview,closure:{id:locked.id,version:locked.version,lockedAt:locked.at}};
    return operatingOverview(await operatingSources(tx,month),month);
   });
  }
