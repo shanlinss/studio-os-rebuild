@@ -638,3 +638,68 @@ test('moving SKU costs reuse original stock and latest procurement versions with
  await api.savePackagingTransfer(item.id,{requestKey:randomUUID(),sourceBalanceId:source.id,targetBalanceId:target.id,sourceVersion:source.version,targetVersion:target.version,quantity:3,reason:'分配店铺库存'},'product');
  assert.equal((await api.productCostReview(sku.id,'2026-12')).balanceAmount,'24.00');
 });
+
+test('opening valuation references original quantities once, versions evidence and recovers moving costs without stock or finance writes',async()=>{
+ const api=clients[0],store=await api.saveDirectory('store',undefined,{name:'期初成本归属店铺'}),product=await api.createProduct({name:'期初成本商品',storeId:null,notes:'',stages:['测试']});
+ const item=await api.warehouseWrite('register',undefined,{requestKey:randomUUID(),itemCode:'OPENING-COST-ORIGINAL',kind:'product',productId:product.id,name:'期初成本商品',specification:'标准',unit:'件',location:'工作室',notes:''});
+ const opening=await api.warehouseWrite('move',item.id,move('opening',6),1);
+ await api.saveCommercialProduct(product.id,'formal',{requestKey:randomUUID(),code:'OPENING-COST-PRODUCT',reason:'登记'},0);
+ await api.saveCommercialProduct(product.id,'sku',{requestKey:randomUUID(),id:null,code:'OPENING-COST-SKU',specification:'标准',unit:'件',active:true,warehouseItemId:item.id,reason:'绑定'},1);
+ const [sku]=await db.client`SELECT id FROM studio_os.product_skus WHERE warehouse_item_id=${item.id}`;
+ await api.warehouseWrite('allocate-product',item.id,{requestKey:randomUUID(),reason:'分配原期初',allocations:[{storeId:null,quantity:2},{storeId:store.id,quantity:4}]},2);
+ const state=await api.productOpening(sku.id);assert.equal(state.lines.length,1);assert.equal(state.lines[0].id,opening.movementId);assert.equal(state.lines[0].quantity,6);assert.equal(state.record,null);
+ const day=state.lines[0].day,month=day.slice(0,7),balance=(await api.warehouseItem(item.id)).balances.find(b=>b.storeId===store.id);
+ const sent=await api.saveProductStockDocument({requestKey:randomUUID(),operation:'shipment',businessDate:day,sourceReference:'期初库存发货',reason:'发出两件',lines:[{balanceId:balance.id,expectedVersion:balance.version,quantity:2,businessStoreId:store.id}]});
+ assert.equal((await api.productCostReview(sku.id,month)).shipmentAmount,null);
+ const beforeStock=await api.warehouseItem(item.id),beforeHistory=await api.warehouseHistory(item.id),beforeFinance=await api.finance();
+ const body={requestKey:randomUUID(),expectedVersion:0,sourceReference:'原期初成本盘点表-01',reason:'按原数量核对总成本',lines:[{movementId:opening.movementId,amount:'10.01'}]},path='/product-opening-costs/'+sku.id;
+ assert.equal((await request(sessions[1],path)).status,403);
+ assert.equal((await fetch(base+'/api'+path,{method:'POST',headers:{Origin:base,'Content-Type':'application/json',Cookie:'studio_session='+sessions[0].token},body:JSON.stringify(body)})).status,403);
+ const copies=beforeHistory.rows.filter(r=>r.type==='opening'&&r.id!==opening.movementId);assert.equal(copies.length,2);
+ assert.equal((await request(sessions[0],path,'POST',{...body,lines:[{movementId:copies[0].id,amount:'10.01'}]})).status,400);
+ assert.equal((await request(sessions[0],path,'POST',{...body,lines:[...body.lines,...body.lines]})).status,400);
+ assert.equal((await request(sessions[0],path,'POST',{...body,lines:[{...body.lines[0],quantity:999}]})).status,400);
+ await db.client.unsafe(`CREATE FUNCTION studio_os.fail_opening_receipt() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN RAISE EXCEPTION 'test opening rollback'; END; $$;
+ CREATE TRIGGER fail_opening_receipt BEFORE INSERT ON studio_os.product_opening_cost_receipts FOR EACH ROW EXECUTE FUNCTION studio_os.fail_opening_receipt();`);
+ try{assert.equal((await request(sessions[0],path,'POST',body)).status,500);assert.equal((await api.productOpening(sku.id)).record,null);assert.equal((await api.productOpeningHistory(sku.id)).total,0);}
+ finally{await db.client.unsafe('DROP TRIGGER fail_opening_receipt ON studio_os.product_opening_cost_receipts; DROP FUNCTION studio_os.fail_opening_receipt()');}
+ const saved=await api.saveProductOpening(sku.id,body);assert.deepEqual(await api.saveProductOpening(sku.id,body),saved);assert.deepEqual(await api.productOpeningReceipt(sku.id,body.requestKey),saved);
+ let review=await api.productCostReview(sku.id,month);assert.equal(review.shipmentAmount,'3.34');assert.equal(review.balanceAmount,'6.67');assert.equal(review.quantity,4);assert.deepEqual(review.issues,[]);assert.equal(review.rows.find(r=>r.kind==='shipment').openingVersion,null);assert.equal(review.rows.find(r=>r.kind==='opening'&&r.delta>0).openingVersion,1);
+ const frozen=(await api.productOpeningHistory(sku.id)).rows[0];
+ assert.equal((await request(sessions[0],path,'POST',{...body,reason:'同一请求更改含义'})).status,409);
+ const corrected={...body,requestKey:randomUUID(),expectedVersion:1,reason:'复核原成本依据',lines:[{movementId:opening.movementId,amount:'12.00'}]};
+ const responses=await Promise.all([request(sessions[0],path,'POST',corrected),request(sessions[0],path,'POST',{...corrected,requestKey:randomUUID()})]);assert.deepEqual(responses.map(r=>r.status).sort(),[201,409]);
+ review=await api.productCostReview(sku.id,month);assert.equal(review.shipmentAmount,'4.00');assert.equal(review.balanceAmount,'8.00');
+ assert.deepEqual((await api.productOpeningHistory(sku.id)).rows.find(r=>r.version===1),frozen);
+ assert.deepEqual(await api.warehouseItem(item.id),beforeStock);assert.deepEqual(await api.warehouseHistory(item.id),beforeHistory);assert.deepEqual(await api.finance(),beforeFinance);
+ assert.doesNotMatch(JSON.stringify(beforeHistory),/totalCents|原期初成本盘点表/);
+ for(const table of ['product_opening_cost_versions','product_opening_cost_lines','product_opening_cost_receipts'])await assert.rejects(db.client.unsafe('DELETE FROM studio_os.'+table),e=>e.code==='23514');
+ // Enough revisions to exercise the complete immutable history, including the oldest source.
+ for(let version=2;version<52;version++)assert.equal((await request(sessions[0],path,'POST',{...corrected,requestKey:randomUUID(),expectedVersion:version})).status,201);
+ const history=await api.productOpeningHistory(sku.id,50);assert.equal(history.total,52);assert.equal(history.rows.length,2);assert.deepEqual(history.rows.at(-1),frozen);
+ const {ProductOpeningCosts}=await import('../../.build/server/product-opening-costs.js');
+ await assert.rejects(new ProductOpeningCosts(db).state(sessions[2].user,sku.id),e=>e.status===403);
+ const username='opening_finance_'+randomBytes(4).toString('hex'),password=randomBytes(24).toString('hex');
+ await db.client`INSERT INTO studio_os.accounts(username,password_hash,role,admin_permissions) VALUES(${username},${await hashPassword(password)},'admin',ARRAY['finance'])`;
+ const finance=await new Authentication(db).login(username,password,'opening-finance');assert.equal((await request(finance,path)).status,200);assert.equal((await request(finance,path,'POST',{...corrected,requestKey:randomUUID(),expectedVersion:52})).status,403);
+ await db.client`UPDATE studio_os.accounts SET admin_permissions=ARRAY[]::text[] WHERE id=${finance.user.id}`;
+ await assert.rejects(new ProductOpeningCosts(db).state(finance.user,sku.id),e=>e.status===403);
+});
+
+test('scoped opening evidence must cover each original nonzero line, while a zero opening cannot acquire fabricated value',async()=>{
+ const api=clients[0],store=await api.saveDirectory('store',undefined,{name:'多行期初店铺'}),product=await api.createProduct({name:'多行期初商品',storeId:null,notes:'',stages:['测试']});
+ await api.saveCommercialProduct(product.id,'formal',{requestKey:randomUUID(),code:'MULTI-OPENING-PRODUCT',reason:'登记'},0);
+ const inventory=[];
+ for(let i=0;i<2;i++){
+  const item=await api.warehouseWrite('register',undefined,{requestKey:randomUUID(),itemCode:'MULTI-OPENING-'+i,kind:'product',productId:product.id,name:'多行期初商品',specification:String(i),unit:'件',location:'工作室',notes:''});
+  await api.saveCommercialProduct(product.id,'sku',{requestKey:randomUUID(),id:null,code:'MULTI-OPENING-SKU-'+i,specification:String(i),unit:'件',active:true,warehouseItemId:item.id,reason:'绑定'},i+1);
+  await api.warehouseWrite('allocate-product',item.id,{requestKey:randomUUID(),reason:'核对原期初',allocations:[{storeId:null,quantity:i?0:2},{storeId:store.id,quantity:i?0:3}]},1);
+  const [sku]=await db.client`SELECT id FROM studio_os.product_skus WHERE warehouse_item_id=${item.id}`;inventory.push({item,sku});
+ }
+ const [{sku},{sku:zeroSku}]=inventory,state=await api.productOpening(sku.id);assert.equal(state.lines.length,2);assert.equal((await api.productOpening(zeroSku.id)).lines.length,0);
+ const body={requestKey:randomUUID(),expectedVersion:0,sourceReference:'按归属核对的原期初表',reason:'原始两行完整计价',lines:state.lines.map(line=>({movementId:line.id,amount:line.quantity===2?'2.00':'6.00'}))},path='/product-opening-costs/'+sku.id;
+ assert.equal((await request(sessions[0],path,'POST',{...body,lines:body.lines.slice(0,1)})).status,400);
+ assert.equal((await request(sessions[0],'/product-opening-costs/'+zeroSku.id,'POST',body)).status,400);
+ assert.equal((await request(sessions[0],path,'POST',{...body,lines:body.lines.map(line=>({...line,amount:''}))})).status,400);
+ await api.saveProductOpening(sku.id,body);const review=await api.productCostReview(sku.id,state.lines[0].day.slice(0,7));assert.equal(review.quantity,5);assert.equal(review.balanceAmount,'8.00');assert.equal(review.averageAmount,'1.60');
+});

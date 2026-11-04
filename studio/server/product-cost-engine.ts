@@ -8,7 +8,7 @@ export function costAmount(a:Fraction|null):string|null{if(a===null)return null;
 export interface CostMovement{
  id:string;type:string;quantity:number;delta:number;day:string;postedAt:string;documentId:string|null;
  operation:string|null;totalCents:number|null;sourceShipmentId:string|null;purchaseVersion:number|null;
- sourceChanged:boolean;snapshot:Record<string,unknown>;duplicateOpening:boolean;internalTransfer:boolean;
+ openingVersion?:number|null;sourceChanged:boolean;snapshot:Record<string,unknown>;duplicateOpening:boolean;internalTransfer:boolean;
 }
 export function movingCosts(movements:CostMovement[],month:string){
  let quantity=0,value:Fraction|null=zero();
@@ -35,7 +35,8 @@ export function movingCosts(movements:CostMovement[],month:string){
    }else if(m.operation==='inbound'){
     cost=m.totalCents===null?null:fraction(BigInt(m.totalCents));
     if(cost===null)notes.push('原入库单尚未登记采购成本');
-   }else{cost=null;notes.push(m.type==='opening'?'期初库存尚缺成本依据':'增加库存尚缺成本依据');}
+   }else if(m.type==='opening'&&m.totalCents!==null){cost=fraction(BigInt(m.totalCents));}
+   else{cost=null;notes.push(m.type==='opening'?'期初库存尚缺成本依据':'增加库存尚缺成本依据');}
    value=value===null||cost===null?null:plus(value,cost);
   }else if(m.delta<0){
    cost=value===null||quantity<=0||-m.delta>quantity?null:times(value,-m.delta,quantity);
@@ -52,7 +53,7 @@ export function movingCosts(movements:CostMovement[],month:string){
    if(m.operation==='shipment'){shipmentQuantity+=m.quantity;totals.shipment=totals.shipment===null||cost===null?null:plus(totals.shipment,cost);}
    if(m.operation==='return'){returnQuantity+=m.quantity;totals.returns=totals.returns===null||cost===null?null:plus(totals.returns,cost);}
    rows.push({id:m.id,day:m.day,postedAt:m.postedAt,kind:m.operation??m.type,quantity:m.quantity,delta:m.delta,documentId:m.documentId,
-    purchaseVersion:m.purchaseVersion,snapshot:m.snapshot,costAmount:costAmount(cost),balanceQuantity:quantity,balanceAmount:costAmount(value),
+    purchaseVersion:m.purchaseVersion,openingVersion:m.openingVersion??null,snapshot:m.snapshot,costAmount:costAmount(cost),balanceQuantity:quantity,balanceAmount:costAmount(value),
     averageAmount:costAmount(value!==null&&quantity>0?times(value,1,quantity):null),notes});
   }
   for(const note of notes)issues.add(note);

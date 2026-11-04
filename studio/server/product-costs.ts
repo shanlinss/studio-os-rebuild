@@ -28,7 +28,7 @@ export class ProductCosts{
    const rows=await tx`SELECT m.id,m.type,m.quantity,m.delta,
     coalesce(d.business_date,(m.created_at AT TIME ZONE 'Asia/Shanghai')::date)::text AS day,
     to_char(m.created_at AT TIME ZONE 'UTC','YYYY-MM-DD"T"HH24:MI:SS.US"Z"') AS "postedAt",m.product_stock_document_id AS "documentId",d.operation,
-    l.total_cents AS "totalCents",r.shipment_movement_id AS "sourceShipmentId",v.version AS "purchaseVersion",m.item_snapshot AS snapshot,
+    coalesce(l.total_cents,ol.total_cents) AS "totalCents",CASE WHEN ol.movement_id IS NOT NULL THEN ov.version END AS "openingVersion",r.shipment_movement_id AS "sourceShipmentId",v.version AS "purchaseVersion",m.item_snapshot AS snapshot,
     coalesce(e.version<>(v.expense_snapshot->>'version')::int,false) AS "sourceChanged",
     (m.type='opening' AND m.packaging_balance_id IS NOT NULL AND EXISTS(SELECT 1 FROM studio_os.warehouse_movements old
      WHERE old.item_id=m.item_id AND old.type='opening' AND old.packaging_balance_id IS NULL)) AS "duplicateOpening",
@@ -38,6 +38,8 @@ export class ProductCosts{
     LEFT JOIN LATERAL(SELECT * FROM studio_os.product_purchase_versions pv WHERE pv.batch_id=b.id ORDER BY pv.version DESC LIMIT 1) v ON true
     LEFT JOIN studio_os.product_purchase_lines l ON l.version_id=v.id AND l.movement_id=m.id
     LEFT JOIN studio_os.expense_records e ON e.id=v.expense_id
+    LEFT JOIN LATERAL(SELECT * FROM studio_os.product_opening_cost_versions o WHERE o.item_id=m.item_id ORDER BY o.version DESC LIMIT 1) ov ON true
+    LEFT JOIN studio_os.product_opening_cost_lines ol ON ol.version_id=ov.id AND ol.movement_id=m.id
     LEFT JOIN studio_os.product_stock_returns r ON r.return_movement_id=m.id
     WHERE m.item_id=${sku.itemId}`;
    return {sku,method:'moving-average',...movingCosts(rows as unknown as CostMovement[],month)};

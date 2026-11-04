@@ -162,3 +162,13 @@ test('cost preview forwards allowed reads and rejects unrelated queries or write
  assert.equal((await request(port,'/api/product-costs/'+id,{method:'POST'})).status,405);assert.equal(seen.length,2);
  }finally{await close(preview);await close(upstream);}
 });
+test('opening-cost preview exposes evidence and history but keeps edits and recovery receipts private',async()=>{
+ const id='11111111-1111-4111-8111-111111111111',seen=[];
+ const upstream=http.createServer((req,res)=>{seen.push(req.url);res.writeHead(200,{'Content-Type':'application/json'});res.end('{}');});await listen(upstream);
+ const preview=createPreviewServer({upstreamPort:upstream.address().port});await listen(preview);const port=preview.address().port,path='/api/product-opening-costs/'+id;
+ try{assert.equal((await request(port,path)).status,200);assert.equal((await request(port,path+'/history?offset=50')).status,200);
+ assert.equal((await request(port,path+'?quantity=4')).status,400);assert.equal((await request(port,path+'/history?month=2026-11')).status,400);
+ assert.equal((await request(port,path+'/receipts/'+id)).status,404);assert.equal((await request(port,path,{method:'POST'})).status,405);assert.equal(seen.length,2);
+ for(const p of ['/product-opening-contract.mjs','/product-opening-view.mjs','/product-opening-editors.mjs'])assert.equal((await request(port,p)).status,200);
+ }finally{await close(preview);await close(upstream);}
+});

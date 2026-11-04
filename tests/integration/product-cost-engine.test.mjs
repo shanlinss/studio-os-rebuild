@@ -32,3 +32,8 @@ test('positive stocktake, missing original returns, negative dated inventory and
  const bad=movingCosts([row('shipment',1,null,{day:'2025-12-01'}),row('inbound',2,200)],'2026-01');assert.ok(bad.issues.some(i=>i.includes('负库存')));assert.equal(bad.balanceAmount,null);
  const incoming=row('inbound',2,200),out=row('shipment',1,null,{postedAt:incoming.postedAt});assert.equal(movingCosts([incoming,out],'2026-01').shipmentAmount,null);
 });
+test('explicit original opening cost participates without unit-price rounding and duplicate scope openings stay excluded',()=>{
+ const opening=row(null,6,1001,{type:'opening',openingVersion:2}),copy=row(null,6,null,{type:'opening',duplicateOpening:true}),sent=row('shipment',2);
+ const result=movingCosts([opening,copy,sent],'2026-01');assert.equal(result.shipmentAmount,'3.34');assert.equal(result.balanceAmount,'6.67');assert.equal(result.quantity,4);assert.equal(result.rows[0].openingVersion,2);assert.deepEqual(result.issues,[]);
+ const free=movingCosts([row(null,2,0,{type:'opening'}),row('shipment',1)],'2026-01');assert.equal(free.shipmentAmount,'0.00');
+});

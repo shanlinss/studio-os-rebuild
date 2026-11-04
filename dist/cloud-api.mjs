@@ -1,3 +1,4 @@
+import {openingState,openingHistory,openingPayload} from './product-opening-contract.mjs';
 import {costMonth,costCatalog,costReview} from './product-cost-contract.mjs';
 import {productPurchaseState,productPurchaseHistory,productPurchasePayload} from './product-purchase-contract.mjs';
 import {productStockOptions,productStockPayload,productStockDetail,productReturnPayload} from './product-stock-contract.mjs';
@@ -150,6 +151,10 @@ export function createCloudApi(fetcher=globalThis.fetch,{allowWrites=false}={}){
     async todos(signal){return read('/api/workbench/todos',signal,v=>list(v).map(todoModel));},
     async finance(signal){return read('/api/finance',signal,financeRecord);},
     async competitors(signal){return namedList(await get('/api/competitors',signal));},
+    async productOpening(id,signal){return read('/api/product-opening-costs/'+endpointId(id),signal,v=>openingState(v,id));},
+    async productOpeningHistory(id,offset=0,signal){return read('/api/product-opening-costs/'+endpointId(id)+'/history?offset='+offset,signal,openingHistory);},
+    async saveProductOpening(id,value){return mutations.send('/api/product-opening-costs/'+endpointId(id),'POST',openingPayload(value));},
+    async productOpeningReceipt(id,key){const path='/api/product-opening-costs/'+endpointId(id);try{const result=await get(path+'/receipts/'+endpointId(key));if(result?.id!==id||!Number.isSafeInteger(result.version)||result.version<1)throw new ContractError();endpointId(result.recordId);mutations.confirmRead(path);return result;}catch(e){if(e.status===404){mutations.confirmRead(path);return null;}throw e;}},
     async productCostCatalog(offset=0,signal){if(!Number.isSafeInteger(offset)||offset<0||offset>2147483647)throw new ContractError();return read('/api/product-costs?offset='+offset,signal,costCatalog);},
     async productCostReview(id,month,signal){costMonth(month);return read('/api/product-costs/'+endpointId(id)+'?month='+month,signal,v=>costReview(v,id,month));},
     async productPurchase(id,signal){return read('/api/product-purchases/'+endpointId(id),signal,v=>productPurchaseState(v,id));},
