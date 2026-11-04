@@ -344,6 +344,14 @@ export async function createStudioApp(
     ) {
       return stores.update(id, body, req.identity!.id);
     }
+    @Get('packaging-stock')
+    scopedPackaging(@Req() r:AuthRequest){return warehouse.scopedCatalog(r.identity!,r.query);}
+    @Get('packaging-stock/:id')
+    scopedPackagingDetail(@Req() r:AuthRequest,@Param('id') id:string){return warehouse.scopedDetail(r.identity!,id,r.query);}
+    @Post('packaging-stock/:id')
+    scopedPackagingMove(@Req() r:AuthRequest,@Param('id') id:string,@Body() b:unknown){return warehouse.scopedMove(r.identity!,id,b);}
+    @Get('packaging-stock/:id/receipts/:key')
+    scopedPackagingReceipt(@Req() r:AuthRequest,@Param('id') id:string,@Param('key') key:string){return warehouse.scopedReceipt(r.identity!,id,key);}
     @Get('warehouse/items') warehouseCatalog(@Req() r: AuthRequest) { return warehouse.catalog(r.identity!,r.query); }
     @Get('phone-cards') phoneCardCatalog(@Req() r:AuthRequest){return phoneCards.catalog(r.identity!,r.query);}
     @Get('phone-card-finance/:id') phoneCardFinanceState(@Req() r:AuthRequest,@Param('id') id:string){return phoneCardFinance.state(r.identity!,id);}
@@ -1757,6 +1765,12 @@ export async function createStudioApp(
         requirePermission(req.identity,'resources');
         const route=req.path.slice('/api/phone-cards'.length),allowed=(req.method==='GET'&&/^(|\/options|\/receipts\/[^/]+|\/[^/]+(?:\/(?:history|identity))?)$/.test(route))||(req.method==='POST'&&/^(|\/[^/]+\/identity)$/.test(route))||(req.method==='PATCH'&&/^\/[^/]+$/.test(route));
         if(!allowed)throw new ForbiddenException();if(route.endsWith('/identity'))requirePermission(req.identity,'resource_identity');if(req.method!=='GET')auth.csrf(req);return true;
+      }
+      if(req.path==='/api/packaging-stock'||req.path.startsWith('/api/packaging-stock/')){
+        requireContributor(req.identity);
+        if(req.method==='GET'&&/^\/api\/packaging-stock(?:\/[^/]+(?:\/receipts\/[^/]+)?)?$/.test(req.path))return true;
+        if(req.method==='POST'&&/^\/api\/packaging-stock\/[^/]+$/.test(req.path)){auth.csrf(req);return true;}
+        throw new ForbiddenException();
       }
       if(req.path.startsWith('/api/warehouse/')){
         requirePermission(req.identity,'resources');

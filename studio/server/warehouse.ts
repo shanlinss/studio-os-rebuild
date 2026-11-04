@@ -1,4 +1,4 @@
-import {livePermission,currentPermission,freshIdentity,hasPermission} from './permissions';
+import {livePermission,currentPermission} from './permissions';
 import {BadRequestException,ConflictException,ForbiddenException,NotFoundException,UnauthorizedException} from '@nestjs/common';
 import {createHash,randomUUID} from 'node:crypto';
 import {registerSampleRecord,stockInSampleRecord} from './samples';
@@ -10,15 +10,22 @@ import {objectInput,shortText,longText,optionalLongText,uuid,version} from './va
 const MAX=2147483647,units=['件','个','套','包','卷','箱'];
 const projection=`w.id,w.item_code AS "itemCode",w.kind,w.product_id AS "productId",p.name AS "productName",w.name,w.specification,w.unit,w.location,w.notes,w.opening_confirmed AS "openingConfirmed",w.quantity,w.active,w.version,w.created_at AS "createdAt",w.updated_at AS "updatedAt",EXISTS(SELECT 1 FROM studio_os.packaging_balances b WHERE b.item_id=w.id) AS "packagingScoped"`;
 const movementProjection=`m.id,m.item_id AS "itemId",m.type,m.quantity,m.delta,m.before_quantity AS "beforeQuantity",m.after_quantity AS "afterQuantity",m.reason,m.source_reference AS "sourceReference",m.corrects_movement_id AS "correctsMovementId",m.item_snapshot AS "itemSnapshot",m.packaging_balance_id AS "packagingBalanceId",m.created_at AS "createdAt",coalesce(n.display_name,a.username) AS actor,t.id AS "transferId",t.sample_id AS "targetSampleId",t.target_snapshot AS "transferTargetSnapshot"`;
+const scopedProjection='b.id,b.store_id AS "storeId",s.name AS "storeName",b.quantity,b.version,g.can_move AS "canMove",w.name,w.item_code AS "itemCode",w.specification,w.unit,w.location';
+function scopedSource(tx:TransactionSql,accountId:string){
+ return tx`FROM studio_os.packaging_balances b JOIN studio_os.warehouse_items w ON w.id=b.item_id
+  JOIN studio_os.inventory_access_grants g ON g.account_id=${accountId} AND g.store_id IS NOT DISTINCT FROM b.store_id
+  LEFT JOIN studio_os.stores s ON s.id=b.store_id
+  WHERE w.active AND w.kind='packaging' AND (b.store_id IS NULL OR s.active)`;
+}
 function canonical(v:unknown):unknown {if(Array.isArray(v))return v.map(canonical);if(v&&typeof v==='object')return Object.fromEntries(Object.keys(v).sort().map(k=>[k,canonical((v as Record<string,unknown>)[k])]));return v;}
 function quantity(v:unknown,zero=false){if(!Number.isSafeInteger(v)||Number(v)<(zero?0:1)||Number(v)>MAX)throw new BadRequestException('数量须为有效整数');return Number(v);}
 async function item(tx:TransactionSql,id:string){const [r]=await tx`SELECT * FROM studio_os.warehouse_items WHERE id=${id} FOR UPDATE`;if(!r)throw new NotFoundException();return r;}
 export class Warehouse {
  constructor(private readonly db:StudioDatabase){}
- private async write(who:Identity,action:string,b:Record<string,unknown>,fn:(tx:TransactionSql)=>Promise<{id:string,movementId?:string,transferId?:string,sampleId?:string,sampleEventId?:string}>){
-  requireAdministrator(who);const key=uuid(b.requestKey),body=canonical(b),hash=createHash('sha256').update(JSON.stringify({action,body})).digest('hex');
+ private async write(who:Identity,action:string,b:Record<string,unknown>,fn:(tx:TransactionSql)=>Promise<{id:string,movementId?:string,transferId?:string,sampleId?:string,sampleEventId?:string}>,authorize?:(tx:TransactionSql)=>Promise<void>){
+  if(!authorize)requireAdministrator(who);const key=uuid(b.requestKey),body=canonical(b),hash=createHash('sha256').update(JSON.stringify({action,body})).digest('hex');
   try{return await this.db.client.begin(async tx=>{
-   const [actor]=await tx`SELECT active,role FROM studio_os.accounts WHERE id=${who.id} FOR SHARE`;if(!actor?.active)throw new UnauthorizedException();await livePermission(tx,who.id,'resources');
+   const [actor]=await tx`SELECT active,role FROM studio_os.accounts WHERE id=${who.id} FOR SHARE`;if(!actor?.active)throw new UnauthorizedException();if(authorize)await authorize(tx);else await livePermission(tx,who.id,'resources');
    await tx`SELECT pg_advisory_xact_lock(hashtextextended(${'warehouse:'+who.id+':'+key},0))`;
    const [old]=await tx`SELECT action,request_hash,result FROM studio_os.warehouse_receipts WHERE actor_id=${who.id} AND request_key=${key}`;
    if(old){if(old.action!==action||old.request_hash!==hash)throw new ConflictException('请求标识已用于其他内容');return old.result;}
@@ -105,16 +112,75 @@ export class Warehouse {
    await tx`INSERT INTO studio_os.warehouse_item_events(item_id,actor_id,action,before_value,after_value) VALUES(${r.id},${who.id},${id?'edited':'registered'},${old?JSON.stringify(old):null}::jsonb,${JSON.stringify(r)}::jsonb)`;return {id:r.id};
   });
  }
- async move(who:Identity,id:string,value:unknown){
-  requireAdministrator(who);uuid(id);const b=objectInput(value,['requestKey','expectedVersion','type','quantity','reason','sourceReference','correctsMovementId','packagingBalanceId']),expected=version(b.expectedVersion),type=String(b.type),qty=quantity(b.quantity,['opening','stocktake'].includes(type)),reason=longText(b.reason,2000),reference=optionalLongText(b.sourceReference,200),corrects=b.correctsMovementId===null?null:uuid(b.correctsMovementId);
+ private async scopedBalance(tx:TransactionSql,who:Identity,id:string,write=false){
+  const [actor]=write
+   ?await tx`SELECT active FROM studio_os.accounts WHERE id=${who.id} FOR SHARE`
+   :await tx`SELECT active FROM studio_os.accounts WHERE id=${who.id}`;
+  if(!actor?.active)throw new UnauthorizedException();
+  const [row]=await tx`SELECT ${tx.unsafe(scopedProjection)},b.item_id AS "itemId" ${scopedSource(tx,who.id)} AND b.id=${id}`;
+  if(!row)throw new NotFoundException();
+  if(write&&!row.canMove)throw new ForbiddenException();
+  if(write&&row.storeId&&!(await tx`SELECT id FROM studio_os.stores WHERE id=${row.storeId} AND active FOR SHARE`).length)
+   throw new NotFoundException();
+  return row;
+ }
+ async scopedCatalog(who:Identity,value:unknown){
+  const b=objectInput(value,['offset','q']),offset=Number(b.offset??0),q=b.q?shortText(b.q,100):'';
+  if(!Number.isSafeInteger(offset)||offset<0||offset>MAX)throw new BadRequestException();
+  return this.db.client.begin(async tx=>{
+   await tx`SET TRANSACTION ISOLATION LEVEL REPEATABLE READ READ ONLY`;
+   if(!(await tx`SELECT id FROM studio_os.accounts WHERE id=${who.id} AND active`).length)throw new UnauthorizedException();
+   const source=tx`${scopedSource(tx,who.id)}
+    AND strpos(lower(concat_ws(' ',w.item_code,w.name,w.specification,s.name)),lower(${q}))>0`;
+   const rows=await tx`SELECT ${tx.unsafe(scopedProjection)} ${source} ORDER BY w.name,s.name NULLS FIRST,b.id LIMIT 50 OFFSET ${offset}`;
+   const [count]=await tx`SELECT count(*)::int AS total ${source}`;
+   return {rows,total:count.total,offset,limit:50};
+  });
+ }
+ async scopedDetail(who:Identity,id:string,value:unknown){
+  id=uuid(id);
+  const b=objectInput(value,['offset']),offset=Number(b.offset??0);
+  if(!Number.isSafeInteger(offset)||offset<0||offset>MAX)throw new BadRequestException();
+  return this.db.client.begin(async tx=>{
+   await tx`SET TRANSACTION ISOLATION LEVEL REPEATABLE READ READ ONLY`;
+   const {itemId,...balance}=await this.scopedBalance(tx,who,id);
+   const rows=await tx`SELECT id,type,delta,before_quantity AS "beforeQuantity",after_quantity AS "afterQuantity",created_at AS "createdAt"
+    FROM studio_os.warehouse_movements WHERE packaging_balance_id=${id} ORDER BY created_at DESC,id LIMIT 50 OFFSET ${offset}`;
+   const [count]=await tx`SELECT count(*)::int AS total FROM studio_os.warehouse_movements WHERE packaging_balance_id=${id}`;
+   return {balance,rows,total:count.total,offset,limit:50};
+  });
+ }
+ async scopedMove(who:Identity,id:string,value:unknown){
+  id=uuid(id);
+  const b=objectInput(value,['requestKey','expectedVersion','type','quantity','reason']);
+  if(b.type!=='inbound'&&b.type!=='outbound')throw new BadRequestException();
+  return this.writeMovement(who,id,{...b,sourceReference:'',correctsMovementId:null,packagingBalanceId:id},true);
+ }
+ async scopedReceipt(who:Identity,id:string,key:string){
+  id=uuid(id);key=uuid(key);
+  return this.db.client.begin(async tx=>{
+   await tx`SET TRANSACTION ISOLATION LEVEL REPEATABLE READ READ ONLY`;
+   const balance=await this.scopedBalance(tx,who,id);
+   if(!balance.canMove)throw new ForbiddenException();
+   const [receipt]=await tx`SELECT result FROM studio_os.warehouse_receipts WHERE actor_id=${who.id} AND request_key=${key} AND action=${'scoped-move:'+id}`;
+   if(!receipt)throw new NotFoundException();
+   return receipt.result;
+  });
+ }
+ async move(who:Identity,id:string,value:unknown){return this.writeMovement(who,id,value,false);}
+ private async writeMovement(who:Identity,id:string,value:unknown,scoped:boolean){
+  if(!scoped)requireAdministrator(who);uuid(id);const b=objectInput(value,['requestKey','expectedVersion','type','quantity','reason','sourceReference','correctsMovementId','packagingBalanceId']),expected=version(b.expectedVersion),type=String(b.type),qty=quantity(b.quantity,['opening','stocktake'].includes(type)),reason=longText(b.reason,2000),reference=optionalLongText(b.sourceReference,200),corrects=b.correctsMovementId===null?null:uuid(b.correctsMovementId);
   if(typeof b.type!=='string'||!['opening','inbound','outbound','stocktake'].includes(type)||!reason.trim()||(corrects&&type!=='stocktake'))throw new BadRequestException();
   const balanceId=b.packagingBalanceId===undefined?null:uuid(b.packagingBalanceId);
-  return this.write(who,'move:'+id,b,async tx=>{
-   const old=await item(tx,id);if(old.version!==expected||!old.active)throw new ConflictException('库存资料已变化或已停用');
-   const balances=await tx`SELECT b.id,b.quantity,b.store_id FROM studio_os.packaging_balances b WHERE b.item_id=${id}`;
+  let itemId=id;
+  const authorize=scoped?async(tx:TransactionSql)=>{itemId=(await this.scopedBalance(tx,who,id,true)).itemId;}:undefined;
+  return this.write(who,(scoped?'scoped-move:':'move:')+id,b,async tx=>{
+   const old=await item(tx,itemId);if((!scoped&&old.version!==expected)||!old.active)throw new ConflictException('库存资料已变化或已停用');
+   const balances=await tx`SELECT b.id,b.quantity,b.store_id,b.version FROM studio_os.packaging_balances b WHERE b.item_id=${itemId}`;
    const balance=balances.find(row=>row.id===balanceId);
    if((balances.length&&!balance)||(balanceId&&!balance)||(balance&&type==='opening'))
     throw new ConflictException('请选择已登记期初的包材归属');
+   if(scoped&&balance?.version!==expected)throw new ConflictException('此归属库存已变化');
    let storeName=null;
    if(balance?.store_id){
     const [store]=await tx`SELECT name,active FROM studio_os.stores WHERE id=${balance.store_id} FOR SHARE`;
@@ -122,7 +188,7 @@ export class Warehouse {
     storeName=store.name;
    }
    if(type==='opening'?old.opening_confirmed:!old.opening_confirmed)throw new ConflictException('请先登记期初数量，且只能登记一次');
-   if(corrects&&!(await tx`SELECT id FROM studio_os.warehouse_movements WHERE id=${corrects} AND item_id=${id} AND packaging_balance_id IS NOT DISTINCT FROM ${balanceId}::uuid FOR SHARE`).length)throw new BadRequestException('纠错流水不属于此库存项目');
+   if(corrects&&!(await tx`SELECT id FROM studio_os.warehouse_movements WHERE id=${corrects} AND item_id=${itemId} AND packaging_balance_id IS NOT DISTINCT FROM ${balanceId}::uuid FOR SHARE`).length)throw new BadRequestException('纠错流水不属于此库存项目');
    if(corrects&&(await tx`SELECT id FROM studio_os.warehouse_sample_transfers WHERE movement_id=${corrects}`).length)throw new ConflictException('转样品记录不支持单边引用撤销，请核对双方实际数量');
    const before=(balance?.quantity??old.quantity) as number|null,after=type==='opening'||type==='stocktake'?qty:type==='inbound'?before!+qty:before!-qty;
    if(after<0||after>MAX)throw new ConflictException('不能超额出库或超过整数容量');const delta=after-(before??0);
@@ -130,10 +196,10 @@ export class Warehouse {
    if(total>MAX)throw new ConflictException('包材合计超过容量');
    const [p]=old.product_id?await tx`SELECT name FROM studio_os.products WHERE id=${old.product_id} FOR SHARE`:[];
    const snapshot={itemCode:old.item_code,kind:old.kind,productId:old.product_id,productName:p?.name||null,name:old.name,specification:old.specification,unit:old.unit,location:old.location,...(balance?{storeId:balance.store_id,storeName}:{})};
-   const [movement]=await tx`INSERT INTO studio_os.warehouse_movements(item_id,packaging_balance_id,type,quantity,delta,before_quantity,after_quantity,reason,source_reference,corrects_movement_id,item_snapshot,actor_id) VALUES(${id},${balanceId},${type},${qty},${delta},${before},${after},${reason},${reference},${corrects},${JSON.stringify(snapshot)}::jsonb,${who.id}) RETURNING id`;
+   const [movement]=await tx`INSERT INTO studio_os.warehouse_movements(item_id,packaging_balance_id,type,quantity,delta,before_quantity,after_quantity,reason,source_reference,corrects_movement_id,item_snapshot,actor_id) VALUES(${itemId},${balanceId},${type},${qty},${delta},${before},${after},${reason},${reference},${corrects},${JSON.stringify(snapshot)}::jsonb,${who.id}) RETURNING id`;
    if(balance)await tx`UPDATE studio_os.packaging_balances SET quantity=${after},version=version+1 WHERE id=${balance.id}`;
-   await tx`UPDATE studio_os.warehouse_items SET opening_confirmed=true,quantity=${total},version=version+1,updated_at=now() WHERE id=${id}`;return {id,movementId:movement.id};
-  });
+   await tx`UPDATE studio_os.warehouse_items SET opening_confirmed=true,quantity=${total},version=version+1,updated_at=now() WHERE id=${itemId}`;return {id:scoped?id:itemId,movementId:movement.id};
+  },authorize);
  }
  async sampleTargets(who:Identity,id:string,value:unknown){await currentPermission(this.db,who,'resources');
   requireAdministrator(who);uuid(id);const b=objectInput(value,['q','offset']),offset=b.offset===undefined?0:Number(b.offset),q=b.q?shortText(b.q,100):'';

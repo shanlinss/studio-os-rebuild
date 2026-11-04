@@ -25,7 +25,7 @@ before(async()=>{
 });
 after(async()=>{if(app)await app.close();if(local)await local.stop();});
 test('empty scope default reuses original accounts and stores without changing quantities or expanding resource access',async()=>{
- assert.deepEqual((await current()).grants,[]);const mine=await clients[4].myInventoryAccess();assert.deepEqual(mine,{canManageAll:false,grants:[],quantityOperationsAvailable:false});assert.equal((await clients[2].myInventoryAccess()).canManageAll,true);assert.equal((await clients[0].warehouseItem(stock.id)).quantity,30);assert.equal((await req(4,'/warehouse/items')).status,403);await checkReadiness(db);
+ assert.deepEqual((await current()).grants,[]);const mine=await clients[4].myInventoryAccess();assert.deepEqual(mine,{canManageAll:false,grants:[],quantityOperationsAvailable:true});assert.equal((await clients[2].myInventoryAccess()).canManageAll,true);assert.equal((await clients[0].warehouseItem(stock.id)).quantity,30);assert.equal((await req(4,'/warehouse/items')).status,403);await checkReadiness(db);
 });
 test('only a current superadministrator changes scopes; security may inspect and other roles see their own configuration only',async()=>{
  const r=await current(),path='/admin/accounts/'+r.id+'/inventory-access',v={...body([{storeId:null,canMove:false}]),expectedVersion:r.version};
@@ -36,10 +36,53 @@ test('only a current superadministrator changes scopes; security may inspect and
 test('public read and individual store movement settings are exact, audited and revoke the target sessions atomically',async()=>{
  const r=await current(),v=body([{storeId:null,canMove:false},{storeId:stores[0],canMove:true}]),result=await clients[0].saveInventoryAccess(r.id,v,r.version);
  assert.equal(result.id,r.id);assert.equal(result.version,r.version+1);assert.equal((await req(4,'/session')).status,401);await login(4);
- const mine=await clients[4].myInventoryAccess();assert.equal(mine.canManageAll,false);assert.equal(mine.quantityOperationsAvailable,false);assert.equal(mine.grants.length,2);assert.equal(mine.grants.find(g=>g.storeId===null).canMove,false);assert.equal(mine.grants.find(g=>g.storeId===stores[0]).canMove,true);assert.ok(!mine.grants.some(g=>g.storeId===stores[1]));
+ const mine=await clients[4].myInventoryAccess();assert.equal(mine.canManageAll,false);assert.equal(mine.quantityOperationsAvailable,true);assert.equal(mine.grants.length,2);assert.equal(mine.grants.find(g=>g.storeId===null).canMove,false);assert.equal(mine.grants.find(g=>g.storeId===stores[0]).canMove,true);assert.ok(!mine.grants.some(g=>g.storeId===stores[1]));
  const h=await clients[1].inventoryAccessHistory(r.id);assert.equal(h.rows[0].afterValue.version,result.version);assert.equal(h.rows[0].beforeValue.grants.length,0);assert.equal(h.rows[0].reason,v.reason);assert.ok(!JSON.stringify(h).includes('password'));
  assert.deepEqual(await clients[0].saveInventoryAccess(r.id,v,r.version),result);assert.deepEqual(await clients[0].inventoryAccessReceipt(r.id,v.requestKey),result);assert.equal((await clients[1].inventoryAccessHistory(r.id)).total,1);
  assert.equal((await req(4,'/warehouse/items')).status,403);assert.equal((await req(4,'/warehouse/items/'+stock.id+'/movements','POST',{requestKey:randomUUID(),expectedVersion:2,type:'outbound',quantity:1,reason:'不可操作旧总余额',sourceReference:'',correctsMovementId:null})).status,403);assert.equal((await clients[0].warehouseItem(stock.id)).quantity,30);
+});
+test('staff see only granted balances and use the original journal for authorized movements',async()=>{
+ const admin=clients[0],employee=clients[4];
+ assert.equal((await employee.scopedWarehouseCatalog()).total,0);
+ const scopedStock=await admin.warehouseWrite('register',undefined,{requestKey:randomUUID(),itemCode:'scoped-stock',kind:'packaging',productId:null,name:'分账包材',specification:'标准',unit:'个',location:'工作室',notes:'只允许原资源管理员读取'});
+ const row=await admin.warehouseItem(scopedStock.id);
+ await admin.warehouseWrite('allocate-packaging',scopedStock.id,{requestKey:randomUUID(),reason:'核对归属',allocations:[
+  {storeId:null,quantity:4},{storeId:stores[0],quantity:9},{storeId:stores[1],quantity:17}
+ ]},row.version);
+ const {balances}=await admin.warehouseItem(scopedStock.id),hidden=balances.find(b=>b.storeId===stores[1]);
+ const list=await employee.scopedWarehouseCatalog();
+ assert.equal(list.total,2);
+ assert.deepEqual((await employee.scopedWarehouseCatalog({q:'库存范围乙店'})).rows,[]);
+ const shared=list.rows.find(b=>b.storeId===null),shop=list.rows.find(b=>b.storeId===stores[0]);
+ const value={requestKey:randomUUID(),type:'outbound',quantity:2,reason:'发货领用'};
+ assert.equal((await req(4,'/packaging-stock/'+hidden.id)).status,404);
+ assert.equal((await req(4,'/packaging-stock/'+hidden.id,'POST',{...value,expectedVersion:1})).status,404);
+ assert.equal((await req(4,'/packaging-stock/'+shared.id,'POST',{...value,expectedVersion:1})).status,403);
+ assert.equal((await req(4,'/packaging-stock/'+shop.id,'POST',{...value,type:'stocktake',expectedVersion:1})).status,400);
+ assert.equal((await req(4,'/packaging-stock/'+shop.id,'POST',{...value,expectedVersion:1},false)).status,403);
+ await assert.rejects(employee.scopedWarehouseMove(shop.id,{...value,quantity:10},shop.version),e=>e.status===409);
+ const saved=await employee.scopedWarehouseMove(shop.id,value,shop.version);
+ assert.deepEqual(await employee.scopedWarehouseMove(shop.id,value,shop.version),saved);
+ assert.deepEqual(await employee.scopedWarehouseReceipt(shop.id,value.requestKey),saved);
+ assert.equal(await clients[5].scopedWarehouseReceipt(shop.id,value.requestKey),null);
+ const detail=await employee.scopedWarehouseDetail(shop.id);
+ assert.equal(detail.balance.quantity,7);
+ await assert.rejects(employee.scopedWarehouseMove(shop.id,{...value,requestKey:randomUUID()},shop.version),e=>e.status===409);
+ assert.equal(detail.total,2);
+ assert.equal(detail.rows[0].id,saved.movementId);
+ assert.ok(!JSON.stringify(detail).includes('只允许原资源管理员读取'));
+ assert.equal((await admin.warehouseItem(scopedStock.id)).quantity,28);
+ assert.equal((await admin.warehouseMovement(scopedStock.id,saved.movementId)).packagingBalanceId,shop.id);
+ await db.client`UPDATE studio_os.stores SET active=false WHERE id=${stores[0]}`;
+ assert.equal((await employee.scopedWarehouseCatalog()).total,1);
+ assert.equal(await employee.scopedWarehouseReceipt(shop.id,value.requestKey),null);
+ await db.client`UPDATE studio_os.stores SET active=true WHERE id=${stores[0]}`;
+ const permission=await current();
+ await admin.saveInventoryAccess(permission.id,body([{storeId:null,canMove:false}]),permission.version);
+ assert.equal((await req(4,'/packaging-stock/'+shop.id)).status,401);
+ await login(4);
+ assert.equal((await req(4,'/packaging-stock/'+shop.id)).status,404);
+ assert.equal(await clients[4].scopedWarehouseReceipt(shop.id,value.requestKey),null);
 });
 test('duplicate scopes, wildcards, malformed grants, missing reason, spoofed claims and absent CSRF fail without mutation',async()=>{
  const r=await current(),path='/admin/accounts/'+r.id+'/inventory-access',v={...body([]),expectedVersion:r.version};

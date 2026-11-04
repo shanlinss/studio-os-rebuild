@@ -51,5 +51,15 @@ export function createWarehouseEditors({api,h,mount,input,area,select}){
    return api.warehouseWrite(operation,id,value,row?.version);
   },{kind:'warehouse',id},async()=>api.warehouseReceipt(key,operation,id),setup);
  }
- return {warehouse};
+ async function scopedWarehouse(type,id){
+  if(!['inbound','outbound'].includes(type))throw new ContractError();
+  const {balance}=await api.scopedWarehouseDetail(id);
+  if(!balance.canMove)throw new ContractError('该归属仅可查看。');
+  const key=crypto.randomUUID();
+  const body=`<p>${h(balance.name)} · ${h(balance.storeName||'公共库存')} · 当前 ${h(balance.quantity)} ${h(balance.unit)}</p>`+
+   input('quantity','本次数量','','required type="number" min="1" max="2147483647" step="1"')+area('reason','原因（必填）');
+  mount('登记'+movementLabels[type],body,f=>api.scopedWarehouseMove(id,{requestKey:key,type,quantity:Number(f.get('quantity')),reason:f.get('reason')},balance.version),
+   {kind:'scoped-warehouse',id},()=>api.scopedWarehouseReceipt(id,key));
+ }
+ return {warehouse,scopedWarehouse};
 }

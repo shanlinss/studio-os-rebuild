@@ -14,7 +14,7 @@ import {attendancePage,attendanceDetail,attendanceHistory,attendancePayload,atte
 import {dailyAttendanceState,endWorkPayload,endWorkResult} from './daily-attendance.mjs';
 import {permissionPayload} from './admin-permissions.mjs';
 import {accountLifecyclePayload,accountLifecycleResult} from './account-lifecycle-contract.mjs';
-import {warehouseItem,warehouseCatalog,warehouseMovement,warehouseHistory,warehousePayload,warehousePath,sampleTargetPage,sampleTransferPayload,sampleTransferPage} from './warehouse-contract.mjs';
+import {warehouseItem,warehouseCatalog,warehouseMovement,warehouseHistory,warehousePayload,warehousePath,sampleTargetPage,sampleTransferPayload,sampleTransferPage,scopedWarehouseCatalog,scopedWarehouseDetail,scopedWarehousePayload} from './warehouse-contract.mjs';
 import {equipmentRecord,equipmentPage,equipmentPayload,equipmentPath} from './equipment-contract.mjs';
 import {sampleState,samplePage,samplePayload,sampleOperationPath} from './sample-contract.mjs';
 import {assetPath,mediaUpload,readMedia,expenseReceiptMaxBytes} from './media-contract.mjs';
@@ -146,6 +146,14 @@ export function createCloudApi(fetcher=globalThis.fetch,{allowWrites=false}={}){
     async todos(signal){return read('/api/workbench/todos',signal,v=>list(v).map(todoModel));},
     async finance(signal){return read('/api/finance',signal,financeRecord);},
     async competitors(signal){return namedList(await get('/api/competitors',signal));},
+    async scopedWarehouseCatalog(params={},signal){const q=new URLSearchParams({q:params.q??'',offset:String(params.offset??0)});return read('/api/packaging-stock?'+q,signal,scopedWarehouseCatalog);},
+    async scopedWarehouseDetail(id,offset=0,signal){return read('/api/packaging-stock/'+endpointId(id)+'?offset='+offset,signal,v=>scopedWarehouseDetail(v,id));},
+    async scopedWarehouseMove(id,value,version){return mutations.send('/api/packaging-stock/'+endpointId(id),'POST',scopedWarehousePayload(value,version));},
+    async scopedWarehouseReceipt(id,key){
+      const path='/api/packaging-stock/'+endpointId(id);
+      try{const result=await get(path+'/receipts/'+endpointId(key));if(result?.id!==id)throw new ContractError();endpointId(result.movementId);mutations.confirmRead(path);return result;}
+      catch(e){if(e.status===404){mutations.confirmRead(path);return null;}throw e;}
+    },
     async warehouseCatalog(params={},signal){const q=new URLSearchParams({q:params.q??'',kind:params.kind??'all',active:params.active??'active',offset:String(params.offset??0)});return read('/api/warehouse/items?'+q,signal,warehouseCatalog);},
     async warehouseItem(id,signal){return read('/api/warehouse/items/'+endpointId(id),signal,warehouseItem);},
     async warehouseHistory(id,offset=0,events=false,signal){return read('/api/warehouse/items/'+endpointId(id)+'/'+(events?'events':'movements')+'?offset='+String(offset),signal,v=>warehouseHistory(v,events));},

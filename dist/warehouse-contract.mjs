@@ -69,3 +69,23 @@ export function sampleTransferRecord(r){
  if(!r.sourceSnapshot||typeof r.sourceSnapshot.name!=='string'||typeof r.sourceSnapshot.itemCode!=='string'||typeof r.sourceSnapshot.specification!=='string'||!['件','个'].includes(r.sourceSnapshot.unit)||!r.targetSnapshot||typeof r.targetSnapshot.name!=='string'||r.targetSnapshot.id!==r.sampleId||r.targetSnapshot.unit!=='件')throw new ContractError('转样品来源或目标快照不完整。');return r;
 }
 export function sampleTransferPage(v){page(v);v.rows.forEach(sampleTransferRecord);return v;}
+
+function scopedBalance(v){
+ if(!v||typeof v.canMove!=='boolean'||typeof v.name!=='string'||typeof v.itemCode!=='string'||typeof v.specification!=='string'||typeof v.location!=='string'||!warehouseUnits.includes(v.unit))throw new ContractError('包材库存资料不完整。');
+ id(v.id);qty(v.quantity);expectedVersion(v.version);
+ if(v.storeId===null){if(v.storeName!==null)throw new ContractError();}else{id(v.storeId);if(typeof v.storeName!=='string')throw new ContractError();}
+ return v;
+}
+export function scopedWarehouseCatalog(v){page(v);v.rows.forEach(scopedBalance);return v;}
+export function scopedWarehouseDetail(v,owner){
+ page(v);if(scopedBalance(v.balance).id!==owner)throw new ContractError();
+ for(const row of v.rows){
+  id(row.id);qty(row.afterQuantity);if(row.beforeQuantity!==null)qty(row.beforeQuantity);
+  if(!Object.hasOwn(movementLabels,row.type)||row.delta!==row.afterQuantity-(row.beforeQuantity??0)||!Number.isFinite(Date.parse(row.createdAt)))throw new ContractError('包材流水不完整。');
+ }
+ return v;
+}
+export function scopedWarehousePayload(v,version){
+ if(!v||Object.keys(v).some(k=>!['requestKey','type','quantity','reason'].includes(k))||!['inbound','outbound'].includes(v.type))throw new ContractError('仅可登记入库或出库。');
+ return {requestKey:id(v.requestKey),expectedVersion:expectedVersion(version),type:v.type,quantity:qty(v.quantity,false),reason:text(v.reason,2000,true)};
+}

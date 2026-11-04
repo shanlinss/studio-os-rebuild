@@ -15,8 +15,8 @@ export function inventoryAccessPayload(v,expected){
  return {requestKey:id(v.requestKey),expectedVersion:version(expected),reason:v.reason.trim(),grants:grants(v.grants).sort((a,b)=>(a.storeId??'public').localeCompare(b.storeId??'public','en'))};
 }
 function snapshot(v){if(!object(v)||typeof v.username!=='string'||typeof v.active!=='boolean')throw new ContractError('库存授权资料不完整。');return {id:id(v.id),username:v.username,active:v.active,version:version(v.version),grants:grants(v.grants,true)};}
-export function inventoryAccessState(v,owner){const out=snapshot(v);if(out.id!==owner||v.quantityOperationsAvailable!==false)throw new ContractError('库存授权状态不匹配。');return {...out,quantityOperationsAvailable:false};}
-export function inventoryAccessMine(v){if(!object(v)||typeof v.canManageAll!=='boolean'||v.quantityOperationsAvailable!==false)throw new ContractError('库存授权状态不完整。');return {canManageAll:v.canManageAll,grants:grants(v.grants,true),quantityOperationsAvailable:false};}
+export function inventoryAccessState(v,owner){const out=snapshot(v);if(out.id!==owner||typeof v.quantityOperationsAvailable!=='boolean')throw new ContractError('库存授权状态不匹配。');return {...out,quantityOperationsAvailable:v.quantityOperationsAvailable};}
+export function inventoryAccessMine(v){if(!object(v)||typeof v.canManageAll!=='boolean'||typeof v.quantityOperationsAvailable!=='boolean')throw new ContractError('库存授权状态不完整。');return {canManageAll:v.canManageAll,grants:grants(v.grants,true),quantityOperationsAvailable:v.quantityOperationsAvailable};}
 export function inventoryAccessResult(v,owner){if(!object(v)||v.id!==owner)throw new ContractError('库存授权回执不匹配。');return {id:id(v.id),version:version(v.version),eventId:id(v.eventId)};}
 export function inventoryAccessHistory(v,owner){
  if(!object(v)||!Array.isArray(v.rows)||!Number.isSafeInteger(v.total)||v.total<0||!Number.isSafeInteger(v.offset)||v.offset<0||v.limit!==50||v.rows.length>50)throw new ContractError('库存授权记录不完整。');

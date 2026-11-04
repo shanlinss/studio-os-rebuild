@@ -28,12 +28,51 @@ export function createWarehouseViews({api,h,heading,showPanel,localTime,writable
  async function reference(id,movement){
   await showPanel('原库存流水',async signal=>{const r=await api.warehouseMovement(id,movement,signal);return `<div class="dialog-header"><h2>${h(movementLabels[r.type])} · ${h(r.itemSnapshot.name)}</h2><button class="icon-button" data-warehouse-close aria-label="关闭库存详情">×</button></div><p>${h(r.itemSnapshot.itemCode)} · ${r.beforeQuantity===null?'未登记':r.beforeQuantity} → ${r.afterQuantity} ${h(r.itemSnapshot.unit)}</p><p>${h(r.actor)} · ${h(localTime(r.createdAt))}</p><p class="preserve-text">${h(r.reason)}</p><p>${h(r.sourceReference||'')}</p><button class="secondary" data-warehouse-detail="${h(id)}">回到库存详情</button>`;});
  }
+ async function refreshScoped(){
+  const container=$('#scoped-stock-results');
+  if(!container||parent?.aborted)return;
+  request?.abort();request=new AbortController();
+  const signal=AbortSignal.any([parent,request.signal]);
+  container.textContent='正在读取包材库存…';
+  try{
+   const data=await api.scopedWarehouseCatalog({q:$('#scoped-stock-query').value,offset},signal);
+   if(signal.aborted)return;
+   container.innerHTML=data.rows.map(b=>`<article class="sample-record"><div><b>${h(b.name)}</b><p>${h(b.itemCode)} · ${h(b.storeName||'公共库存')} · ${h(b.quantity)} ${h(b.unit)}</p><p>${b.canMove?'可登记出入库':'仅查看'}</p></div><button class="secondary" data-scoped-stock-detail="${h(b.id)}">查看库存</button></article>`).join('')||'<p class="muted">当前授权范围内暂无符合条件的包材。</p>';
+   $('#scoped-stock-prev').disabled=offset===0;$('#scoped-stock-next').disabled=offset+data.limit>=data.total;
+   $('#scoped-stock-total').textContent=data.total+' 条归属余额';
+  }catch(e){if(!signal.aborted)container.textContent=e.message;}
+ }
+ async function scopedDetail(id,offset=0){
+  await showPanel('包材库存',async signal=>{
+   const {balance:b,rows,total,limit}=await api.scopedWarehouseDetail(id,offset,signal);
+   const actions=writable&&b.canMove?['inbound','outbound'].map(type=>`<button class="secondary" data-scoped-warehouse-move="${type}" data-balance-id="${h(b.id)}">登记${h(movementLabels[type])}</button>`).join(''):'';
+   return `<div class="dialog-header"><h2>${h(b.name)}</h2><button class="icon-button" data-warehouse-close aria-label="关闭库存详情">×</button></div>
+    <p>${h(b.itemCode)} · ${h(b.storeName||'公共库存')} · ${h(b.specification||'无规格说明')}</p><p>当前库存 ${h(b.quantity)} ${h(b.unit)} · ${h(b.location)}</p>
+    <div class="action-row">${actions}</div><h3>此归属的数量流水</h3>
+    ${rows.map(r=>`<p>${h(movementLabels[r.type])} · ${r.beforeQuantity===null?'未登记':h(r.beforeQuantity)} → ${h(r.afterQuantity)} ${h(b.unit)} · ${h(localTime(r.createdAt))}</p>`).join('')||'<p class="muted">暂无流水。</p>'}
+    <div class="pager"><button class="secondary" data-scoped-stock-detail="${h(id)}" data-stock-offset="${Math.max(0,offset-limit)}" ${offset===0?'disabled':''}>上一页</button><span>${total} 条流水</span><button class="secondary" data-scoped-stock-detail="${h(id)}" data-stock-offset="${offset+limit}" ${offset+limit>=total?'disabled':''}>下一页</button></div>`;
+  });
+ }
+ async function renderScoped(signal){
+  $('#main').innerHTML=heading('包材库存','查看获授权的公共库存和店铺库存。')+`<section class="work-panel module-panel">
+   <div class="module-toolbar"><label class="module-search">查找包材<input id="scoped-stock-query" type="search" maxlength="100" placeholder="名称、编码、规格或店铺"></label></div>
+   <div id="scoped-stock-results"></div><div class="pager"><button class="secondary" id="scoped-stock-prev" disabled>上一页</button><span id="scoped-stock-total"></span><button class="secondary" id="scoped-stock-next" disabled>下一页</button></div></section>`;
+  $('#scoped-stock-query').oninput=()=>{offset=0;clearTimeout(timer);timer=setTimeout(refreshScoped,250);};
+  $('#scoped-stock-prev').onclick=()=>{offset=Math.max(0,offset-50);refreshScoped();};
+  $('#scoped-stock-next').onclick=()=>{offset+=50;refreshScoped();};
+  signal.addEventListener('abort',()=>{clearTimeout(timer);request?.abort();},{once:true});
+  await refreshScoped();
+ }
  document.addEventListener('click',e=>{
   const close=e.target.closest('[data-warehouse-close]'),record=e.target.closest('button[data-warehouse-detail]'),history=e.target.closest('button[data-warehouse-history]'),original=e.target.closest('button[data-warehouse-reference]');
+  const scoped=e.target.closest('button[data-scoped-stock-detail]');
+  if(scoped)scopedDetail(scoped.dataset.scopedStockDetail,Number(scoped.dataset.stockOffset||0));
   if(original)reference(original.dataset.warehouseId,original.dataset.warehouseReference);if(close)$('#cloud-detail').close();if(record)detail(record.dataset.warehouseDetail);if(history)detail(history.dataset.warehouseHistory,{events:history.dataset.historyEvents==='true',transfers:history.dataset.historyTransfers==='true',historyOffset:Number(history.dataset.historyOffset||0)});
  });
- return {refresh,detail,async render(signal){
-  parent=signal;offset=0;$('#main').innerHTML=heading('仓库管理','按实际数量登记产品和包材库存，每次变动保留流水。')+`<section class="work-panel module-panel"><div class="module-toolbar"><label class="module-search">查找库存<input id="warehouse-search" type="search" maxlength="100" placeholder="编码、名称、产品、规格或位置"></label><label>类型<select id="warehouse-kind"><option value="all">全部类型</option><option value="product">产品库存</option><option value="packaging">包材库存</option></select></label><label>范围<select id="warehouse-active"><option value="active">启用项目</option><option value="all">全部项目</option><option value="inactive">停用项目</option></select></label>${canWrite()?'<button class="primary" data-warehouse-action="register">＋ 新建库存项目</button>':''}</div><p class="muted">下方汇总覆盖当前筛选的全部项目，按类型与单位分别统计已登记数量；待登记期初不等于零库存。</p><div id="warehouse-summary" class="warehouse-summary"></div><div id="warehouse-results"></div><div class="pager"><button class="secondary" id="warehouse-prev">上一页</button><span id="warehouse-caption"></span><button class="secondary" id="warehouse-next">下一页</button></div><div class="module-foot">件／个单位的产品支持转为拍摄样品；转出后在原样品档案中借用与归还。订单和采购支出暂不自动关联。</div></section>`;
+ return {refresh,detail,refreshScoped,scopedDetail,async render(signal){
+  parent=signal;offset=0;
+  if(!hasSensitive(getUser(),'resources')&&getUser()?.scopedPackaging)return renderScoped(signal);
+  $('#main').innerHTML=heading('仓库管理','按实际数量登记产品和包材库存，每次变动保留流水。')+`<section class="work-panel module-panel"><div class="module-toolbar"><label class="module-search">查找库存<input id="warehouse-search" type="search" maxlength="100" placeholder="编码、名称、产品、规格或位置"></label><label>类型<select id="warehouse-kind"><option value="all">全部类型</option><option value="product">产品库存</option><option value="packaging">包材库存</option></select></label><label>范围<select id="warehouse-active"><option value="active">启用项目</option><option value="all">全部项目</option><option value="inactive">停用项目</option></select></label>${canWrite()?'<button class="primary" data-warehouse-action="register">＋ 新建库存项目</button>':''}</div><p class="muted">下方汇总覆盖当前筛选的全部项目，按类型与单位分别统计已登记数量；待登记期初不等于零库存。</p><div id="warehouse-summary" class="warehouse-summary"></div><div id="warehouse-results"></div><div class="pager"><button class="secondary" id="warehouse-prev">上一页</button><span id="warehouse-caption"></span><button class="secondary" id="warehouse-next">下一页</button></div><div class="module-foot">件／个单位的产品支持转为拍摄样品；转出后在原样品档案中借用与归还。订单和采购支出暂不自动关联。</div></section>`;
   $('#warehouse-search').oninput=()=>{offset=0;clearTimeout(timer);timer=setTimeout(refresh,250);};$('#warehouse-kind').onchange=()=>{offset=0;refresh();};$('#warehouse-active').onchange=()=>{offset=0;refresh();};$('#warehouse-prev').onclick=()=>{offset=Math.max(0,offset-50);refresh();};$('#warehouse-next').onclick=()=>{offset+=50;refresh();};signal.addEventListener('abort',()=>{clearTimeout(timer);request?.abort();},{once:true});await refresh();
  }};
 }
