@@ -53,6 +53,11 @@ export async function checkReadiness(
     await tx`SELECT publication_id,asset_id,actor_id,action FROM publication_asset_events LIMIT 0`;
     await tx`SELECT plan_id,actor_id,request_key,request_hash,result FROM snapshot_imports LIMIT 0`;
     await tx`SELECT id,name,store_id,active,version FROM products LIMIT 0`;
+    await tx`SELECT product_id,code,version FROM commercial_products LIMIT 0`;
+    await tx`SELECT id,product_id,code,specification,unit,active,warehouse_item_id FROM product_skus LIMIT 0`;
+    await tx`SELECT sku_id,store_id,platform_product_id,platform_sku_id,listing_url,active FROM product_sku_stores LIMIT 0`;
+    await tx`SELECT product_id,actor_id,reason,before_value,after_value FROM commercial_product_events LIMIT 0`;
+    await tx`SELECT actor_id,request_key,product_id,request_hash,result FROM commercial_product_receipts LIMIT 0`;
     await tx`SELECT product_id,id,name,position FROM product_stages LIMIT 0`;
     await tx`SELECT product_id,name,mime,content FROM product_images LIMIT 0`;
     await tx`SELECT product_id,decision,reason FROM product_reviews LIMIT 0`;

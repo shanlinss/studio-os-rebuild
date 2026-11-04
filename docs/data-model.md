@@ -119,3 +119,10 @@ id、variant、observedAt（北京时间）、window、url、note、metrics（na
 ## 手机卡充值、余额与日期提醒（2026-11-03）
 
 055新增phone_card_recharges不可改写根、phone_card_recharge_versions追加金额/来源/状态/经办/付款/归属历史、phone_card_balances独立查询时点版本、phone_card_reminder_versions独立公开日期配置及phone_card_operation_receipts私人操作回执。经办人保留成员或原账号ID，录入者另存；原始卡号/号码快照在充值后续版本不变。复用原卡片行锁与原expense_id及其版本，读写financial需resources+finance，公开提醒仅resources且不查金额/实名。无平行账本/原始余额累计值。
+
+
+## 正式商品与 SKU（062）
+
+原 products 继续作为测试、拍摄、素材及库存引用的产品身份。管理员手动登记 commercial_products 后才具有正式商品编号，原有产品不自动转为正式商品。product_skus 对应具体规格及基础单位，编号固定，可明确绑定同一原产品的一条既有 warehouse_items，绑定后规格、单位及库存关联保持固定。旧库存不会自动生成 SKU，绑定不会写入数量流水。
+
+product_sku_stores 以 SKU 和店铺对应店铺商品 ID、店铺 SKU ID 和商品链接。每个 SKU 在每家店铺维护一条映射，同一店铺的商品与 SKU 标识组合只对应一个内部 SKU。停用以状态保存。正式商品、SKU 和映射共用资料版本、不可改写的快照历史和私人请求回执，资源授权管理员维护。

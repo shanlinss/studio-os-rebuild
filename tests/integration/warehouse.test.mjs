@@ -305,3 +305,69 @@ test('reorder alerts use each active balance, refresh with stock, and preserve t
  await api.saveWarehouseReorderThreshold(item.id,shop.id,{requestKey:randomUUID(),threshold:null,reason:'取消店铺提醒'},2);
  assert.deepEqual(await alerts(),[]);
 });
+
+test('formal products and SKU mappings preserve original identities, stock and scoped permissions',async()=>{
+ const api=clients[0],original=await api.createProduct({name:'正式商品原产品',storeId:null,notes:'原测试说明',stages:['内容测试']});
+ const stock=await api.warehouseWrite('register',undefined,{requestKey:randomUUID(),itemCode:'COMM-STOCK',kind:'product',productId:original.id,name:'原产品库存',specification:'黑色',unit:'件',location:'工作室',notes:''});
+ const initial=await api.commercialProduct(original.id);
+ assert.equal(initial.formal,null);
+ assert.equal(initial.stock[0].id,stock.id);
+ assert.equal((await request(sessions[1],'/commercial-products/'+original.id)).status,403);
+ const formal={requestKey:randomUUID(),code:'PRODUCT-001',reason:'通过测试后登记'};
+ const registered=await api.saveCommercialProduct(original.id,'formal',formal,0);
+ assert.deepEqual(await api.saveCommercialProduct(original.id,'formal',formal,0),registered);
+ assert.deepEqual(await api.commercialProductReceipt(original.id,formal.requestKey,'formal'),registered);
+ assert.equal((await api.product(original.id)).version,1);
+ assert.equal((await api.product(original.id)).stages[0].name,'内容测试');
+ const sku={requestKey:randomUUID(),id:null,code:'SKU-BLACK',specification:'黑色',unit:'件',active:true,warehouseItemId:stock.id,reason:'登记规格并关联原库存'};
+ await api.saveCommercialProduct(original.id,'sku',sku,1);
+ const state=await api.commercialProduct(original.id),id=state.formal.skus[0].id;
+ assert.equal(state.formal.skus[0].warehouseItemId,stock.id);
+ assert.equal((await api.warehouseItem(stock.id)).quantity,null);
+ await assert.rejects(api.saveCommercialProduct(original.id,'sku',{...sku,requestKey:randomUUID(),code:'SKU-OTHER'},2),e=>e.status===409);
+ await assert.rejects(api.saveCommercialProduct(original.id,'sku',{...sku,id,requestKey:randomUUID(),code:'SKU-RENAMED'},2),e=>e.status===409);
+ const inventory=await api.warehouseItem(stock.id);
+ await assert.rejects(api.warehouseWrite('edit',stock.id,{requestKey:randomUUID(),...metadata(inventory),specification:'白色'},inventory.version),e=>e.status===409);
+ const store=await api.saveDirectory('store',undefined,{name:'正式商品店铺'});
+ const mapping={requestKey:randomUUID(),skuId:id,storeId:store.id,platformProductId:'XHS-P001',platformSkuId:'XHS-S001',listingUrl:'https://example.com/listing',active:true,reason:'核对店铺商品标识'};
+ await api.saveCommercialProduct(original.id,'mapping',mapping,2);
+ const linked=await api.commercialProduct(original.id);
+ assert.equal(linked.formal.mappings[0].storeId,store.id);
+ assert.equal(linked.formal.mappings[0].skuId,id);
+ const second={...sku,requestKey:randomUUID(),code:'SKU-WHITE',specification:'白色',warehouseItemId:null};
+ await api.saveCommercialProduct(original.id,'sku',second,3);
+ const secondId=(await api.commercialProduct(original.id)).formal.skus.find(s=>s.code==='SKU-WHITE').id;
+ await assert.rejects(api.saveCommercialProduct(original.id,'mapping',{...mapping,requestKey:randomUUID(),skuId:secondId},4),e=>e.status===409);
+ const before=(await api.commercialProductHistory(original.id)).rows[1];
+ await db.client`UPDATE studio_os.stores SET name='店铺新名称',active=false WHERE id=${store.id}`;
+ await assert.rejects(api.saveCommercialProduct(original.id,'mapping',{...mapping,requestKey:randomUUID()},4),e=>e.status===409);
+ await api.saveCommercialProduct(original.id,'mapping',{...mapping,requestKey:randomUUID(),active:false},4);
+ assert.deepEqual((await api.commercialProductHistory(original.id)).rows.find(e=>e.id===before.id),before);
+ assert.equal((await api.commercialProduct(original.id)).formal.mappings[0].active,false);
+ assert.equal((await api.warehouseItem(stock.id)).id,stock.id);
+ assert.equal((await api.product(original.id)).id,original.id);
+});
+
+test('concurrent SKU edits share one version and audit failures roll back SKU registration',async()=>{
+ const api=clients[0],product=await api.createProduct({name:'SKU 并发验证',storeId:null,notes:'',stages:['测试']});
+ await api.saveCommercialProduct(product.id,'formal',{requestKey:randomUUID(),code:'COMM-CONCURRENT',reason:'手动登记'},0);
+ const value={id:null,specification:'标准',unit:'件',active:true,warehouseItemId:null,reason:'登记规格',expectedVersion:1};
+ const replies=await Promise.all([0,0].map((actor,i)=>request(sessions[actor],'/commercial-products/'+product.id+'/sku','POST',{
+  ...value,requestKey:randomUUID(),code:'CONCURRENT-SKU-'+i
+ })));
+ assert.deepEqual(replies.map(r=>r.status).sort(),[201,409]);
+ assert.equal((await api.commercialProduct(product.id)).formal.skus.length,1);
+ await db.client.unsafe(`CREATE FUNCTION studio_os.fail_commercial_audit() RETURNS trigger LANGUAGE plpgsql AS $$
+  BEGIN RAISE EXCEPTION 'test audit rollback'; END; $$;
+  CREATE TRIGGER fail_commercial_audit BEFORE INSERT ON studio_os.commercial_product_events FOR EACH ROW EXECUTE FUNCTION studio_os.fail_commercial_audit();`);
+ try{
+  const response=await request(sessions[0],'/commercial-products/'+product.id+'/sku','POST',{
+   ...value,expectedVersion:2,requestKey:randomUUID(),code:'SKU-ROLLBACK'
+  });
+  assert.equal(response.status,500);
+  const state=await api.commercialProduct(product.id);
+  assert.equal(state.formal.version,2);
+  assert.equal(state.formal.skus.length,1);
+  assert.equal((await api.commercialProductHistory(product.id)).total,2);
+ }finally{await db.client.unsafe('DROP TRIGGER fail_commercial_audit ON studio_os.commercial_product_events; DROP FUNCTION studio_os.fail_commercial_audit()');}
+});

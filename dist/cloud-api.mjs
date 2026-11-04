@@ -1,3 +1,4 @@
+import {commercialState,commercialPayload,commercialHistory} from './commercial-products-contract.mjs';
 import {financeState,rechargeRecord,rechargePage,rechargeHistory,balancePage,reminderState,reminderHistory,reminderPage,rechargePayload,voidPayload,balancePayload,reminderPayload,operationPath,operationAction,operationResult} from './phone-card-finance-contract.mjs';
 import {phoneCard,phoneCardPage,phoneCardHistory,phoneCardIdentity,phoneCardOptions,phoneCardPayload,phoneCardIdentityPayload,phoneCardResult} from './phone-cards-contract.mjs';
 import {handoverState,handoverPayload,handoverPage} from './equipment-assets-contract.mjs';
@@ -146,6 +147,14 @@ export function createCloudApi(fetcher=globalThis.fetch,{allowWrites=false}={}){
     async todos(signal){return read('/api/workbench/todos',signal,v=>list(v).map(todoModel));},
     async finance(signal){return read('/api/finance',signal,financeRecord);},
     async competitors(signal){return namedList(await get('/api/competitors',signal));},
+    async commercialProduct(id,signal){return read('/api/commercial-products/'+endpointId(id),signal,v=>commercialState(v,id));},
+    async commercialProductHistory(id,offset=0,signal){return read('/api/commercial-products/'+endpointId(id)+'/history?offset='+offset,signal,v=>commercialHistory(v,id));},
+    async saveCommercialProduct(id,action,value,version){return mutations.send('/api/commercial-products/'+endpointId(id)+'/'+action,'POST',commercialPayload(action,value,version));},
+    async commercialProductReceipt(id,key,action){
+      const path='/api/commercial-products/'+endpointId(id)+'/'+action;
+      try{const result=await get('/api/commercial-products/'+endpointId(id)+'/receipts/'+endpointId(key));if(result?.id!==id||!Number.isSafeInteger(result.version))throw new ContractError();mutations.confirmRead(path);return result;}
+      catch(e){if(e.status===404){mutations.confirmRead(path);return null;}throw e;}
+    },
     async warehouseReorderAlerts(offset=0,signal){return read('/api/warehouse/reorder-alerts?offset='+offset,signal,reorderAlerts);},
     async saveWarehouseReorderThreshold(id,balance,value,version){
       return mutations.send(warehousePath('reorder-threshold',id,balance),'POST',reorderThresholdPayload(value,version));

@@ -58,6 +58,7 @@ import { PublicationAssets } from './publication-assets';
 import { SnapshotImports } from './snapshot-imports';
 import { Shooting } from './shooting';
 import { ProductObservations } from './product-observations';
+import {CommercialProducts} from './commercial-products';
 import { Products } from './products';
 import { Workbench } from './workbench';
 import { Announcements } from './announcements';
@@ -102,6 +103,7 @@ export async function createStudioApp(
   const publicationAssets = new PublicationAssets(database);
   const snapshotImports = new SnapshotImports(database);
   const products = new Products(database);
+  const commercialProducts=new CommercialProducts(database);
   const shooting = new Shooting(database);
   const productObservations = new ProductObservations(database);
   const workbench = new Workbench(database);
@@ -1588,6 +1590,14 @@ export async function createStudioApp(
     productsList(@Req() r: AuthRequest) {
       return products.list(r.identity!);
     }
+    @Get('commercial-products/:id')
+    commercialProduct(@Req() r:AuthRequest,@Param('id') id:string){return commercialProducts.state(r.identity!,id);}
+    @Get('commercial-products/:id/history')
+    commercialProductHistory(@Req() r:AuthRequest,@Param('id') id:string){return commercialProducts.history(r.identity!,id,r.query);}
+    @Get('commercial-products/:id/receipts/:key')
+    commercialProductReceipt(@Req() r:AuthRequest,@Param('id') id:string,@Param('key') key:string){return commercialProducts.receipt(r.identity!,id,key);}
+    @Post('commercial-products/:id/:action')
+    commercialProductSave(@Req() r:AuthRequest,@Param('id') id:string,@Param('action') action:string,@Body() b:unknown){return commercialProducts.save(r.identity!,id,action,b);}
     @Get('products/:id')
     productDetail(@Req() r: AuthRequest, @Param('id') id: string) {
       return products.detail(r.identity!, id);
@@ -1791,6 +1801,12 @@ export async function createStudioApp(
         requirePermission(req.identity,'resources');
         const route=req.path.slice('/api/phone-cards'.length),allowed=(req.method==='GET'&&/^(|\/options|\/receipts\/[^/]+|\/[^/]+(?:\/(?:history|identity))?)$/.test(route))||(req.method==='POST'&&/^(|\/[^/]+\/identity)$/.test(route))||(req.method==='PATCH'&&/^\/[^/]+$/.test(route));
         if(!allowed)throw new ForbiddenException();if(route.endsWith('/identity'))requirePermission(req.identity,'resource_identity');if(req.method!=='GET')auth.csrf(req);return true;
+      }
+      if(req.path.startsWith('/api/commercial-products/')){
+        requirePermission(req.identity,'resources');
+        if(req.method==='GET'&&/^\/api\/commercial-products\/[^/]+(?:\/(?:history|receipts\/[^/]+))?$/.test(req.path))return true;
+        if(req.method==='POST'&&/^\/api\/commercial-products\/[^/]+\/(?:formal|sku|mapping)$/.test(req.path)){auth.csrf(req);return true;}
+        throw new ForbiddenException();
       }
       if(req.path==='/api/packaging-consumptions'||req.path.startsWith('/api/packaging-consumptions/')){
         requireContributor(req.identity);

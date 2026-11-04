@@ -1,3 +1,4 @@
+import {hasSensitive} from './admin-permissions.mjs';
 import {attachmentList} from './attachments.mjs';
 import {shootingActions} from './shooting-contract.mjs';
 import {shootingLabels} from './shooting-editors.mjs';
@@ -14,11 +15,11 @@ export function createBusinessViews({api,h,heading,showPanel,source,localTime,wr
  const pageHeader=(title,desc)=>heading(title,desc);
  const keyValues=(pairs)=>`<dl class="record-facts">${pairs.map(([label,value])=>`<div><dt>${h(label)}</dt><dd>${h(value??'未填写')}</dd></div>`).join('')}</dl>`;
  const taskLink=t=>`<button class="linked-record" data-live-task="${h(t.id)}"><span><b>${h(t.title)}</b><small>${h(t.assignee||'未提供负责人')} · ${h(t.accountName||'无需账号')}</small></span><span>${h(taskProgress(t))} →</span></button>`;
- let currentWeek=chinaDate(),canEditProducts=false;
+ let currentWeek=chinaDate(),canEditProducts=false,canMaintainCommerce=false;
  async function productDetail(id){
   await showPanel('产品资料',async signal=>{
    const p=await api.product(id,signal);
-   return detailHead(p.name)+`<div class="detail-meta">${badge(p.active?'在用':'已停用',p.active?'green':'')}<span>${h(p.storeName||'未关联店铺')}</span></div><div class="action-row">${canEditProducts?`<button class="secondary" data-edit-product="${h(p.id)}">编辑产品</button>`:disabled('编辑产品')}${disabled('安排内容测试')}</div><div class="detail-content"><h3>产品说明</h3><p class="preserve-text">${h(p.notes||'还没有产品说明。')}</p><h3>工作阶段</h3><div class="stage-track">${p.stages.map((s,i)=>`<span><i>${i+1}</i>${h(s.name)}</span>`).join('')||'<span class="muted">暂无阶段</span>'}</div><h3>相关执行事项 · ${p.tasks.length}</h3>${p.tasks.map(taskLink).join('')||blank('还没有执行安排','后续在测品或内容安排中引用这份产品档案。')}<h3>产品复盘</h3>${p.reviews.map(r=>`<article class="observation"><b>${h(r.decision)}</b><p class="preserve-text">${h(r.reason||'暂无说明')}</p><small class="muted">${h(localTime(r.createdAt))}</small></article>`).join('')||'<p class="muted">暂无产品复盘记录。</p>'}</div>`;
+   return detailHead(p.name)+`<div class="detail-meta">${badge(p.active?'在用':'已停用',p.active?'green':'')}<span>${h(p.storeName||'未关联店铺')}</span></div><div class="action-row">${canEditProducts?`<button class="secondary" data-edit-product="${h(p.id)}">编辑产品</button>`:disabled('编辑产品')}${disabled('安排内容测试')}${canMaintainCommerce?`<button class="secondary" data-commercial-product="${h(p.id)}">正式商品与 SKU</button>`:''}</div><div class="detail-content"><h3>产品说明</h3><p class="preserve-text">${h(p.notes||'还没有产品说明。')}</p><h3>工作阶段</h3><div class="stage-track">${p.stages.map((s,i)=>`<span><i>${i+1}</i>${h(s.name)}</span>`).join('')||'<span class="muted">暂无阶段</span>'}</div><h3>相关执行事项 · ${p.tasks.length}</h3>${p.tasks.map(taskLink).join('')||blank('还没有执行安排','后续在测品或内容安排中引用这份产品档案。')}<h3>产品复盘</h3>${p.reviews.map(r=>`<article class="observation"><b>${h(r.decision)}</b><p class="preserve-text">${h(r.reason||'暂无说明')}</p><small class="muted">${h(localTime(r.createdAt))}</small></article>`).join('')||'<p class="muted">暂无产品复盘记录。</p>'}</div>`;
   });
  }
  async function shootingDetail(id){
@@ -58,6 +59,7 @@ export function createBusinessViews({api,h,heading,showPanel,source,localTime,wr
   const render=()=>{const q=$('#product-test-query').value.trim().toLowerCase(),product=$('#product-test-product').value;const visible=rows.filter(t=>(product==='all'||t.productId===product)&&[t.title,t.productName,t.accountName,t.assignee].join(' ').toLowerCase().includes(q));$('#product-test-list').innerHTML=visible.map(t=>`<article class="product-test-row"><div><span class="type-tag">${h(t.stageName||'测试执行')}</span><button class="table-title" data-live-task="${h(t.id)}">${h(t.title)}</button><p class="muted">${h(t.productName||'产品未提供')} · ${h(t.accountName||'无需账号')} · ${h(t.assignee||'负责人未提供')}</p></div><div>${t.productId?`<button class="text-button" data-product-detail="${h(t.productId)}">产品档案 →</button>`:''}<p class="muted">${h(taskProgress(t))}</p></div></article>`).join('')||blank('暂无符合条件的测品事项','产品档案与测试执行保持分开，后续安排会进入同一队列。');};$('#product-test-query').oninput=render;$('#product-test-product').onchange=render;render();
  }
  return {shootingDetail,async render(page,signal,user){
+  canMaintainCommerce=hasSensitive(user,'resources');
   canEditProducts=writable&&user.role==='admin';
   if(page==='products'){const rows=await api.products(signal);if(!signal.aborted)catalog(rows);}
   if(page==='shooting'){const rows=await api.shooting(signal);if(!signal.aborted)shooting(rows);}

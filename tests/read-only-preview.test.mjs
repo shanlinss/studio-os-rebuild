@@ -62,7 +62,7 @@ test('warehouse preview forwards only scoped reads and keeps journal edits and r
  assert.equal((await request(port,'/api/warehouse/receipts/'+id)).status,404);assert.equal((await request(port,'/api/warehouse/items?target=elsewhere')).status,400);assert.equal((await request(port,'/api/warehouse/items/'+id+'/movements/not-an-id')).status,404);assert.equal(seen.length,count);
  assert.equal((await request(port,'/api/warehouse/items/'+id+'/to-samples',{method:'POST'})).status,405);
  assert.equal((await request(port,'/api/warehouse/items/'+id+'/transfers?sampleId='+id)).status,400);assert.equal((await request(port,'/api/samples/catalog/'+id+'/transfers?owner=other')).status,400);assert.equal(seen.length,count);
- for(const path of ['/warehouse-view.mjs','/warehouse-editors.mjs','/warehouse-contract.mjs','/warehouse-transfer-editors.mjs'])assert.equal((await request(port,path)).status,200);
+ for(const path of ['/warehouse-view.mjs','/warehouse-editors.mjs','/warehouse-contract.mjs','/warehouse-transfer-editors.mjs','/commercial-products-contract.mjs','/commercial-products-editors.mjs','/commercial-products-view.mjs'])assert.equal((await request(port,path)).status,200);
  }finally{await close(preview);await close(upstream);}
 });
 test('attendance review preview exposes only scoped records and history while refusing review writes and private receipts',async()=>{
