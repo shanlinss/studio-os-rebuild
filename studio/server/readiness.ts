@@ -56,6 +56,11 @@ export async function checkReadiness(
     await tx`SELECT product_id,code,version FROM commercial_products LIMIT 0`;
     await tx`SELECT id,product_id,code,specification,unit,active,warehouse_item_id FROM product_skus LIMIT 0`;
     await tx`SELECT id,operation,business_date,source_reference,reason,actor_id,source_shipment_id,resellable_confirmed FROM product_stock_documents LIMIT 0`;
+    await tx`SELECT id,inbound_document_id,code FROM product_purchase_batches LIMIT 0`;
+    await tx`SELECT id,batch_id,version,purchase_date,supplier,goods_cents,additional_cents,total_cents,expense_id,expense_snapshot,reason,actor_id,actor_name FROM product_purchase_versions LIMIT 0`;
+    await tx`SELECT version_id,movement_id,quantity,unit_cents,goods_cents,additional_cents,total_cents,item_snapshot FROM product_purchase_lines LIMIT 0`;
+    await tx`SELECT expense_id,batch_id FROM product_purchase_expenses LIMIT 0`;
+    await tx`SELECT actor_id,request_key,inbound_document_id,request_hash,result FROM product_purchase_receipts LIMIT 0`;
     await tx`SELECT return_movement_id,shipment_movement_id FROM product_stock_returns LIMIT 0`;
     await tx`SELECT sku_id,store_id,platform_product_id,platform_sku_id,listing_url,active FROM product_sku_stores LIMIT 0`;
     await tx`SELECT product_id,actor_id,reason,before_value,after_value FROM commercial_product_events LIMIT 0`;

@@ -1,3 +1,4 @@
+import {ProductPurchases} from '../../.build/server/product-purchases.js';
 import test,{before,after} from 'node:test';
 import assert from 'node:assert/strict';
 import {randomBytes,randomUUID} from 'node:crypto';
@@ -534,4 +535,58 @@ test('resellable returns retain shipment provenance and cannot exceed the shippe
  assert.equal((await post({...value,requestKey:randomUUID()})).status,403);
  await assert.rejects(employee.api.productStockReceipt(value.requestKey,shipment.id),e=>e.status===403);
  assert.equal((await admin.productStockDocument(returned.id)).sourceShipmentId,shipment.id);
+});
+
+test('purchase cost versions use original inbound quantities and protect prices without receiving stock twice',async()=>{
+ const api=clients[0],store=await api.saveDirectory('store',undefined,{name:'采购成本店铺'}),product=await api.createProduct({name:'采购成本原商品',storeId:null,notes:'',stages:['测试']});
+ await api.saveCommercialProduct(product.id,'formal',{requestKey:randomUUID(),code:'PURCHASE-COST-PRODUCT',reason:'登记'},0);
+ const inventory=[];
+ for(const [i,specification] of ['蓝色','红色'].entries()){
+  const item=await api.warehouseWrite('register',undefined,{requestKey:randomUUID(),itemCode:'PURCHASE-STOCK-'+i,kind:'product',productId:product.id,name:'成本商品 '+specification,specification,unit:'件',location:'工作室',notes:''});
+  await api.saveCommercialProduct(product.id,'sku',{requestKey:randomUUID(),id:null,code:'PURCHASE-SKU-'+i,specification,unit:'件',active:true,warehouseItemId:item.id,reason:'关联原库存'},i+1);
+  await api.warehouseWrite('allocate-product',item.id,{requestKey:randomUUID(),reason:'核对期初',allocations:[{storeId:i?store.id:null,quantity:0}]},1);
+  inventory.push({id:item.id,balance:(await api.warehouseItem(item.id)).balances[0]});
+ }
+ const incoming=await api.saveProductStockDocument({requestKey:randomUUID(),operation:'inbound',businessDate:'2020-03-01',sourceReference:'采购到货记录',reason:'实际收货',lines:inventory.map((row,i)=>({balanceId:row.balance.id,expectedVersion:1,quantity:i?2:3,businessStoreId:i?store.id:null}))});
+ const document=await api.productStockDocument(incoming.id),snapshot=await Promise.all(inventory.map(row=>api.warehouseItem(row.id)));
+ const category=await api.createExpenseCategory('原商品采购款'),expenseBody={expenseDate:'2020-02-29',description:'原商品采购支付',amount:'8.00',paymentMode:'company',payerId:null,storeId:null,categoryId:category.id,note:'原支付记录'};
+ const expense=await api.saveExpense(undefined,{...expenseBody,requestKey:randomUUID()}),ledgerCount=(await api.finance()).records.length;
+ const body={requestKey:randomUUID(),expectedVersion:0,code:'PURCHASE-COST-BATCH',purchaseDate:'2020-02-29',supplier:'采购供应商',expenseId:expense.id,expenseVersion:1,reason:'按采购票据核对',lines:document.lines.map(line=>({movementId:line.id,unitPrice:line.quantity===3?'1.25':'2.00',additionalAmount:line.quantity===3?'0.02':'0.03'}))};
+ const path='/product-purchases/'+incoming.id;
+ assert.equal((await request(sessions[1],path)).status,403);
+ await assert.rejects(new ProductPurchases(db).state(sessions[2].user,incoming.id),e=>e.status===403);
+ await db.client.unsafe(`CREATE FUNCTION studio_os.fail_product_purchase_receipt() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN RAISE EXCEPTION 'test purchase rollback'; END; $$;
+  CREATE TRIGGER fail_product_purchase_receipt BEFORE INSERT ON studio_os.product_purchase_receipts FOR EACH ROW EXECUTE FUNCTION studio_os.fail_product_purchase_receipt();`);
+ try{
+  assert.equal((await request(sessions[0],path,'POST',body)).status,500);
+  assert.equal((await api.productPurchase(incoming.id)).batch,null);
+  assert.deepEqual(await Promise.all(inventory.map(row=>api.warehouseItem(row.id))),snapshot);
+ }finally{await db.client.unsafe('DROP TRIGGER fail_product_purchase_receipt ON studio_os.product_purchase_receipts; DROP FUNCTION studio_os.fail_product_purchase_receipt()');}
+ const saved=await api.saveProductPurchase(incoming.id,body);
+ assert.deepEqual(await api.saveProductPurchase(incoming.id,body),saved);
+ assert.deepEqual(await api.productPurchaseReceipt(incoming.id,body.requestKey),saved);
+ const state=await api.productPurchase(incoming.id),frozen=(await api.productPurchaseHistory(incoming.id)).rows[0];
+ assert.equal(state.record.goodsCents,775);assert.equal(state.record.additionalCents,5);assert.equal(state.record.totalCents,780);
+ assert.equal(state.record.expenseSnapshot.amountCents,800);
+ assert.deepEqual(await Promise.all(inventory.map(row=>api.warehouseItem(row.id))),snapshot);
+ assert.equal((await api.finance()).records.length,ledgerCount);
+ assert.doesNotMatch(JSON.stringify(await api.warehouseHistory(inventory[0].id)),/采购供应商|unitCents|additionalCents/);
+ const financeUsername='purchase_finance_'+randomBytes(5).toString('hex'),financePassword=randomBytes(24).toString('hex');
+ await db.client`INSERT INTO studio_os.accounts(username,password_hash,role,admin_permissions) VALUES(${financeUsername},${await hashPassword(financePassword)},'admin',ARRAY['finance'])`;
+ const financeSession=await new Authentication(db).login(financeUsername,financePassword,'purchase-finance');
+ assert.equal((await request(financeSession,path)).status,200);
+ assert.equal((await request(financeSession,path,'POST',{...body,requestKey:randomUUID(),expectedVersion:1})).status,403);
+ const revisions=await Promise.all([request(sessions[0],path,'POST',{...body,requestKey:randomUUID(),expectedVersion:1,reason:'复核价格甲'}),request(sessions[0],path,'POST',{...body,requestKey:randomUUID(),expectedVersion:1,reason:'复核价格乙'})]);
+ assert.deepEqual(revisions.map(r=>r.status).sort(),[201,409]);
+ await api.saveExpense(expense.id,{...expenseBody,description:'支付来源已核对修改'},1);
+ assert.equal((await api.productPurchase(incoming.id)).sourceChanged,true);
+ assert.equal((await request(sessions[0],path,'POST',{...body,requestKey:randomUUID(),expectedVersion:2})).status,409);
+ await api.saveProductPurchase(incoming.id,{...body,requestKey:randomUUID(),expectedVersion:2,expenseVersion:2,reason:'重新核对原支出'});
+ assert.equal((await api.productPurchase(incoming.id)).sourceChanged,false);
+ assert.deepEqual((await api.productPurchaseHistory(incoming.id)).rows.find(row=>row.id===frozen.id),frozen);
+ const second=await api.saveProductStockDocument({requestKey:randomUUID(),operation:'inbound',businessDate:'2020-03-02',sourceReference:'第二次收货',reason:'实收',lines:[{balanceId:inventory[0].balance.id,expectedVersion:2,quantity:1,businessStoreId:null}]});
+ const secondLine=(await api.productStockDocument(second.id)).lines[0];
+ assert.equal((await request(sessions[0],'/product-purchases/'+second.id,'POST',{...body,requestKey:randomUUID(),code:'PURCHASE-COST-OTHER',expenseVersion:2,lines:[{movementId:secondLine.id,unitPrice:'1.00',additionalAmount:'0.00'}]})).status,409);
+ assert.equal((await api.productPurchase(second.id)).batch,null);
+ assert.equal((await api.warehouseItem(inventory[0].id)).quantity,4);
 });

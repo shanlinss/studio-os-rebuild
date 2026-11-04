@@ -1,3 +1,4 @@
+import {createProductPurchaseEditors} from './product-purchase-editors.mjs';
 import {createProductStockEditors} from './product-stock-editors.mjs';
 import {createCommercialProductEditors} from './commercial-products-editors.mjs';
 import {createPhoneCardFinanceEditors} from './phone-card-finance-editors.mjs';
@@ -135,10 +136,11 @@ export function createRecordEditors({api,h,onSaved,notify}){
  const inventoryAccessEditors=createInventoryAccessEditors({api,h,mount,area,select});
  const accountLifecycleEditors=createAccountLifecycleEditors({api,h,mount,input,area,select});
  const warehouseTransferEditors=createWarehouseTransferEditors({api,h,mount,input,area,select});
+ const productPurchaseEditors=createProductPurchaseEditors({api,h,mount,input,area,select});
  const productStockEditors=createProductStockEditors({api,h,mount,input,area,select});
  const commercialEditors=createCommercialProductEditors({api,h,mount,input,area,select});
  const warehouseEditors=createWarehouseEditors({api,h,mount,input,area,select});
  const shootingEditors=createShootingEditors({api,h,mount,input,area,select});
- return {...productStockEditors,...commercialEditors,material,product,publication,snapshot,todo,experiment,dispatch,review,conclusion,...shootingEditors,...operations,...warehouseEditors,...warehouseTransferEditors,...accountLifecycleEditors,...inventoryAccessEditors,...equipmentPurchaseEditors,...equipmentAssetsEditors,...phoneCardEditors,...phoneCardFinanceEditors,...attendanceEditors,...leaveEditors,...exceptionEditors,...monthlyEditors,...closureEditors,...payrollEditors,...payrollConfirmationEditors,...personnelEditors};
+ return {...productPurchaseEditors,...productStockEditors,...commercialEditors,material,product,publication,snapshot,todo,experiment,dispatch,review,conclusion,...shootingEditors,...operations,...warehouseEditors,...warehouseTransferEditors,...accountLifecycleEditors,...inventoryAccessEditors,...equipmentPurchaseEditors,...equipmentAssetsEditors,...phoneCardEditors,...phoneCardFinanceEditors,...attendanceEditors,...leaveEditors,...exceptionEditors,...monthlyEditors,...closureEditors,...payrollEditors,...payrollConfirmationEditors,...personnelEditors};
 
 }

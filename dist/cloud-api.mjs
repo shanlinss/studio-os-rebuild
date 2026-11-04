@@ -1,3 +1,4 @@
+import {productPurchaseState,productPurchaseHistory,productPurchasePayload} from './product-purchase-contract.mjs';
 import {productStockOptions,productStockPayload,productStockDetail,productReturnPayload} from './product-stock-contract.mjs';
 import {commercialState,commercialPayload,commercialHistory} from './commercial-products-contract.mjs';
 import {financeState,rechargeRecord,rechargePage,rechargeHistory,balancePage,reminderState,reminderHistory,reminderPage,rechargePayload,voidPayload,balancePayload,reminderPayload,operationPath,operationAction,operationResult} from './phone-card-finance-contract.mjs';
@@ -148,6 +149,14 @@ export function createCloudApi(fetcher=globalThis.fetch,{allowWrites=false}={}){
     async todos(signal){return read('/api/workbench/todos',signal,v=>list(v).map(todoModel));},
     async finance(signal){return read('/api/finance',signal,financeRecord);},
     async competitors(signal){return namedList(await get('/api/competitors',signal));},
+    async productPurchase(id,signal){return read('/api/product-purchases/'+endpointId(id),signal,v=>productPurchaseState(v,id));},
+    async productPurchaseHistory(id,offset=0,signal){return read('/api/product-purchases/'+endpointId(id)+'/history?offset='+offset,signal,productPurchaseHistory);},
+    async saveProductPurchase(id,value){return mutations.send('/api/product-purchases/'+endpointId(id),'POST',productPurchasePayload(value));},
+    async productPurchaseReceipt(id,key){
+      const path='/api/product-purchases/'+endpointId(id);
+      try{const result=await get(path+'/receipts/'+endpointId(key));if(result?.id!==id||!Number.isSafeInteger(result.version))throw new ContractError();endpointId(result.batchId);endpointId(result.recordId);mutations.confirmRead(path);return result;}
+      catch(e){if(e.status===404){mutations.confirmRead(path);return null;}throw e;}
+    },
     async productStockOptions(offset=0,signal){return read('/api/product-stock-documents/options?offset='+offset,signal,productStockOptions);},
     async saveProductStockDocument(value){return mutations.send('/api/product-stock-documents','POST',productStockPayload(value));},
     async productStockDocument(id,signal){return read('/api/product-stock-documents/'+endpointId(id),signal,v=>productStockDetail(v,id));},

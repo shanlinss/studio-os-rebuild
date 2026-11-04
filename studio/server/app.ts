@@ -58,6 +58,7 @@ import { PublicationAssets } from './publication-assets';
 import { SnapshotImports } from './snapshot-imports';
 import { Shooting } from './shooting';
 import { ProductObservations } from './product-observations';
+import {ProductPurchases} from './product-purchases';
 import {CommercialProducts} from './commercial-products';
 import { Products } from './products';
 import { Workbench } from './workbench';
@@ -104,6 +105,7 @@ export async function createStudioApp(
   const snapshotImports = new SnapshotImports(database);
   const products = new Products(database);
   const commercialProducts=new CommercialProducts(database);
+  const productPurchases=new ProductPurchases(database);
   const shooting = new Shooting(database);
   const productObservations = new ProductObservations(database);
   const workbench = new Workbench(database);
@@ -354,6 +356,14 @@ export async function createStudioApp(
     packagingConsumptionDetail(@Req() r:AuthRequest,@Param('id') id:string){return warehouse.consumptionDetail(r.identity!,id);}
     @Post('packaging-consumptions')
     packagingConsumption(@Req() r:AuthRequest,@Body() b:unknown){return warehouse.consumePackaging(r.identity!,b);}
+    @Get('product-purchases/:id')
+    productPurchase(@Req() r:AuthRequest,@Param('id') id:string){return productPurchases.state(r.identity!,id);}
+    @Get('product-purchases/:id/history')
+    productPurchaseHistory(@Req() r:AuthRequest,@Param('id') id:string){return productPurchases.history(r.identity!,id,r.query);}
+    @Get('product-purchases/:id/receipts/:key')
+    productPurchaseReceipt(@Req() r:AuthRequest,@Param('id') id:string,@Param('key') key:string){return productPurchases.receipt(r.identity!,id,key);}
+    @Post('product-purchases/:id')
+    productPurchaseSave(@Req() r:AuthRequest,@Param('id') id:string,@Body() b:unknown){return productPurchases.save(r.identity!,id,b);}
     @Get('product-stock-documents/options')
     productStockOptions(@Req() r:AuthRequest){return warehouse.productStockOptions(r.identity!,r.query);}
     @Get('product-stock-documents/receipts/:key')
@@ -1834,6 +1844,12 @@ export async function createStudioApp(
         requireContributor(req.identity);
         if(req.method==='GET'&&/^\/api\/packaging-consumptions\/[^/]+(?:\/[^/]+)?$/.test(req.path))return true;
         if(req.method==='POST'&&req.path==='/api/packaging-consumptions'){auth.csrf(req);return true;}
+        throw new ForbiddenException();
+      }
+      if(req.path.startsWith('/api/product-purchases/')){
+        requirePermission(req.identity,'finance');
+        if(req.method==='GET'&&/^\/api\/product-purchases\/[^/]+(?:\/(?:history|receipts\/[^/]+))?$/.test(req.path))return true;
+        if(req.method==='POST'&&/^\/api\/product-purchases\/[^/]+$/.test(req.path)){requirePermission(req.identity,'resources');auth.csrf(req);return true;}
         throw new ForbiddenException();
       }
       if(req.path==='/api/product-stock-documents'||req.path.startsWith('/api/product-stock-documents/')){

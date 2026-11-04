@@ -43,6 +43,7 @@ export function createWarehouseViews({api,h,heading,showPanel,localTime,writable
    const doc=await api.productStockDocument(id,signal),label=doc.operation==='return'?'商品退货入库单':doc.operation==='inbound'?'商品入库单':'商品发货单';
    return `<div class="dialog-header"><h2>${label}</h2><button class="icon-button" data-warehouse-close aria-label="关闭商品单据">×</button></div>
     ${writable&&doc.operation==='shipment'&&doc.lines.some(line=>line.canReturn&&line.returnedQuantity<line.quantity)?`<button class="secondary" data-product-stock-return="${h(id)}">登记可重新销售退货</button>`:''}
+    ${doc.operation==='inbound'&&hasSensitive(getUser(),'finance')?`<button class="secondary" data-product-purchase="${h(id)}">采购批次与成本</button>`:''}
     ${doc.sourceShipmentId?`<button class="text-button" data-product-stock-document="${h(doc.sourceShipmentId)}">查看原发货单</button>`:''}
     <p>业务日期 ${h(doc.businessDate)} · ${h(doc.actor)} · 登记 ${h(localTime(doc.createdAt))}</p><p>${h(doc.sourceReference||'未填写来源参考')}</p><p class="preserve-text">${h(doc.reason)}</p>
     ${doc.lines.map(line=>`<article class="observation"><b>${h(line.snapshot.skuCode)} · ${h(line.snapshot.name)} · ${line.quantity} ${h(line.snapshot.unit)}</b>
