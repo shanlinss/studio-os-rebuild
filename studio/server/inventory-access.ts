@@ -35,7 +35,7 @@ export class InventoryAccess {
    await tx`SET TRANSACTION ISOLATION LEVEL REPEATABLE READ READ ONLY`;
    const [account]=await tx`SELECT id,username,role,active,superadmin,admin_permissions FROM studio_os.accounts WHERE id=${who.id}`;if(!account?.active)throw new UnauthorizedException();
    const rows=await grants(tx,who.id);
-   return {canManageAll:hasPermission(databaseIdentity(account),'resources'),grants:rows.filter(g=>g.storeId===null||g.storeActive),quantityOperationsAvailable:true};
+   return {canManageAll:hasPermission(databaseIdentity(account),'resources'),grants:rows.filter(g=>g.storeId===null||g.storeActive),quantityOperationsAvailable:true,productOperationsAvailable:true};
   });
  }
  async save(who:Identity,id:string,value:unknown){

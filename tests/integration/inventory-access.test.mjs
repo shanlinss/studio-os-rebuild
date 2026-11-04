@@ -25,7 +25,7 @@ before(async()=>{
 });
 after(async()=>{if(app)await app.close();if(local)await local.stop();});
 test('empty scope default reuses original accounts and stores without changing quantities or expanding resource access',async()=>{
- assert.deepEqual((await current()).grants,[]);const mine=await clients[4].myInventoryAccess();assert.deepEqual(mine,{canManageAll:false,grants:[],quantityOperationsAvailable:true});assert.equal((await clients[2].myInventoryAccess()).canManageAll,true);assert.equal((await clients[0].warehouseItem(stock.id)).quantity,30);assert.equal((await req(4,'/warehouse/items')).status,403);await checkReadiness(db);
+ assert.deepEqual((await current()).grants,[]);const mine=await clients[4].myInventoryAccess();assert.deepEqual(mine,{canManageAll:false,grants:[],quantityOperationsAvailable:true,productOperationsAvailable:true});assert.equal((await clients[2].myInventoryAccess()).canManageAll,true);assert.equal((await clients[0].warehouseItem(stock.id)).quantity,30);assert.equal((await req(4,'/warehouse/items')).status,403);await checkReadiness(db);
 });
 test('only a current superadministrator changes scopes; security may inspect and other roles see their own configuration only',async()=>{
  const r=await current(),path='/admin/accounts/'+r.id+'/inventory-access',v={...body([{storeId:null,canMove:false}]),expectedVersion:r.version};

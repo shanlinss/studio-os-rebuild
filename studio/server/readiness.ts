@@ -55,6 +55,7 @@ export async function checkReadiness(
     await tx`SELECT id,name,store_id,active,version FROM products LIMIT 0`;
     await tx`SELECT product_id,code,version FROM commercial_products LIMIT 0`;
     await tx`SELECT id,product_id,code,specification,unit,active,warehouse_item_id FROM product_skus LIMIT 0`;
+    await tx`SELECT id,operation,business_date,source_reference,reason,actor_id FROM product_stock_documents LIMIT 0`;
     await tx`SELECT sku_id,store_id,platform_product_id,platform_sku_id,listing_url,active FROM product_sku_stores LIMIT 0`;
     await tx`SELECT product_id,actor_id,reason,before_value,after_value FROM commercial_product_events LIMIT 0`;
     await tx`SELECT actor_id,request_key,product_id,request_hash,result FROM commercial_product_receipts LIMIT 0`;
@@ -129,7 +130,7 @@ export async function checkReadiness(
     await tx`SELECT id,actor_id,reason,created_at FROM packaging_consumptions LIMIT 0`;
     await tx`SELECT id,item_id,source_balance_id,target_balance_id,outbound_movement_id,inbound_movement_id,quantity,reason,actor_id FROM packaging_stock_transfers LIMIT 0`;
     await tx`SELECT purchase_id,balance_id,movement_id FROM packaging_purchase_allocations LIMIT 0`;
-    await tx`SELECT id,item_id,type,quantity,delta,before_quantity,after_quantity,item_snapshot,corrects_movement_id,packaging_balance_id,packaging_consumption_id,used_store_id FROM warehouse_movements LIMIT 0`;
+    await tx`SELECT id,item_id,type,quantity,delta,before_quantity,after_quantity,item_snapshot,corrects_movement_id,packaging_balance_id,packaging_consumption_id,used_store_id,product_stock_document_id,business_store_id FROM warehouse_movements LIMIT 0`;
     await tx`SELECT id,item_id,actor_id,action,before_value,after_value FROM warehouse_item_events LIMIT 0`;
     await tx`SELECT actor_id,request_key,request_hash,result FROM warehouse_receipts LIMIT 0`;
     await tx`SELECT sample_id,item_id,product_id,specification,source_unit,confirmed_by FROM warehouse_sample_links LIMIT 0`;

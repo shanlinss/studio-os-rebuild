@@ -1,3 +1,4 @@
+import {productStockOptions,productStockPayload,productStockDetail} from './product-stock-contract.mjs';
 import {commercialState,commercialPayload,commercialHistory} from './commercial-products-contract.mjs';
 import {financeState,rechargeRecord,rechargePage,rechargeHistory,balancePage,reminderState,reminderHistory,reminderPage,rechargePayload,voidPayload,balancePayload,reminderPayload,operationPath,operationAction,operationResult} from './phone-card-finance-contract.mjs';
 import {phoneCard,phoneCardPage,phoneCardHistory,phoneCardIdentity,phoneCardOptions,phoneCardPayload,phoneCardIdentityPayload,phoneCardResult} from './phone-cards-contract.mjs';
@@ -147,6 +148,14 @@ export function createCloudApi(fetcher=globalThis.fetch,{allowWrites=false}={}){
     async todos(signal){return read('/api/workbench/todos',signal,v=>list(v).map(todoModel));},
     async finance(signal){return read('/api/finance',signal,financeRecord);},
     async competitors(signal){return namedList(await get('/api/competitors',signal));},
+    async productStockOptions(offset=0,signal){return read('/api/product-stock-documents/options?offset='+offset,signal,productStockOptions);},
+    async saveProductStockDocument(value){return mutations.send('/api/product-stock-documents','POST',productStockPayload(value));},
+    async productStockDocument(id,signal){return read('/api/product-stock-documents/'+endpointId(id),signal,v=>productStockDetail(v,id));},
+    async productStockReceipt(key){
+      const path='/api/product-stock-documents';
+      try{const result=await get(path+'/receipts/'+endpointId(key));endpointId(result?.id);mutations.confirmRead(path);return result;}
+      catch(e){if(e.status===404){mutations.confirmRead(path);return null;}throw e;}
+    },
     async commercialProduct(id,signal){return read('/api/commercial-products/'+endpointId(id),signal,v=>commercialState(v,id));},
     async commercialProductHistory(id,offset=0,signal){return read('/api/commercial-products/'+endpointId(id)+'/history?offset='+offset,signal,v=>commercialHistory(v,id));},
     async saveCommercialProduct(id,action,value,version){return mutations.send('/api/commercial-products/'+endpointId(id)+'/'+action,'POST',commercialPayload(action,value,version));},
@@ -178,8 +187,8 @@ export function createCloudApi(fetcher=globalThis.fetch,{allowWrites=false}={}){
       try{const result=await get(path+'/receipts/'+endpointId(key));if(result?.id!==id)throw new ContractError();endpointId(result.purchaseId);mutations.confirmRead(path);return result;}
       catch(e){if(e.status===404){mutations.confirmRead(path);return null;}throw e;}
     },
-    async scopedWarehouseCatalog(params={},signal){const q=new URLSearchParams({q:params.q??'',offset:String(params.offset??0)});return read('/api/packaging-stock?'+q,signal,scopedWarehouseCatalog);},
-    async scopedWarehouseDetail(id,offset=0,signal){return read('/api/packaging-stock/'+endpointId(id)+'?offset='+offset,signal,v=>scopedWarehouseDetail(v,id));},
+    async scopedWarehouseCatalog(params={},signal,kind='packaging'){const q=new URLSearchParams({q:params.q??'',offset:String(params.offset??0)});return read((kind==='product'?'/api/product-stock?':'/api/packaging-stock?')+q,signal,scopedWarehouseCatalog);},
+    async scopedWarehouseDetail(id,offset=0,signal,kind='packaging'){return read((kind==='product'?'/api/product-stock/':'/api/packaging-stock/')+endpointId(id)+'?offset='+offset,signal,v=>scopedWarehouseDetail(v,id));},
     async scopedWarehouseMove(id,value,version){return mutations.send('/api/packaging-stock/'+endpointId(id),'POST',scopedWarehousePayload(value,version));},
     async scopedWarehouseReceipt(id,key){
       const path='/api/packaging-stock/'+endpointId(id);
