@@ -13,9 +13,9 @@ export function warehouseItem(v){
  if(!v||typeof v.kind!=='string'||!Object.hasOwn(warehouseKinds,v.kind)||!warehouseUnits.includes(v.unit)||typeof v.itemCode!=='string'||typeof v.name!=='string'||typeof v.specification!=='string'||typeof v.location!=='string'||typeof v.notes!=='string'||typeof v.active!=='boolean'||typeof v.openingConfirmed!=='boolean')throw new ContractError('库存资料不完整。');
  id(v.id);expectedVersion(v.version);if(v.reorderAlertCount!==undefined)qty(v.reorderAlertCount);if(v.kind==='product')id(v.productId);else if(v.productId!==null)throw new ContractError();
  if(v.balances!==undefined){
-  if(v.kind!=='packaging'||!Array.isArray(v.balances)||v.packagingScoped!==(v.balances.length>0))throw new ContractError();
+  if(!Array.isArray(v.balances)||(v.inventoryScoped??v.packagingScoped)!==(v.balances.length>0))throw new ContractError();
   for(const b of v.balances){id(b.id);if(b.storeId!==null){id(b.storeId);if(typeof b.storeName!=='string'||typeof b.storeActive!=='boolean')throw new ContractError();}qty(b.quantity);expectedVersion(b.version);if(b.reorderThreshold!==undefined&&b.reorderThreshold!==null)qty(b.reorderThreshold);}
-  if(v.packagingScoped&&v.balances.reduce((sum,b)=>sum+b.quantity,0)!==v.quantity)throw new ContractError('包材分账与总量不一致，请重新读取。');
+  if((v.inventoryScoped??v.packagingScoped)&&v.balances.reduce((sum,b)=>sum+b.quantity,0)!==v.quantity)throw new ContractError('库存分账与总量不一致，请重新读取。');
  }
  if(v.openingConfirmed)qty(v.quantity);else if(v.quantity!==null)throw new ContractError('未登记期初不能作为零库存展示。');return v;
 }
@@ -34,7 +34,7 @@ export function warehouseMovement(v){
 }
 export function warehouseHistory(v,events=false){page(v);if(events){for(const r of v.rows)if(!r||!['registered','edited'].includes(r.action)||typeof r.actor!=='string'||!Number.isFinite(Date.parse(r.createdAt))||!r.afterValue||typeof r.afterValue!=='object'||typeof r.afterValue.name!=='string'||typeof r.afterValue.location!=='string'||typeof r.afterValue.active!=='boolean')throw new ContractError();}else v.rows.forEach(warehouseMovement);return v;}
 export function warehousePayload(action,value,version){
- if(action==='allocate-packaging'){
+ if(['allocate-packaging','allocate-product'].includes(action)){
   if(!value||Object.keys(value).some(k=>!['requestKey','reason','allocations'].includes(k))||!Array.isArray(value.allocations)||!value.allocations.length||value.allocations.length>100)throw new ContractError('请填写 1 至 100 个归属数量。');
   const allocations=value.allocations.map(row=>({storeId:row.storeId===null?null:id(row.storeId),quantity:qty(row.quantity)}));
   if(new Set(allocations.map(row=>row.storeId)).size!==allocations.length)throw new ContractError('同一归属只能填写一次。');
@@ -50,17 +50,17 @@ export function warehousePayload(action,value,version){
   if(typeof value.kind!=='string'||!Object.hasOwn(warehouseKinds,value.kind)||!warehouseUnits.includes(value.unit))throw new ContractError('请选择库存类型和整数基础单位。');out.itemCode=text(value.itemCode,64,true);out.kind=value.kind;out.productId=value.productId===null?null:id(value.productId);if((out.kind==='product'&&!out.productId)||(out.kind==='packaging'&&out.productId))throw new ContractError('产品库存须关联原产品，包材独立建档。');out.name=text(value.name,120,true);out.specification=text(value.specification,200);out.unit=value.unit;out.location=text(value.location,150,true);out.notes=text(value.notes,2000);if(action==='edit'){if(typeof value.active!=='boolean')throw new ContractError();out.active=value.active;}
  }if(action!=='register')out.expectedVersion=expectedVersion(version);return out;
 }
-export function warehousePath(action,owner,balance){if(action==='register')return '/api/warehouse/items';id(owner);if(action==='reorder-threshold')return '/api/warehouse/items/'+owner+'/packaging-balances/'+id(balance)+'/reorder-threshold';if(action==='edit')return '/api/warehouse/items/'+owner;if(action==='move')return '/api/warehouse/items/'+owner+'/movements';if(action==='allocate-packaging')return '/api/warehouse/items/'+owner+'/packaging-balances';if(action==='transfer-packaging')return '/api/warehouse/items/'+owner+'/packaging-transfers';if(action==='transfer')return '/api/warehouse/items/'+owner+'/to-samples';throw new ContractError();}
+export function warehousePath(action,owner,balance){if(action==='register')return '/api/warehouse/items';id(owner);if(action==='reorder-threshold')return '/api/warehouse/items/'+owner+'/packaging-balances/'+id(balance)+'/reorder-threshold';if(action==='edit')return '/api/warehouse/items/'+owner;if(action==='move')return '/api/warehouse/items/'+owner+'/movements';if(action==='allocate-packaging')return '/api/warehouse/items/'+owner+'/packaging-balances';if(action==='allocate-product')return '/api/warehouse/items/'+owner+'/product-balances';if(action==='transfer-packaging')return '/api/warehouse/items/'+owner+'/packaging-transfers';if(action==='transfer-product')return '/api/warehouse/items/'+owner+'/product-transfers';if(action==='transfer')return '/api/warehouse/items/'+owner+'/to-samples';throw new ContractError();}
 
 export function sampleTargetPage(v){
  page(v);for(const r of v.rows){id(r.id);id(r.productId);if(typeof r.name!=='string'||typeof r.warehouseLocation!=='string'||r.active!==true)throw new ContractError('目标样品资料不完整。');qty(r.availableQuantity);expectedVersion(r.version);if(r.sourceItemId!==null)id(r.sourceItemId);if(r.keeperMemberId!==null)id(r.keeperMemberId);}return v;
 }
 export function sampleTransferPayload(v,version){
- const keys=['requestKey','quantity','reason','sourceReference','confirmed','target'];if(!v||keys.some(k=>!Object.hasOwn(v,k))||Object.keys(v).some(k=>!keys.includes(k))||v.confirmed!==true)throw new ContractError('请先核对规格和一件对一件的数量关系。');
+ const keys=['requestKey','quantity','reason','sourceReference','confirmed','target'];if(!v||keys.some(k=>!Object.hasOwn(v,k))||Object.keys(v).some(k=>![...keys,'sourceBalanceId'].includes(k))||v.confirmed!==true)throw new ContractError('请先核对规格和一件对一件的数量关系。');
  const target=v.target;if(!target||!['new','existing'].includes(target.mode))throw new ContractError('请选择样品目标。');
  const allowed=target.mode==='new'?['mode','name','warehouseLocation','keeperMemberId','notes']:['mode','sampleId','expectedVersion'];if(allowed.some(k=>!Object.hasOwn(target,k))||Object.keys(target).some(k=>!allowed.includes(k)))throw new ContractError('目标样品信息不完整。');
  const destination=target.mode==='new'?{mode:'new',name:text(target.name,120,true),warehouseLocation:text(target.warehouseLocation,150,true),keeperMemberId:target.keeperMemberId===null?null:id(target.keeperMemberId),notes:text(target.notes,2000)}:{mode:'existing',sampleId:id(target.sampleId),expectedVersion:expectedVersion(target.expectedVersion)};
- return {requestKey:id(v.requestKey),quantity:qty(v.quantity,false),reason:text(v.reason,2000,true),sourceReference:text(v.sourceReference,200),confirmed:true,target:destination,expectedVersion:expectedVersion(version)};
+ return {...(v.sourceBalanceId===undefined?{}:{sourceBalanceId:id(v.sourceBalanceId)}),requestKey:id(v.requestKey),quantity:qty(v.quantity,false),reason:text(v.reason,2000,true),sourceReference:text(v.sourceReference,200),confirmed:true,target:destination,expectedVersion:expectedVersion(version)};
 }
 export function sampleTransferRecord(r){
  if(!r||typeof r.reason!=='string'||!r.reason.trim()||typeof r.sourceReference!=='string'||typeof r.actor!=='string'||!Number.isFinite(Date.parse(r.createdAt)))throw new ContractError('转样品记录不完整。');for(const key of ['id','itemId','sampleId','movementId','sampleEventId'])id(r[key]);

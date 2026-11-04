@@ -4,17 +4,18 @@ import {warehouseUnits,warehouseKinds,movementLabels} from './warehouse-contract
 
 export function createWarehouseEditors({api,h,mount,input,area,select}){
  async function warehouse(action,id,correctionId=null){
-  if(!['register','edit','allocate-packaging',...Object.keys(movementLabels)].includes(action)||(correctionId&&action!=='stocktake'))throw new ContractError();
+  if(!['register','edit','allocate-packaging','allocate-product',...Object.keys(movementLabels)].includes(action)||(correctionId&&action!=='stocktake'))throw new ContractError();
   const row=id?await api.warehouseItem(id):null,key=crypto.randomUUID();let body='',operation=action,setup;
-  if(action==='allocate-packaging'){
-   if(!row?.active||row.kind!=='packaging')throw new ContractError('请选择启用的包材。');
+  if(['allocate-packaging','allocate-product'].includes(action)){
+   const kind=action==='allocate-product'?'product':'packaging';
+   if(!row?.active||row.kind!==kind||(kind==='product'&&!row.skuId))throw new ContractError('请核对库存类型，并为正式商品关联 SKU。');
    const used=new Set((row.balances||[]).map(b=>b.storeId));
    const scopes=[{id:null,name:'公共库存'},...(await api.stores()).filter(s=>s.active)].filter(s=>!used.has(s.id));
    if(!scopes.length)throw new ContractError('所有启用的库存归属均已建立。');
-   const hint=row.packagingScoped?'新归属请填 0。':row.openingConfirmed?`分配合计须等于旧库存 ${row.quantity} ${row.unit}。`:'按实盘数量填写，确认是零时请填 0。';
+   const hint=(row.inventoryScoped??row.packagingScoped)?'新归属请填 0。':row.openingConfirmed?`分配合计须等于旧库存 ${row.quantity} ${row.unit}。`:'按实盘数量填写，确认是零时请填 0。';
    body=`<p>${h(row.name)} · ${h(hint)} 留空表示本次不建立该归属。</p>`+
-    scopes.map((scope,i)=>input('scope'+i,scope.name,'',`type="number" min="0" max="${row.packagingScoped?0:2147483647}" step="1"`)).join('')+area('reason','核对依据（必填）');
-   mount(row.packagingScoped?'新增包材归属':'核对并分配包材库存',body,f=>{
+    scopes.map((scope,i)=>input('scope'+i,scope.name,'',`type="number" min="0" max="${(row.inventoryScoped??row.packagingScoped)?0:2147483647}" step="1"`)).join('')+area('reason','核对依据（必填）');
+   mount((row.inventoryScoped??row.packagingScoped)?'新增库存归属':'核对并分配库存',body,f=>{
     const allocations=scopes.flatMap((scope,i)=>{
      const raw=f.get('scope'+i);
      return raw===''?[]:[{storeId:scope.id,quantity:Number(raw)}];
@@ -37,10 +38,10 @@ export function createWarehouseEditors({api,h,mount,input,area,select}){
    const corrected=correctionId?await api.warehouseMovement(id,correctionId):null;
    const balances=(row.balances||[]).filter(b=>b.storeId===null||b.storeActive);
    fixedBalance=corrected?.packagingBalanceId;
-   if(row.packagingScoped&&(!balances.length||(corrected&&!balances.some(b=>b.id===fixedBalance))))throw new ContractError('没有可登记变动的包材归属。');
+   if((row.inventoryScoped??row.packagingScoped)&&(!balances.length||(corrected&&!balances.some(b=>b.id===fixedBalance))))throw new ContractError('没有可登记变动的库存归属。');
    const scopeOptions=balances.map(b=>[b.id,(b.storeName||'公共库存')+' · '+b.quantity+' '+row.unit]);
-   const scopeField=row.packagingScoped?(fixedBalance?`<p>${h(scopeOptions.find(([key])=>key===fixedBalance)[1])}</p>`:select('packagingBalanceId','库存归属','',[['','请选择'],...scopeOptions])):'';
-   body=scopeField+`<p>${h(row.name)} · ${h(row.itemCode)} · ${row.openingConfirmed?(row.packagingScoped?'全部归属合计 ':'当前 ')+row.quantity+' '+h(row.unit):'尚未登记期初'}</p>`+(corrected?`<p class="muted">本次盘点引用原${h(movementLabels[corrected.type])}记录（${h(corrected.reason)}）。原流水保留，请填写当前实际盘点数。</p>`:'')+input('quantity',action==='opening'?'实际期初数量':action==='stocktake'?'当前实际盘点数量':action==='inbound'?'本次入库数量':'本次出库数量','',`required type="number" min="${['opening','stocktake'].includes(action)?0:1}" max="2147483647" step="1"`)+area('reason','原因与依据（必填）')+input('sourceReference','来源参考（可填送货单号或领用说明）','','maxlength="200"')+`<p class="muted">${action==='stocktake'?'盘点填写实际结余，不填写增减差额；系统将差异记为一条新流水。':action==='opening'?'实际为零也需明确填写 0；保存后不能再次登记期初。':'只登记实际数量变化，不生成采购支出或订单记录。'}</p>`;
+   const scopeField=(row.inventoryScoped??row.packagingScoped)?(fixedBalance?`<p>${h(scopeOptions.find(([key])=>key===fixedBalance)[1])}</p>`:select('packagingBalanceId','库存归属','',[['','请选择'],...scopeOptions])):'';
+   body=scopeField+`<p>${h(row.name)} · ${h(row.itemCode)} · ${row.openingConfirmed?((row.inventoryScoped??row.packagingScoped)?'全部归属合计 ':'当前 ')+row.quantity+' '+h(row.unit):'尚未登记期初'}</p>`+(corrected?`<p class="muted">本次盘点引用原${h(movementLabels[corrected.type])}记录（${h(corrected.reason)}）。原流水保留，请填写当前实际盘点数。</p>`:'')+input('quantity',action==='opening'?'实际期初数量':action==='stocktake'?'当前实际盘点数量':action==='inbound'?'本次入库数量':'本次出库数量','',`required type="number" min="${['opening','stocktake'].includes(action)?0:1}" max="2147483647" step="1"`)+area('reason','原因与依据（必填）')+input('sourceReference','来源参考（可填送货单号或领用说明）','','maxlength="200"')+`<p class="muted">${action==='stocktake'?'盘点填写实际结余，不填写增减差额；系统将差异记为一条新流水。':action==='opening'?'实际为零也需明确填写 0；保存后不能再次登记期初。':'只登记实际数量变化，不生成采购支出或订单记录。'}</p>`;
   }
   const title=action==='register'?'新建库存项目':action==='edit'?'编辑库存资料':movementLabels[action];
   mount(title,body,f=>{
@@ -48,7 +49,7 @@ export function createWarehouseEditors({api,h,mount,input,area,select}){
    if(['register','edit'].includes(action)){
     const locked=row?.openingConfirmed||row?.skuId,kind=locked?row.kind:f.get('kind');
     value={requestKey:key,itemCode:f.get('itemCode'),name:f.get('name'),kind,productId:locked?row.productId:kind==='packaging'?null:f.get('productId')||null,specification:locked?row.specification:f.get('specification'),unit:locked?row.unit:f.get('unit'),location:f.get('location'),notes:f.get('notes')};if(row)value.active=f.get('active')==='true';
-   }else{const raw=f.get('quantity');if(typeof raw!=='string'||!raw.trim())throw new ContractError('请明确填写实际数量。');value={requestKey:key,type:action,quantity:Number(raw),reason:f.get('reason'),sourceReference:f.get('sourceReference'),correctsMovementId:correctionId};if(row.packagingScoped)value.packagingBalanceId=fixedBalance||f.get('packagingBalanceId');}
+   }else{const raw=f.get('quantity');if(typeof raw!=='string'||!raw.trim())throw new ContractError('请明确填写实际数量。');value={requestKey:key,type:action,quantity:Number(raw),reason:f.get('reason'),sourceReference:f.get('sourceReference'),correctsMovementId:correctionId};if((row.inventoryScoped??row.packagingScoped))value.packagingBalanceId=fixedBalance||f.get('packagingBalanceId');}
    return api.warehouseWrite(operation,id,value,row?.version);
   },{kind:'warehouse',id},async()=>api.warehouseReceipt(key,operation,id),setup);
  }
@@ -64,10 +65,10 @@ export function createWarehouseEditors({api,h,mount,input,area,select}){
    return api.saveWarehouseReorderThreshold(id,balanceId,{requestKey:key,threshold:raw===''?null:Number(raw),reason:f.get('reason')},balance.version);
   },{kind:'reorder-threshold',id},()=>api.warehouseReceipt(key,'reorder-threshold',id,balanceId));
  }
- async function transferPackaging(id){
+ async function transferPackaging(id,kind='packaging'){
   const row=await api.warehouseItem(id);
   const balances=(row.balances||[]).filter(b=>b.storeId===null||b.storeActive);
-  if(row.kind!=='packaging'||!row.active||balances.length<2)throw new ContractError('请先为此包材建立至少两个启用的库存归属。');
+  if(row.kind!==kind||!row.active||balances.length<2)throw new ContractError('请先建立至少两个启用的库存归属。');
   const key=crypto.randomUUID();
   const options=rows=>[['','请选择'],...rows.map(b=>[b.id,`${b.storeName||'公共库存'} · ${b.quantity} ${row.unit}`])];
   const body=`<p>${h(row.name)} · ${h(row.itemCode)} · 当前合计 ${h(row.quantity)} ${h(row.unit)}</p>`+
@@ -75,12 +76,12 @@ export function createWarehouseEditors({api,h,mount,input,area,select}){
    select('targetBalanceId','调入归属','',options(balances))+
    input('quantity','调拨数量','','required type="number" min="1" max="2147483647" step="1"')+
    area('reason','调拨原因（必填）');
-  mount('包材调拨',body,f=>{
+  mount(kind==='product'?'商品调拨':'包材调拨',body,f=>{
    const source=balances.find(b=>b.id===f.get('sourceBalanceId')),target=balances.find(b=>b.id===f.get('targetBalanceId'));
    if(!source||!target)throw new ContractError('请选择调出和调入归属。');
    return api.savePackagingTransfer(id,{requestKey:key,sourceBalanceId:source.id,targetBalanceId:target.id,
-    sourceVersion:source.version,targetVersion:target.version,quantity:Number(f.get('quantity')),reason:f.get('reason')});
-  },{kind:'warehouse',id},()=>api.warehouseReceipt(key,'transfer-packaging',id));
+    sourceVersion:source.version,targetVersion:target.version,quantity:Number(f.get('quantity')),reason:f.get('reason')},kind);
+  },{kind:'warehouse',id},()=>api.warehouseReceipt(key,kind==='product'?'transfer-product':'transfer-packaging',id));
  }
  async function consumePackaging(){
   const first=await api.consumptionOptions(),balances=[...first.rows];

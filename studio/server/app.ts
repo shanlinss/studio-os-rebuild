@@ -413,6 +413,12 @@ export async function createStudioApp(
     @Get('warehouse/receipts/:key') warehouseReceipt(@Req() r: AuthRequest,@Param('key') key: string) { return warehouse.receipt(r.identity!,key); }
     @Post('warehouse/items') warehouseCreate(@Req() r: AuthRequest,@Body() b: unknown) { return warehouse.save(r.identity!,b); }
     @Patch('warehouse/items/:id') warehouseEdit(@Req() r: AuthRequest,@Param('id') id: string,@Body() b: unknown) { return warehouse.save(r.identity!,b,id); }
+    @Post('warehouse/items/:id/product-transfers')
+    productInventoryTransfer(@Req() r:AuthRequest,@Param('id') id:string,@Body() b:unknown){return warehouse.transferProduct(r.identity!,id,b);}
+    @Get('warehouse/items/:id/product-transfers/:transfer')
+    productInventoryTransferDetail(@Req() r:AuthRequest,@Param('id') id:string,@Param('transfer') transfer:string){
+      return warehouse.packagingTransferDetail(r.identity!,id,transfer);
+    }
     @Post('warehouse/items/:id/packaging-transfers')
     packagingTransfer(@Req() r:AuthRequest,@Param('id') id:string,@Body() b:unknown){return warehouse.transferPackaging(r.identity!,id,b);}
     @Get('warehouse/items/:id/packaging-transfers/:transfer')
@@ -425,6 +431,8 @@ export async function createStudioApp(
     packagingPurchase(@Req() r:AuthRequest,@Param('id') id:string,@Body() b:unknown){return warehouse.purchasePackaging(r.identity!,id,b);}
     @Get('warehouse/items/:id/packaging-purchases/receipts/:key')
     packagingPurchaseReceipt(@Req() r:AuthRequest,@Param('id') id:string,@Param('key') key:string){return warehouse.packagingPurchaseReceipt(r.identity!,id,key);}
+    @Post('warehouse/items/:id/product-balances')
+    allocateProductInventory(@Req() r:AuthRequest,@Param('id') id:string,@Body() b:unknown){return warehouse.allocateProduct(r.identity!,id,b);}
     @Post('warehouse/items/:id/packaging-balances')
     allocatePackaging(@Req() r:AuthRequest,@Param('id') id:string,@Body() b:unknown){
       return warehouse.allocatePackaging(r.identity!,id,b);
@@ -1828,8 +1836,8 @@ export async function createStudioApp(
           if(req.method==='POST'&&req.path.endsWith('/packaging-purchases')){auth.csrf(req);return true;}
           throw new ForbiddenException();
         }
-        const route=req.path.slice('/api/warehouse/'.length),allowed=(req.method==='GET' && /^(reorder-alerts|items|items\/[^/]+(?:\/(?:movements(?:\/[^/]+)?|events|transfers|sample-targets|packaging-transfers\/[^/]+))?|receipts\/[^/]+)$/.test(route)) ||
-          (req.method==='POST' && /^(items|items\/[^/]+\/(?:movements|to-samples|packaging-balances|packaging-balances\/[^/]+\/reorder-threshold|packaging-transfers))$/.test(route)) || (req.method==='PATCH' && /^items\/[^/]+$/.test(route));
+        const route=req.path.slice('/api/warehouse/'.length),allowed=(req.method==='GET' && /^(reorder-alerts|items|items\/[^/]+(?:\/(?:movements(?:\/[^/]+)?|events|transfers|sample-targets|(?:packaging-transfers|product-transfers)\/[^/]+))?|receipts\/[^/]+)$/.test(route)) ||
+          (req.method==='POST' && /^(items|items\/[^/]+\/(?:movements|to-samples|product-transfers|product-balances|packaging-balances|packaging-balances\/[^/]+\/reorder-threshold|packaging-transfers))$/.test(route)) || (req.method==='PATCH' && /^items\/[^/]+$/.test(route));
         if(!allowed)throw new ForbiddenException();if(req.method!=='GET')auth.csrf(req);return true;
       }
       if(req.path.startsWith('/api/equipment/')){

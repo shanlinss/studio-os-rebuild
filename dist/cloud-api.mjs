@@ -159,10 +159,10 @@ export function createCloudApi(fetcher=globalThis.fetch,{allowWrites=false}={}){
     async saveWarehouseReorderThreshold(id,balance,value,version){
       return mutations.send(warehousePath('reorder-threshold',id,balance),'POST',reorderThresholdPayload(value,version));
     },
-    async packagingTransferDetail(id,transfer,signal){
-      return read(warehousePath('transfer-packaging',id)+'/'+endpointId(transfer),signal,v=>packagingTransferDetail(v,id,transfer));
+    async packagingTransferDetail(id,transfer,signal,kind='packaging'){
+      return read(warehousePath(kind==='product'?'transfer-product':'transfer-packaging',id)+'/'+endpointId(transfer),signal,v=>packagingTransferDetail(v,id,transfer));
     },
-    async savePackagingTransfer(id,value){return mutations.send(warehousePath('transfer-packaging',id),'POST',packagingTransferPayload(value));},
+    async savePackagingTransfer(id,value,kind='packaging'){return mutations.send(warehousePath(kind==='product'?'transfer-product':'transfer-packaging',id),'POST',packagingTransferPayload(value));},
     async consumptionOptions(offset=0,signal){return read('/api/packaging-consumptions/options?offset='+offset,signal,consumptionOptions);},
     async consumptionDetail(id,signal){return read('/api/packaging-consumptions/'+endpointId(id),signal,v=>consumptionDetail(v,id));},
     async saveConsumption(value){return mutations.send('/api/packaging-consumptions','POST',consumptionPayload(value));},
@@ -194,7 +194,7 @@ export function createCloudApi(fetcher=globalThis.fetch,{allowWrites=false}={}){
     async warehouseToSamples(id,value,version){return mutations.send(warehousePath('transfer',id),'POST',sampleTransferPayload(value,version));},
     async warehouseTransfers(id,offset=0,bySample=false,signal){const path=bySample?'/api/samples/catalog/'+endpointId(id)+'/transfers':'/api/warehouse/items/'+endpointId(id)+'/transfers';return read(path+'?offset='+String(offset),signal,sampleTransferPage);},
     async warehouseWrite(action,id,value,version){return mutations.send(warehousePath(action,id),action==='edit'?'PATCH':'POST',warehousePayload(action,value,version));},
-    async warehouseReceipt(key,action,id,balance){const path=warehousePath(action,id,balance);try{const result=await get('/api/warehouse/receipts/'+endpointId(key));if(!record(result)||typeof result.id!=='string')throw new ContractError();endpointId(result.id);if(result.movementId!==undefined)endpointId(result.movementId);if(action==='transfer-packaging')endpointId(result.packagingTransferId);if(action==='transfer'){for(const key of ['movementId','transferId','sampleId','sampleEventId'])endpointId(result[key]);}mutations.confirmRead(path);return result;}catch(e){if(e.status===404){mutations.confirmRead(path);return null;}throw e;}},
+    async warehouseReceipt(key,action,id,balance){const path=warehousePath(action,id,balance);try{const result=await get('/api/warehouse/receipts/'+endpointId(key));if(!record(result)||typeof result.id!=='string')throw new ContractError();endpointId(result.id);if(result.movementId!==undefined)endpointId(result.movementId);if(['transfer-packaging','transfer-product'].includes(action))endpointId(result.packagingTransferId);if(action==='transfer'){for(const key of ['movementId','transferId','sampleId','sampleEventId'])endpointId(result[key]);}mutations.confirmRead(path);return result;}catch(e){if(e.status===404){mutations.confirmRead(path);return null;}throw e;}},
     async cardFinanceState(id,signal){return financeState(await get('/api/phone-card-finance/'+endpointId(id),signal),id);},
     async cardRecharges(id,params={},signal){const q=new URLSearchParams({offset:String(params.offset||0),status:params.status||'all'});for(const k of ['q','from','to','storeId'])if(params[k])q.set(k,params[k]);return rechargePage(await get('/api/phone-card-finance/'+endpointId(id)+'/recharges?'+q,signal),id);},
     async cardRecharge(id,root,signal){return rechargeRecord(await get('/api/phone-card-finance/'+endpointId(id)+'/recharges/'+endpointId(root),signal),id,root);},

@@ -371,3 +371,43 @@ test('concurrent SKU edits share one version and audit failures roll back SKU re
   assert.equal((await api.commercialProductHistory(product.id)).total,2);
  }finally{await db.client.unsafe('DROP TRIGGER fail_commercial_audit ON studio_os.commercial_product_events; DROP FUNCTION studio_os.fail_commercial_audit()');}
 });
+
+test('formal SKU stock reuses original scope balances and debits the selected source when becoming samples',async()=>{
+ const api=clients[0],product=await api.createProduct({name:'商品分账原产品',storeId:null,notes:'原测试记录保留',stages:['测试']});
+ const item=await api.warehouseWrite('register',undefined,{requestKey:randomUUID(),itemCode:'PRODUCT-SCOPES',kind:'product',productId:product.id,name:'正式商品蓝色',specification:'蓝色',unit:'件',location:'商品架',notes:''});
+ const opening=await api.warehouseWrite('move',item.id,move('opening',10),1);
+ const store=await api.saveDirectory('store',undefined,{name:'商品库存店铺'});
+ const allocation={requestKey:randomUUID(),reason:'按实盘分配归属',allocations:[{storeId:null,quantity:4},{storeId:store.id,quantity:6}]};
+ await assert.rejects(api.warehouseWrite('allocate-product',item.id,allocation,2),e=>e.status===409);
+ await api.saveCommercialProduct(product.id,'formal',{requestKey:randomUUID(),code:'PRODUCT-SCOPES-FORMAL',reason:'测试后登记正式商品'},0);
+ await api.saveCommercialProduct(product.id,'sku',{requestKey:randomUUID(),id:null,code:'PRODUCT-SCOPES-SKU',specification:'蓝色',unit:'件',active:true,warehouseItemId:item.id,reason:'关联原库存'},1);
+ const wrong={...allocation,allocations:[{storeId:null,quantity:9}]};
+ await assert.rejects(api.warehouseWrite('allocate-product',item.id,wrong,2),e=>e.status===409);
+ await assert.rejects(api.warehouseWrite('allocate-packaging',item.id,allocation,2),e=>e.status===409);
+ assert.equal((await request(sessions[1],'/warehouse/items/'+item.id+'/product-balances','POST',{...allocation,expectedVersion:2})).status,403);
+ const saved=await api.warehouseWrite('allocate-product',item.id,allocation,2);
+ assert.deepEqual(await api.warehouseWrite('allocate-product',item.id,allocation,2),saved);
+ const scoped=await api.warehouseItem(item.id),shared=scoped.balances.find(b=>b.storeId===null),shop=scoped.balances.find(b=>b.storeId===store.id);
+ assert.equal(scoped.id,item.id);assert.equal(scoped.inventoryScoped,true);assert.equal(scoped.packagingScoped,false);
+ assert.equal(scoped.quantity,10);assert.equal((await api.warehouseMovement(item.id,opening.movementId)).packagingBalanceId,null);
+ assert.equal((await api.commercialProduct(product.id)).formal.skus[0].warehouseItemId,item.id);
+ await assert.rejects(api.warehouseWrite('move',item.id,move('outbound',1),scoped.version),e=>e.status===409);
+ await assert.rejects(api.warehouseWrite('move',item.id,move('outbound',5,{packagingBalanceId:shared.id}),scoped.version),e=>e.status===409);
+ const transferred=await api.savePackagingTransfer(item.id,{requestKey:randomUUID(),sourceBalanceId:shop.id,targetBalanceId:shared.id,sourceVersion:1,targetVersion:1,quantity:2,reason:'补公共备货'},'product');
+ assert.equal((await api.warehouseItem(item.id)).quantity,10);
+ assert.equal((await api.packagingTransferDetail(item.id,transferred.packagingTransferId,undefined,'product')).source.snapshot.productId,product.id);
+ const row=await api.warehouseItem(item.id),value={requestKey:randomUUID(),quantity:2,reason:'转为拍摄样品',sourceReference:'',confirmed:true,target:{mode:'new',name:'蓝色拍摄样品',warehouseLocation:'样品架',keeperMemberId:null,notes:''}};
+ await assert.rejects(api.warehouseToSamples(item.id,value,row.version),e=>e.status===409);
+ const sample=await api.warehouseToSamples(item.id,{...value,sourceBalanceId:shared.id},row.version);
+ const after=await api.warehouseItem(item.id);
+ assert.equal(after.quantity,8);
+ assert.equal(after.balances.find(b=>b.id===shared.id).quantity,4);
+ assert.equal(after.balances.find(b=>b.id===shop.id).quantity,4);
+ const movement=await api.warehouseMovement(item.id,sample.movementId);
+ assert.equal(movement.packagingBalanceId,shared.id);assert.equal(movement.beforeQuantity,6);assert.equal(movement.afterQuantity,4);
+ const history=await api.warehouseTransfers(item.id);
+ assert.equal(history.rows[0].sourceSnapshot.balanceId,shared.id);
+ assert.equal(history.rows[0].sourceBefore,6);assert.equal(history.rows[0].sourceAfter,4);
+ assert.equal((await api.products()).find(p=>p.id===product.id).id,product.id);
+ assert.equal((await api.sampleCatalog()).rows.find(s=>s.id===sample.sampleId).available_quantity,2);
+});

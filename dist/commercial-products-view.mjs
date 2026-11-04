@@ -9,7 +9,7 @@ export function createCommercialProductViews({api,h,showPanel,source,localTime,w
     <button class="text-button" data-product-detail="${h(id)}">查看原产品资料</button>
     ${formal?`<p>正式商品编号 ${h(formal.code)} · 资料版本 ${formal.version}</p>${button('sku','＋ 新增 SKU')}
      ${formal.skus.map(sku=>`<article class="observation"><b>${h(sku.code)} · ${h(sku.specification||'默认规格')} · ${h(sku.unit)}</b><p>${sku.active?'启用':'停用'} · ${sku.warehouseItemId?'关联原库存 '+h(state.stock.find(w=>w.id===sku.warehouseItemId)?.itemCode||''):'尚未关联原库存'}</p>
-      <div class="action-row">${button('sku','编辑 SKU',`data-sku-id="${h(sku.id)}"`)}${sku.active?button('mapping','关联店铺商品',`data-sku-id="${h(sku.id)}"`):''}</div>
+      <div class="action-row">${button('sku','编辑 SKU',`data-sku-id="${h(sku.id)}"`)}${sku.warehouseItemId?`<button class="secondary" data-warehouse-detail="${h(sku.warehouseItemId)}">库存与归属</button>`:''}${sku.active?button('mapping','关联店铺商品',`data-sku-id="${h(sku.id)}"`):''}</div>
       ${formal.mappings.filter(m=>m.skuId===sku.id).map(m=>`<p>${h(m.storeName)} · ${h(m.platformProductId)} / ${h(m.platformSkuId)} · ${m.active&&m.storeActive&&sku.active?'映射生效':'已停用'}
        ${m.listingUrl?source(m.listingUrl,'打开店铺商品'):''} ${button('mapping','编辑映射',`data-sku-id="${h(sku.id)}" data-store-id="${h(m.storeId)}"`)}</p>`).join('')}
      </article>`).join('')||'<p class="muted">暂无 SKU。</p>'}`:`<p class="muted">尚未登记正式商品编号。</p>${button('formal','登记为正式商品')}`}
