@@ -1,3 +1,5 @@
+import {FinanceMonthScope} from './finance-month-scope';
+import {FinanceMonthReview} from './finance-month-review';
 import {ProductStockCorrections} from './product-stock-corrections';
 import {CashCorrespondence} from './cash-correspondence';
 import {SampleCostEvidence} from './sample-cost-evidence';
@@ -145,6 +147,8 @@ export async function createStudioApp(
   const templates = new Templates(database);
   const competitors = new Competitors(database);
   const finance = new Finance(database);
+  const financeMonthScope=new FinanceMonthScope(database);
+  const financeMonthReview=new FinanceMonthReview(database);
   const cashCorrespondence=new CashCorrespondence(database);
   const sampleCostEvidence=new SampleCostEvidence(database);
   const inventoryCostEvidence=new InventoryCostEvidence(database);
@@ -1256,6 +1260,14 @@ export async function createStudioApp(
 
     @Get('finance/cash-sources')
     cashSources(@Req() r:AuthRequest){return cashCorrespondence.sources(r.identity!,r.query);}
+    @Get('finance/month-review')
+    async financeReview(@Req() r:AuthRequest){return financeMonthReview.read(r.identity!,r.query);}
+    @Get('finance/month-scope')
+    async financeScope(@Req() r:AuthRequest){return financeMonthScope.state(r.identity!,r.query);}
+    @Post('finance/month-scope')
+    async saveFinanceScope(@Req() r:AuthRequest){return financeMonthScope.save(r.identity!,r.body);}
+    @Get('finance/month-scope/receipts/:key')
+    async financeScopeReceipt(@Req() r:AuthRequest,@Param('key') key:string){const q=objectInput(r.query,['month']);return financeMonthScope.receipt(r.identity!,key,String(q.month??''));}
     @Get('finance/cash-movements')
     cashMovements(@Req() r:AuthRequest){return cashCorrespondence.list(r.identity!,r.query);}
     @Get('finance/cash-movements/receipts/:key')

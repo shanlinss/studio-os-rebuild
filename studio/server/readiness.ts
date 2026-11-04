@@ -216,6 +216,9 @@ export async function checkReadiness(
     await tx`SELECT key, attempts, reset_at FROM login_limits LIMIT 0`;
     await tx`SELECT id, name, active, version, created_at, updated_at FROM stores LIMIT 0`;
     await tx`SELECT store_id, actor_id, action, before_value, after_value FROM store_events LIMIT 0`;
+    await tx`SELECT id,month,version,reason,actor_id,actor_name FROM finance_month_scope_versions LIMIT 0`;
+    await tx`SELECT version_id,store_id,store_name FROM finance_month_scope_stores LIMIT 0`;
+    await tx`SELECT actor_id,request_key,month,request_hash,result FROM finance_month_scope_receipts LIMIT 0`;
     const layout =
       await tx`SELECT singleton,version FROM material_folder_layout WHERE singleton`;
     if (layout.length !== 1)

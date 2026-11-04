@@ -117,3 +117,14 @@ export class CashCorrespondence{
   const [r]=await this.db.client`SELECT result FROM studio_os.cash_movement_receipts WHERE actor_id=${who.id} AND request_key=${key} AND operation=${operation} AND target_id IS NOT DISTINCT FROM ${target}`;if(!r)throw new NotFoundException();return r.result;
  }
 }
+
+// Shared read-only evidence for monthly review; uses the same source/version and cumulative allocation rules as cash detail.
+export async function cashMonthEvidence(tx:TransactionSql,month:string):Promise<any[]>{
+ const records=await tx`SELECT r.id,r.direction,r.account_label AS "accountLabel",r.source_reference AS "sourceReference",v.version,v.paid_date::text AS "paidDate",v.amount_cents AS "amountCents",v.description,v.lines
+  FROM studio_os.cash_movement_records r JOIN LATERAL(SELECT * FROM studio_os.cash_movement_versions v WHERE v.record_id=r.id ORDER BY version DESC LIMIT 1) v ON true
+  WHERE v.status='active' AND (to_char(v.paid_date,'YYYY-MM')=${month} OR EXISTS(SELECT 1 FROM jsonb_array_elements(v.lines) l(value) LEFT JOIN studio_os.expense_records e ON e.id=(l.value->>'expenseId')::uuid
+   WHERE l.value->>'month'=${month} OR l.value->'snapshot'->>'month'=${month} OR to_char(e.expense_date,'YYYY-MM')=${month})) ORDER BY r.id`;
+ const rows=[];for(const r of records){const matches=[];for(const line of r.lines){const evidence=await match(tx,line);if(line.month===month||line.snapshot.month===month||evidence.current?.month===month||r.paidDate.startsWith(month))matches.push(evidence);}rows.push({...r,unmatchedCents:(BigInt(r.amountCents)-r.lines.reduce((n:bigint,l:any)=>n+BigInt(l.amountCents),0n)).toString(),matches});}
+ return rows;
+}
+export async function matchedIncomeCents(tx:TransactionSql,storeId:string,month:string){return allocated(tx,`income:${storeId}:${month}`);}

@@ -9,7 +9,7 @@ export function createOperatingOverviewViews({api,h,showPanel,getUser,writable,n
  async function detail(month=chinaDate().slice(0,7)){
   await showPanel('经营总览',async signal=>{
    const d=await api.financeOverview(month,signal),s=d.summary;
-   return head('经营总览')+`<button class="text-button" data-cash-sources="income" data-month="${h(month)}">核对本月收入对应到账</button>`+`<label>经营月份<input type="month" min="1900-01" max="2199-12" value="${h(month)}" data-overview-month></label><p class="planning-rule">按已录入来源测算，尚未月结。收入按每店平台月度汇总单手工填写可提现金额。佣金、退款等平台已扣项目不再扣减，商品货款、代发及工作室费用另算。公共费用在工作室层面扣一次。</p>
+   return head('经营总览')+`<button class="text-button" data-finance-review="${h(month)}">检查本月来源完整性</button><button class="text-button" data-cash-sources="income" data-month="${h(month)}">核对本月收入对应到账</button>`+`<label>经营月份<input type="month" min="1900-01" max="2199-12" value="${h(month)}" data-overview-month></label><p class="planning-rule">按已录入来源测算，尚未月结。收入按每店平台月度汇总单手工填写可提现金额。佣金、退款等平台已扣项目不再扣减，商品货款、代发及工作室费用另算。公共费用在工作室层面扣一次。</p>
     <section class="summary-strip"><div><b>${amount(s.incomeCents)}</b><span>确认收入合计</span></div><div><b>${amount(s.storeProfitCents)}</b><span>店铺利润合计（已录来源）</span></div><div><b>${amount(d.publicCents)}</b><span>已核对公共运营费用</span></div><div><b>${amount(s.studioProfitCents)}</b><span>工作室利润测算</span></div></section>
     <p>本月纳入 ${s.storeCount} 家店铺，按收入确认及本月业务来源列示。空白收入不计为零；新增或停用店铺不会改变历史公共费用。</p>
     ${maintain()?`<div class="action-row"><label>确认收入的店铺<select id="overview-income-store"><option value="">请选择</option>${d.stores.map(store=>`<option value="${h(store.id)}">${h(store.name)}${store.active?'':'（已停用）'}</option>`).join('')}</select></label><button class="secondary" data-studio-income="" data-month="${h(month)}">确认本月收入</button></div>`:''}

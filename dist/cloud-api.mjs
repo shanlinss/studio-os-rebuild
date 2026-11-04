@@ -1,3 +1,4 @@
+import {scopeState,scopePayload,scopeResult,monthReview} from './finance-month-review-contract.mjs';
 import {stockCorrectionState,stockCorrectionPayload} from './product-stock-corrections-contract.mjs';
 import {cashPage,cashSourcePage,cashState,cashPayload,cashVoidPayload} from './cash-correspondence-contract.mjs';
 import {sampleCostPage,sampleCostState,sampleCostPayload} from './sample-cost-contract.mjs';
@@ -157,6 +158,10 @@ export function createCloudApi(fetcher=globalThis.fetch,{allowWrites=false}={}){
     async tasks(profile,user,signal){if(!profile)return [];return ownTasks(await get('/api/tasks',signal),profile,user.role);},
     async task(id,signal){return read('/api/tasks/'+endpointId(id),signal,taskModel);},
     async todos(signal){return read('/api/workbench/todos',signal,v=>list(v).map(todoModel));},
+    async financeMonthReview(params,signal){costMonth(params.month);return read('/api/finance/month-review?'+new URLSearchParams({month:params.month,section:params.section??'all',severity:params.severity??'all',offset:params.offset??0}),signal,v=>monthReview(v,params.month));},
+    async financeMonthScope(month,offset=0,signal){costMonth(month);return read('/api/finance/month-scope?'+new URLSearchParams({month,offset}),signal,v=>scopeState(v,month));},
+    async saveFinanceMonthScope(value){return mutations.send('/api/finance/month-scope','POST',scopePayload(value));},
+    async financeScopeReceipt(key,month){costMonth(month);const path='/api/finance/month-scope';try{const r=scopeResult(await get(path+'/receipts/'+endpointId(key)+'?'+new URLSearchParams({month})),month);mutations.confirmRead(path);return r;}catch(e){if(e.status===404){mutations.confirmRead(path);return null;}throw e;}},
     async cashMovements(params,signal){costMonth(params.month);return read('/api/finance/cash-movements?'+new URLSearchParams({month:params.month,direction:params.direction??'all',status:params.status??'active',q:params.q??'',offset:params.offset??0}),signal,cashPage);},
     async cashSources(params,signal){costMonth(params.month);return read('/api/finance/cash-sources?'+new URLSearchParams({month:params.month,kind:params.kind??'income',q:params.q??'',offset:params.offset??0}),signal,cashSourcePage);},
     async cashMovement(id,offset=0,signal){return read('/api/finance/cash-movements/'+endpointId(id)+'?offset='+offset,signal,v=>cashState(v,id));},

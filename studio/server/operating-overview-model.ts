@@ -2,13 +2,13 @@ import {movingCosts,fraction,plus,costAmount,type Fraction,type CostMovement} fr
 const cents=(v:unknown)=>BigInt(String(v));
 const signed=(n:bigint)=>n.toString();
 function rounded(value:Fraction){const text=costAmount(value)!,negative=text.startsWith('-'),[whole,part]=text.replace('-','').split('.');return (BigInt(whole)*100n+BigInt(part))*(negative?-1n:1n);}
-export function operatingOverview(data:{stores:any[],incomes:any[],expenses:any[],fees:any[],daily:any[],dropship:any[],refunds:any[],movements:(CostMovement&{skuId:string})[],packaging:any[],inventoryCosts?:any[],feeExpenseLinks?:any[]},month:string){
+export function operatingOverview(data:{stores:any[],incomes:any[],expenses:any[],fees:any[],daily:any[],dropship:any[],refunds:any[],movements:(CostMovement&{skuId:string})[],packaging:any[],inventoryCosts?:any[],feeExpenseLinks?:any[]},month:string,onIssue?:(issue:{storeId:string|null,kind:string,id:string,label:string})=>void){
  const byStore=new Map(data.stores.map(s=>[s.id,s])),rows=new Map<string,any>(),publicIssues:any[]=[],expenseById=new Map(data.expenses.map(e=>[e.id,e]));
  let sampleAssets=fraction(0n),sampleAssetPending=0;const sampleAssetSources:any[]=[];
  const feeLinks=new Map((data.feeExpenseLinks??data.fees).filter(f=>f.expenseId).map(f=>[f.expenseId,f]));
  let publicInventory=fraction(0n),publicCents=0n,inventoryCents=0n,prepaidCents=0n;
  const get=(id:string)=>{if(!rows.has(id)){const store=byStore.get(id);if(!store)throw Error('Missing store source');rows.set(id,{storeId:id,name:store.name,active:store.active,income:null,operating:0n,stock:fraction(0n),packaging:fraction(0n),otherInventory:fraction(0n),drop:0n,fee:0n,platformFeeReference:0n,dailySale:0n,dailyRefund:0n,pending:[],sources:[]});}return rows.get(id);};
- const issue=(row:any|null,kind:string,id:string,label:string)=>{(row?row.pending:publicIssues).push({kind,id,label});};
+ const issue=(row:any|null,kind:string,id:string,label:string)=>{(row?row.pending:publicIssues).push({kind,id,label});onIssue?.({storeId:row?.storeId??null,kind,id,label});};
  const source=(row:any,kind:string,id:string)=>row.sources.push({kind,id});
  for(const income of data.incomes)if(income.status==='confirmed')get(income.storeId).income={id:income.id,version:income.version,amountCents:String(income.amountCents),sourceReference:income.sourceReference};
  for(const e of data.expenses){if(e.month!==month)continue;const row=e.storeId?get(e.storeId):null;

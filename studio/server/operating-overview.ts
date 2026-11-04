@@ -1,5 +1,6 @@
 import {sampleCostSummary} from './sample-cost-sources';
 import {inventoryCostSummary} from './inventory-cost-summary';
+import type {TransactionSql} from 'postgres';
 import type {StudioDatabase} from './database';
 import type {Identity} from './auth';
 import {currentPermission} from './permissions';
@@ -13,6 +14,12 @@ export class OperatingOverview{
   await currentPermission(this.db,who,'finance');const q=objectInput(value,['month']),month=attendanceMonth(q.month);
   return this.db.client.begin(async tx=>{
    await tx`SET TRANSACTION ISOLATION LEVEL REPEATABLE READ READ ONLY`;
+   return operatingOverview(await operatingSources(tx,month),month);
+  });
+ }
+}
+
+export async function operatingSources(tx:TransactionSql,month:string){
    const stores=await tx`SELECT id,name,active FROM studio_os.stores ORDER BY name,id`;
    const incomes=await tx`SELECT DISTINCT ON(store_id) id,store_id AS "storeId",version,amount_cents AS "amountCents",source_reference AS "sourceReference",status FROM studio_os.store_month_income_versions WHERE month=${month} ORDER BY store_id,version DESC`;
    const expenses=await tx`SELECT e.id,e.version,e.store_id AS "storeId",e.expense_scope AS "expenseScope",e.expense_use AS "expenseUse",e.amount_cents AS "amountCents",to_char(e.expense_date,'YYYY-MM') AS month,
@@ -36,7 +43,5 @@ export class OperatingOverview{
     FROM studio_os.dropship_refunds r JOIN studio_os.dropship_effective_lines l ON l.id=r.line_id JOIN studio_os.dropship_effective_documents d ON d.id=l.document_id
     JOIN LATERAL(SELECT * FROM studio_os.dropship_refund_versions v WHERE v.refund_id=r.id ORDER BY version DESC LIMIT 1) v ON true JOIN LATERAL(SELECT status FROM studio_os.dropship_cost_versions dv WHERE dv.document_id=d.id ORDER BY version DESC LIMIT 1) dv ON true WHERE v.status='active' AND dv.status='active' AND to_char(r.business_date,'YYYY-MM')=${month}`;
    const inventoryCosts=[...await inventoryCostSummary(tx,month),...await sampleCostSummary(tx,month)];
-   return operatingOverview({stores,incomes,expenses,fees:operating.filter(r=>r.kind==='fee'),daily:operating.filter(r=>r.kind!=='fee'),dropship,refunds,movements:await stockCostMovements(tx),packaging:[],inventoryCosts,feeExpenseLinks},month);
-  });
- }
+ return {stores,incomes,expenses,fees:operating.filter(r=>r.kind==='fee'),daily:operating.filter(r=>r.kind!=='fee'),dropship,refunds,movements:await stockCostMovements(tx),packaging:[],inventoryCosts,feeExpenseLinks};
 }
