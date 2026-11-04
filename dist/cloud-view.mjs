@@ -1,3 +1,4 @@
+import {createProductCostViews} from './product-cost-view.mjs';
 import {createProductPurchaseViews} from './product-purchase-view.mjs';
 import {createCommercialProductViews} from './commercial-products-view.mjs';
 import {createPhoneCardFinanceWorkspace,renderCardReminderPanel} from './phone-card-finance-workspace.mjs';
@@ -173,6 +174,7 @@ createSampleWorkspace({api,h,writable,getUser:()=>user,notify,localTime});
 const phoneCardFinanceWorkspace=createPhoneCardFinanceWorkspace({api,h,writable,getUser:()=>user,notify,localTime});
 const phoneCardWorkspace=createPhoneCardWorkspace({api,h,writable,getUser:()=>user,notify,localTime});
 const equipmentWorkspace=createEquipmentWorkspace({api,h,writable,getUser:()=>user,notify,localTime});
+createProductCostViews({api,h,showPanel,getUser:()=>user,notify});
 const productPurchaseViews=createProductPurchaseViews({api,h,showPanel,localTime,getUser:()=>user,writable,notify});
 const commercialViews=createCommercialProductViews({api,h,showPanel,source,localTime,writable,getUser:()=>user,notify});
 const warehouseViews=createWarehouseViews({api,h,heading,showPanel,localTime,writable,getUser:()=>user});

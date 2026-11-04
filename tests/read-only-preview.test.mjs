@@ -62,7 +62,7 @@ test('warehouse preview forwards only scoped reads and keeps journal edits and r
  assert.equal((await request(port,'/api/warehouse/receipts/'+id)).status,404);assert.equal((await request(port,'/api/warehouse/items?target=elsewhere')).status,400);assert.equal((await request(port,'/api/warehouse/items/'+id+'/movements/not-an-id')).status,404);assert.equal(seen.length,count);
  assert.equal((await request(port,'/api/warehouse/items/'+id+'/to-samples',{method:'POST'})).status,405);
  assert.equal((await request(port,'/api/warehouse/items/'+id+'/transfers?sampleId='+id)).status,400);assert.equal((await request(port,'/api/samples/catalog/'+id+'/transfers?owner=other')).status,400);assert.equal(seen.length,count);
- for(const path of ['/warehouse-view.mjs','/warehouse-editors.mjs','/warehouse-contract.mjs','/warehouse-transfer-editors.mjs','/commercial-products-contract.mjs','/commercial-products-editors.mjs','/commercial-products-view.mjs','/product-stock-contract.mjs','/product-stock-editors.mjs','/product-purchase-contract.mjs','/product-purchase-editors.mjs','/product-purchase-view.mjs'])assert.equal((await request(port,path)).status,200);
+ for(const path of ['/warehouse-view.mjs','/warehouse-editors.mjs','/warehouse-contract.mjs','/warehouse-transfer-editors.mjs','/commercial-products-contract.mjs','/commercial-products-editors.mjs','/commercial-products-view.mjs','/product-stock-contract.mjs','/product-stock-editors.mjs','/product-cost-contract.mjs','/product-cost-view.mjs','/product-purchase-contract.mjs','/product-purchase-editors.mjs','/product-purchase-view.mjs'])assert.equal((await request(port,path)).status,200);
  }finally{await close(preview);await close(upstream);}
 });
 test('attendance review preview exposes only scoped records and history while refusing review writes and private receipts',async()=>{
@@ -150,5 +150,15 @@ test('phone card preview preserves explicit identity claims and forwards only pr
 test('card finance and reminder preview permit exact read queries but never expose operation receipts or forward mutations',async()=>{
  const seen=[],id='11111111-1111-4111-8111-111111111111',f='/api/phone-card-finance/'+id,m='/api/phone-card-reminders',upstream=http.createServer((req,res)=>{seen.push(req.url);res.setHeader('Content-Type','application/json');res.end('{}');});await listen(upstream);const preview=createPreviewServer({upstreamPort:upstream.address().port});await listen(preview);const port=preview.address().port;
  try{for(const p of [f,f+'/recharges?from=2020-01-01&status=all&offset=50',f+'/recharges/'+id,f+'/recharges/'+id+'/history?offset=50',f+'/balances?offset=50',m+'?until=2020-01-01',m+'/'+id,m+'/'+id+'/history?offset=50'])assert.equal((await request(port,p)).status,200);const count=seen.length;for(const p of [f+'/recharges',f+'/recharges/'+id+'/void',f+'/balances',m+'/'+id])assert.equal((await request(port,p,{method:'POST'})).status,405);assert.equal((await request(port,'/api/phone-card-operations/receipts/'+id)).status,404);assert.equal((await request(port,m+'?amount=100')).status,400);assert.equal((await request(port,f+'?identity=secret')).status,400);assert.equal(seen.length,count);for(const p of ['/phone-card-finance-contract.mjs','/phone-card-finance-editors.mjs','/phone-card-finance-workspace.mjs'])assert.equal((await request(port,p)).status,200);
+ }finally{await close(preview);await close(upstream);}
+});
+
+test('cost preview forwards allowed reads and rejects unrelated queries or writes',async()=>{
+ const id='11111111-1111-4111-8111-111111111111',seen=[];
+ const upstream=http.createServer((req,res)=>{seen.push(req.url);res.writeHead(200,{'Content-Type':'application/json'});res.end('{}');});await listen(upstream);
+ const preview=createPreviewServer({upstreamPort:upstream.address().port});await listen(preview);const port=preview.address().port;
+ try{for(const path of ['/api/product-costs?offset=0','/api/product-costs/'+id+'?month=2026-01'])assert.equal((await request(port,path)).status,200);
+ assert.equal((await request(port,'/api/product-costs?month=2026-01')).status,400);assert.equal((await request(port,'/api/product-costs/'+id+'?offset=0')).status,400);
+ assert.equal((await request(port,'/api/product-costs/'+id,{method:'POST'})).status,405);assert.equal(seen.length,2);
  }finally{await close(preview);await close(upstream);}
 });

@@ -580,6 +580,7 @@ test('purchase cost versions use original inbound quantities and protect prices 
  assert.deepEqual(revisions.map(r=>r.status).sort(),[201,409]);
  await api.saveExpense(expense.id,{...expenseBody,description:'支付来源已核对修改'},1);
  assert.equal((await api.productPurchase(incoming.id)).sourceChanged,true);
+ assert.ok((await api.productCostReview(document.lines[0].snapshot.skuId,'2020-03')).issues.some(note=>note.includes('支出已变更')));
  assert.equal((await request(sessions[0],path,'POST',{...body,requestKey:randomUUID(),expectedVersion:2})).status,409);
  await api.saveProductPurchase(incoming.id,{...body,requestKey:randomUUID(),expectedVersion:2,expenseVersion:2,reason:'重新核对原支出'});
  assert.equal((await api.productPurchase(incoming.id)).sourceChanged,false);
@@ -589,4 +590,51 @@ test('purchase cost versions use original inbound quantities and protect prices 
  assert.equal((await request(sessions[0],'/product-purchases/'+second.id,'POST',{...body,requestKey:randomUUID(),code:'PURCHASE-COST-OTHER',expenseVersion:2,lines:[{movementId:secondLine.id,unitPrice:'1.00',additionalAmount:'0.00'}]})).status,409);
  assert.equal((await api.productPurchase(second.id)).batch,null);
  assert.equal((await api.warehouseItem(inventory[0].id)).quantity,4);
+ const missingCost=await api.productCostReview(document.lines.find(line=>line.quantity===3).snapshot.skuId,'2020-03');
+ assert.equal(missingCost.balanceAmount,null);assert.ok(missingCost.issues.some(note=>note.includes('尚未登记采购成本')));
+});
+
+test('moving SKU costs reuse original stock and latest procurement versions with cross-month return bases and finance permissions',async()=>{
+ const api=clients[0],store=await api.saveDirectory('store',undefined,{name:'移动成本店铺'}),product=await api.createProduct({name:'移动平均成本商品',storeId:null,notes:'',stages:['测试']});
+ await api.saveCommercialProduct(product.id,'formal',{requestKey:randomUUID(),code:'MOVING-COST-PRODUCT',reason:'登记'},0);
+ const item=await api.warehouseWrite('register',undefined,{requestKey:randomUUID(),itemCode:'MOVING-COST-STOCK',kind:'product',productId:product.id,name:'移动平均成本商品',specification:'标准',unit:'件',location:'工作室',notes:''});
+ await api.saveCommercialProduct(product.id,'sku',{requestKey:randomUUID(),id:null,code:'MOVING-COST-SKU',specification:'标准',unit:'件',active:true,warehouseItemId:item.id,reason:'关联'},1);
+ const [sku]=await db.client`SELECT id FROM studio_os.product_skus WHERE warehouse_item_id=${item.id}`;
+ await api.warehouseWrite('allocate-product',item.id,{requestKey:randomUUID(),reason:'从零期初开始',allocations:[{storeId:null,quantity:0},{storeId:store.id,quantity:0}]},1);
+ const publicBalance=async()=>(await api.warehouseItem(item.id)).balances.find(b=>b.storeId===null);
+ const incoming=async(date,quantity,price,code)=>{
+  const balance=await publicBalance(),doc=await api.saveProductStockDocument({requestKey:randomUUID(),operation:'inbound',businessDate:date,sourceReference:code,reason:'按实收登记',lines:[{balanceId:balance.id,expectedVersion:balance.version,quantity,businessStoreId:null}]});
+  const line=(await api.productStockDocument(doc.id)).lines[0],body={requestKey:randomUUID(),expectedVersion:0,code,purchaseDate:date,supplier:'成本来源供应商',expenseId:null,expenseVersion:null,reason:'核对采购依据',lines:[{movementId:line.id,unitPrice:price,additionalAmount:'0'}]};
+  await api.saveProductPurchase(doc.id,body);return {doc,line,body};
+ };
+ const first=await incoming('2026-11-01',10,'1.00','MOVING-COST-FIRST');
+ let balance=await publicBalance();
+ const sent=await api.saveProductStockDocument({requestKey:randomUUID(),operation:'shipment',businessDate:'2026-11-02',sourceReference:'实际发货',reason:'已发货',lines:[{balanceId:balance.id,expectedVersion:balance.version,quantity:4,businessStoreId:store.id}]});
+ await incoming('2026-11-03',4,'2.00','MOVING-COST-SECOND');
+ let original=(await api.productStockDocument(sent.id)).lines[0];
+ await api.saveProductStockReturn(sent.id,{requestKey:randomUUID(),businessDate:'2026-12-01',sourceReference:'原发货退回',reason:'可再次销售',resellableConfirmed:true,lines:[{shipmentMovementId:original.id,expectedVersion:original.currentVersion,quantity:2}]});
+ const stockBefore=await api.warehouseItem(item.id),historyBefore=await api.warehouseHistory(item.id);
+ const november=await api.productCostReview(sku.id,'2026-11');
+ assert.equal(november.method,'moving-average');assert.equal(november.shipmentAmount,'4.00');assert.equal(november.balanceAmount,'14.00');assert.equal(november.quantity,10);
+ let december=await api.productCostReview(sku.id,'2026-12');assert.equal(december.returnAmount,'2.00');assert.equal(december.netAmount,'-2.00');assert.equal(december.balanceAmount,'16.00');
+ await api.saveProductPurchase(first.doc.id,{...first.body,requestKey:randomUUID(),expectedVersion:1,reason:'复核采购单价',lines:[{...first.body.lines[0],unitPrice:'2.00'}]});
+ assert.equal((await api.productCostReview(sku.id,'2026-11')).shipmentAmount,'8.00');
+ december=await api.productCostReview(sku.id,'2026-12');assert.equal(december.returnAmount,'4.00');assert.equal(december.balanceAmount,'24.00');
+ assert.deepEqual(await api.warehouseItem(item.id),stockBefore);assert.deepEqual(await api.warehouseHistory(item.id),historyBefore);
+ assert.ok((await api.productCostCatalog()).rows.some(r=>r.id===sku.id));
+ assert.equal((await request(sessions[1],'/product-costs')).status,403);assert.equal((await request(sessions[1],'/product-costs/'+sku.id+'?month=2026-11')).status,403);
+ const {ProductCosts}=await import('../../.build/server/product-costs.js');
+ await assert.rejects(new ProductCosts(db).review(sessions[2].user,sku.id,{month:'2026-11'}),e=>e.status===403);
+ const username='cost_finance_'+randomBytes(4).toString('hex'),password=randomBytes(24).toString('hex');
+ await db.client`INSERT INTO studio_os.accounts(username,password_hash,role,admin_permissions) VALUES(${username},${await hashPassword(password)},'admin',ARRAY['finance'])`;
+ const finance=await new Authentication(db).login(username,password,'cost-finance');
+ assert.equal((await request(finance,'/product-costs/'+sku.id+'?month=2026-11')).status,200);
+ assert.equal((await request(sessions[0],'/product-costs/'+sku.id+'?month=2026-13')).status,400);
+ assert.equal((await request(sessions[0],'/product-costs/'+sku.id+'?month=2026-11&unexpected=1')).status,400);
+ assert.equal((await request(sessions[0],'/product-costs/'+randomUUID()+'?month=2026-11')).status,404);
+ assert.equal((await request(sessions[0],'/product-costs','POST',{})).status,404);
+ // Internal shop transfers use original quantity facts without manufacturing a new purchase cost.
+ const balances=(await api.warehouseItem(item.id)).balances,source=balances.find(b=>b.storeId===null),target=balances.find(b=>b.storeId===store.id);
+ await api.savePackagingTransfer(item.id,{requestKey:randomUUID(),sourceBalanceId:source.id,targetBalanceId:target.id,sourceVersion:source.version,targetVersion:target.version,quantity:3,reason:'分配店铺库存'},'product');
+ assert.equal((await api.productCostReview(sku.id,'2026-12')).balanceAmount,'24.00');
 });

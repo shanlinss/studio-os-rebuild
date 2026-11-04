@@ -58,6 +58,7 @@ import { PublicationAssets } from './publication-assets';
 import { SnapshotImports } from './snapshot-imports';
 import { Shooting } from './shooting';
 import { ProductObservations } from './product-observations';
+import {ProductCosts} from './product-costs';
 import {ProductPurchases} from './product-purchases';
 import {CommercialProducts} from './commercial-products';
 import { Products } from './products';
@@ -106,6 +107,7 @@ export async function createStudioApp(
   const products = new Products(database);
   const commercialProducts=new CommercialProducts(database);
   const productPurchases=new ProductPurchases(database);
+  const productCosts=new ProductCosts(database);
   const shooting = new Shooting(database);
   const productObservations = new ProductObservations(database);
   const workbench = new Workbench(database);
@@ -356,6 +358,10 @@ export async function createStudioApp(
     packagingConsumptionDetail(@Req() r:AuthRequest,@Param('id') id:string){return warehouse.consumptionDetail(r.identity!,id);}
     @Post('packaging-consumptions')
     packagingConsumption(@Req() r:AuthRequest,@Body() b:unknown){return warehouse.consumePackaging(r.identity!,b);}
+    @Get('product-costs')
+    productCostCatalog(@Req() r:AuthRequest){return productCosts.catalog(r.identity!,r.query);}
+    @Get('product-costs/:id')
+    productCostReview(@Req() r:AuthRequest,@Param('id') id:string){return productCosts.review(r.identity!,id,r.query);}
     @Get('product-purchases/:id')
     productPurchase(@Req() r:AuthRequest,@Param('id') id:string){return productPurchases.state(r.identity!,id);}
     @Get('product-purchases/:id/history')
@@ -1844,6 +1850,11 @@ export async function createStudioApp(
         requireContributor(req.identity);
         if(req.method==='GET'&&/^\/api\/packaging-consumptions\/[^/]+(?:\/[^/]+)?$/.test(req.path))return true;
         if(req.method==='POST'&&req.path==='/api/packaging-consumptions'){auth.csrf(req);return true;}
+        throw new ForbiddenException();
+      }
+      if(req.path==='/api/product-costs'||req.path.startsWith('/api/product-costs/')){
+        requirePermission(req.identity,'finance');
+        if(req.method==='GET'&&/^\/api\/product-costs(?:\/[^/]+)?$/.test(req.path))return true;
         throw new ForbiddenException();
       }
       if(req.path.startsWith('/api/product-purchases/')){
