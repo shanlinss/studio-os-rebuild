@@ -1,3 +1,4 @@
+import {ExpenseAttribution} from './expense-attribution';
 import {OperatingFinance} from './operating-finance';
 import {DropshipCosts} from './dropship-costs';
 import {ProductReferenceCosts} from './product-reference-costs';
@@ -137,6 +138,7 @@ export async function createStudioApp(
   const templates = new Templates(database);
   const competitors = new Competitors(database);
   const finance = new Finance(database);
+  const expenseAttribution=new ExpenseAttribution(database);
   const operatingFinance=new OperatingFinance(database);
   const cookie = 'studio_session';
   @Controller('api')
@@ -1238,6 +1240,10 @@ export async function createStudioApp(
     operatingFinanceRevise(@Req() r:AuthRequest,@Param('id') id:string,@Body() b:unknown){return operatingFinance.save(r.identity!,id,b);}
     @Post('finance/operating-records/:id/void')
     operatingFinanceVoid(@Req() r:AuthRequest,@Param('id') id:string,@Body() b:unknown){return operatingFinance.void(r.identity!,id,b);}
+    @Post('finance/expenses/:id/attribution')
+    expenseAttributionSave(@Req() r:AuthRequest,@Param('id') id:string,@Body() b:unknown){return expenseAttribution.save(r.identity!,id,b);}
+    @Get('finance/expenses/:id/attribution/receipts/:key')
+    expenseAttributionReceipt(@Req() r:AuthRequest,@Param('id') id:string,@Param('key') key:string){return expenseAttribution.receipt(r.identity!,id,key);}
     @Get('finance')
     financeList(@Req() r: AuthRequest) {
       return finance.list(r.identity!);

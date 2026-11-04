@@ -190,3 +190,9 @@ test('operating finance preview forwards only daily record reads and never priva
  for(const p of ['/operating-finance-contract.mjs','/operating-finance-view.mjs','/operating-finance-editors.mjs'])assert.equal((await request(port,p)).status,200);
  }finally{await close(preview);await close(upstream);}
 });
+test('expense attribution modules load in read-only preview while metadata writes and private receipts remain blocked',async()=>{
+ const id='11111111-1111-4111-8111-111111111111';const preview=createPreviewServer();await listen(preview);const port=preview.address().port;
+ try{for(const p of ['/expense-attribution-model.mjs','/expense-attribution-editors.mjs','/expense-attribution-view.mjs'])assert.equal((await request(port,p)).status,200);
+ assert.equal((await request(port,'/api/finance/expenses/'+id+'/attribution',{method:'POST'})).status,405);assert.equal((await request(port,'/api/finance/expenses/'+id+'/attribution/receipts/'+id)).status,404);
+ }finally{await close(preview);}
+});

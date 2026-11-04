@@ -1,3 +1,4 @@
+import {classification} from './expense-attribution-model.mjs';
 import {ContractError,validDate} from './cloud-contract.mjs';
 import {todoTypes,todoStatuses} from './workbench-model.mjs';
 const fields=(v,allowed)=>{if(!v||typeof v!=='object'||Array.isArray(v)||Object.keys(v).some(k=>!allowed.includes(k)))throw new ContractError('保存字段暂不兼容，请保留编辑内容后核对。');return v;};
@@ -94,9 +95,9 @@ export function decimalAmount(v){
  if(typeof v!=='string'||!/^\d{1,8}(?:\.\d{1,2})?$/.test(v))throw new ContractError('金额最多保留两位小数。');const [whole,fraction='']=v.split('.'),cents=BigInt(whole)*100n+BigInt(fraction.padEnd(2,'0'));if(cents<=0n||cents>2147483647n)throw new ContractError('金额超出允许范围。');return v;
 }
 export function expensePayload(value,version){
- const b=fields(value,['expenseDate','description','amount','paymentMode','payerId','storeId','categoryId','note',...(version===undefined?['requestKey']:[])]);
+ const b=fields(value,['expenseDate','description','amount','paymentMode','payerId','storeId','categoryId','note','expenseScope','expenseUse',...(version===undefined?['requestKey']:[])]);
  if(!['company','advance'].includes(b.paymentMode)||(b.paymentMode==='company'&&b.payerId!==null)||(b.paymentMode==='advance'&&!b.payerId))throw new ContractError('个人垫付须指定垫付人，公司支付不指定垫付人。');
- return {expenseDate:day(b.expenseDate),description:text(b.description,2000,true),amount:decimalAmount(b.amount),paymentMode:b.paymentMode,payerId:b.payerId===null?null:uuid(b.payerId),storeId:b.storeId===null?null:uuid(b.storeId),categoryId:b.categoryId===null?null:uuid(b.categoryId),note:text(b.note,2000),...(version===undefined?{requestKey:uuid(b.requestKey)}:{expectedVersion:expectedVersion(version)})};
+ return {...(b.expenseScope!==undefined||b.expenseUse!==undefined?classification(b.expenseScope,b.expenseUse,b.storeId):{}),expenseDate:day(b.expenseDate),description:text(b.description,2000,true),amount:decimalAmount(b.amount),paymentMode:b.paymentMode,payerId:b.payerId===null?null:uuid(b.payerId),storeId:b.storeId===null?null:uuid(b.storeId),categoryId:b.categoryId===null?null:uuid(b.categoryId),note:text(b.note,2000),...(version===undefined?{requestKey:uuid(b.requestKey)}:{expectedVersion:expectedVersion(version)})};
 }
 export function settlementPayload(value){
  const b=fields(value,['payerId','startDate','endDate','items','note','requestKey']);day(b.startDate);day(b.endDate);if(b.startDate>b.endDate||!Array.isArray(b.items)||!b.items.length||b.items.length>500)throw new ContractError('请选择同一垫付人的有效支出明细和日期区间。');

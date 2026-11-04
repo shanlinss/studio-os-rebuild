@@ -1,3 +1,4 @@
+import {attributionPayload} from './expense-attribution-model.mjs';
 import {operatingPage,operatingDetail,operatingQuery,operatingPayload,operatingVoid} from './operating-finance-contract.mjs';
 import {referenceState,referencePayload,dropshipList,dropshipOptions,dropshipDetail,dropshipPayload,dropshipRefundPayload} from './cost-sources-contract.mjs';
 import {openingState,openingHistory,openingPayload} from './product-opening-contract.mjs';
@@ -156,6 +157,8 @@ export function createCloudApi(fetcher=globalThis.fetch,{allowWrites=false}={}){
     async saveOperatingRecord(id,value){return mutations.send('/api/finance/operating-records'+(id?'/'+endpointId(id):''),'POST',operatingPayload(value,!!id));},
     async voidOperatingRecord(id,value){return mutations.send('/api/finance/operating-records/'+endpointId(id)+'/void','POST',operatingVoid(value));},
     async operatingReceipt(key,operation,target=null){if(!['create','revise','void'].includes(operation)||(operation==='create')!==(target===null))throw new ContractError();const path='/api/finance/operating-records'+(target?'/'+endpointId(target):'')+(operation==='void'?'/void':'');try{const r=await get('/api/finance/operating-records/receipts/'+endpointId(key)+'?'+new URLSearchParams({operation,...(target?{target}:{})}));if(!r||target&&r.id!==target||!Number.isSafeInteger(r.version)||r.version<1)throw new ContractError();endpointId(r.id);mutations.confirmRead(path);return r;}catch(e){if(e.status===404){mutations.confirmRead(path);return null;}throw e;}},
+    async saveExpenseAttribution(id,value){return mutations.send('/api/finance/expenses/'+endpointId(id)+'/attribution','POST',attributionPayload(value));},
+    async expenseAttributionReceipt(id,key){const path='/api/finance/expenses/'+endpointId(id)+'/attribution';try{const r=await get(path+'/receipts/'+endpointId(key));if(r?.id!==id||!Number.isSafeInteger(r.version)||r.version<1)throw new ContractError();mutations.confirmRead(path);return r;}catch(e){if(e.status===404){mutations.confirmRead(path);return null;}throw e;}},
     async finance(signal){return read('/api/finance',signal,financeRecord);},
     async competitors(signal){return namedList(await get('/api/competitors',signal));},
     async referenceCost(id,month,offset=0,signal){costMonth(month);return read('/api/product-reference-costs/'+endpointId(id)+'?month='+month+'&offset='+offset,signal,v=>referenceState(v,id,month));},

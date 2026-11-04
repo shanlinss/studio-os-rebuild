@@ -1,3 +1,4 @@
+import {expenseClassification} from './expense-attribution';
 import {requirePermission,livePermission} from './permissions';
 // ExpenseLedgerPanel/service@b9576d0: real expenses, statements and recorded
 // reimbursements. First-party identities/private receipts replace platform APIs.
@@ -49,6 +50,8 @@ function expenseInput(value: unknown, editing: boolean) {
     'storeId',
     'categoryId',
     'note',
+    'expenseScope',
+    'expenseUse',
     editing ? 'expectedVersion' : 'requestKey',
   ]);
   const mode = b.paymentMode;
@@ -57,6 +60,7 @@ function expenseInput(value: unknown, editing: boolean) {
   if ((mode === 'advance' && !payer) || (mode === 'company' && payer))
     throw new BadRequestException();
   return {
+    classification: b.expenseScope!==undefined||b.expenseUse!==undefined?expenseClassification(b.expenseScope,b.expenseUse,optionalId(b.storeId)):null,
     date: day(b.expenseDate),
     description: longText(b.description, 2000),
     cents: amount(b.amount),
@@ -96,7 +100,7 @@ export class Finance {
       const members =
         await tx`SELECT id,display_name AS "displayName",active FROM studio_os.members ORDER BY active DESC,display_name,id`;
       const records =
-        await tx`SELECT r.id,r.expense_date::text AS "expenseDate",r.store_id AS "storeId",s.name AS "storeName",r.category_id AS "categoryId",c.name AS "categoryName",r.description,r.amount_cents AS "amountCents",r.payment_mode AS "paymentMode",r.payer_id AS "payerId",m.display_name AS "payerName",r.note,r.version,r.request_key AS "requestKey",r.created_at AS "createdAt",r.updated_at AS "updatedAt",i.settlement_id AS "settlementId",coalesce((SELECT jsonb_agg(jsonb_build_object('id',f.id,'name',f.name,'mime',f.mime,'size',octet_length(f.content)) ORDER BY f.created_at,f.id) FROM studio_os.expense_receipts f WHERE f.expense_id=r.id),'[]') AS receipts FROM studio_os.expense_records r LEFT JOIN studio_os.stores s ON s.id=r.store_id LEFT JOIN studio_os.expense_categories c ON c.id=r.category_id LEFT JOIN studio_os.members m ON m.id=r.payer_id LEFT JOIN studio_os.expense_settlement_items i ON i.expense_id=r.id ORDER BY r.expense_date DESC,r.created_at DESC,r.id`;
+        await tx`SELECT r.id,r.expense_date::text AS "expenseDate",r.store_id AS "storeId",s.name AS "storeName",r.category_id AS "categoryId",c.name AS "categoryName",r.description,r.amount_cents AS "amountCents",r.payment_mode AS "paymentMode",r.payer_id AS "payerId",m.display_name AS "payerName",r.note,r.expense_scope AS "expenseScope",r.expense_use AS "expenseUse",r.version,r.request_key AS "requestKey",r.created_at AS "createdAt",r.updated_at AS "updatedAt",i.settlement_id AS "settlementId",coalesce((SELECT jsonb_agg(jsonb_build_object('id',f.id,'name',f.name,'mime',f.mime,'size',octet_length(f.content)) ORDER BY f.created_at,f.id) FROM studio_os.expense_receipts f WHERE f.expense_id=r.id),'[]') AS receipts FROM studio_os.expense_records r LEFT JOIN studio_os.stores s ON s.id=r.store_id LEFT JOIN studio_os.expense_categories c ON c.id=r.category_id LEFT JOIN studio_os.members m ON m.id=r.payer_id LEFT JOIN studio_os.expense_settlement_items i ON i.expense_id=r.id ORDER BY r.expense_date DESC,r.created_at DESC,r.id`;
       const settlements =
         await tx`SELECT s.id,s.payer_id AS "payerId",m.display_name AS "payerName",s.start_date::text AS "startDate",s.end_date::text AS "endDate",s.note,s.version,s.request_key AS "requestKey",s.created_at AS "createdAt",(SELECT coalesce(sum(i.amount_cents),0)::text FROM studio_os.expense_settlement_items i WHERE i.settlement_id=s.id) AS "totalCents",(SELECT coalesce(sum(p.amount_cents),0)::text FROM studio_os.expense_reimbursements p WHERE p.settlement_id=s.id) AS "paidCents",coalesce((SELECT jsonb_agg(jsonb_build_object('expenseId',i.expense_id,'amountCents',i.amount_cents) ORDER BY i.expense_id) FROM studio_os.expense_settlement_items i WHERE i.settlement_id=s.id),'[]') AS items FROM studio_os.expense_settlements s JOIN studio_os.members m ON m.id=s.payer_id ORDER BY s.created_at DESC,s.id`;
       const payments =
@@ -139,10 +143,11 @@ export class Finance {
     requirePermission(identity,'finance');
     if (id) uuid(id);
     const input = expenseInput(value, !!id),
-      { date, description, cents, mode, payer, store, category, note, v, key } =
+      { classification,date, description, cents, mode, payer, store, category, note, v, key } =
         input,
       requestHash = hash({
         actor: identity.id,
+        ...(classification?{classification}:{}),
         date,
         description,
         cents,
@@ -185,13 +190,15 @@ export class Finance {
           if (!c || (!c.active && before?.category_id !== category))
             throw new BadRequestException();
         }
+        const selected=classification??{scope:before?.expense_scope??'unclassified',use:before?.expense_use??'unclassified'};
+        expenseClassification(selected.scope,selected.use,store);
         if (id)
           [row] =
-            await tx`UPDATE studio_os.expense_records SET expense_date=${date}::date,description=${description},amount_cents=${cents},payment_mode=${mode},payer_id=${payer},store_id=${store},category_id=${category},note=${note},version=version+1,updated_at=now() WHERE id=${id} RETURNING id,version`;
+            await tx`UPDATE studio_os.expense_records SET expense_scope=${selected.scope},expense_use=${selected.use},expense_date=${date}::date,description=${description},amount_cents=${cents},payment_mode=${mode},payer_id=${payer},store_id=${store},category_id=${category},note=${note},version=version+1,updated_at=now() WHERE id=${id} RETURNING id,version`;
         else
           [row] =
-            await tx`INSERT INTO studio_os.expense_records(expense_date,description,amount_cents,payment_mode,payer_id,store_id,category_id,note,request_key,request_hash,created_by) VALUES(${date}::date,${description},${cents},${mode},${payer},${store},${category},${note},${key!},${requestHash},${identity.id}) RETURNING id,version`;
-        await tx`INSERT INTO studio_os.expense_events(entity_type,entity_id,actor_id,action,detail) VALUES('expense',${row.id},${identity.id},${id ? 'updated' : 'created'},${JSON.stringify({ before: before ?? null, after: { date, description, cents, mode, payer, store, category, note } })}::jsonb)`;
+            await tx`INSERT INTO studio_os.expense_records(expense_scope,expense_use,expense_date,description,amount_cents,payment_mode,payer_id,store_id,category_id,note,request_key,request_hash,created_by) VALUES(${selected.scope},${selected.use},${date}::date,${description},${cents},${mode},${payer},${store},${category},${note},${key!},${requestHash},${identity.id}) RETURNING id,version`;
+        await tx`INSERT INTO studio_os.expense_events(entity_type,entity_id,actor_id,action,detail) VALUES('expense',${row.id},${identity.id},${id ? 'updated' : 'created'},${JSON.stringify({ before: before ?? null, after: { date, description, cents, mode, payer, store, category, note,expenseScope:selected.scope,expenseUse:selected.use } })}::jsonb)`;
         return row;
       });
     } catch (e) {
