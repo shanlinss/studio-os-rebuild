@@ -36,7 +36,7 @@ export function movingCosts(movements:CostMovement[],month:string){
    }else if(m.operation==='inbound'){
     cost=m.totalCents===null?null:fraction(BigInt(m.totalCents));
     if(cost===null)notes.push('原入库单尚未登记采购成本');
-   }else if(m.type==='opening'&&m.totalCents!==null){cost=fraction(BigInt(m.totalCents));}
+   }else if(['opening','stocktake'].includes(m.type)&&m.totalCents!==null){cost=fraction(BigInt(m.totalCents));}
    else{cost=null;notes.push(m.type==='opening'?'期初库存尚缺成本依据':'增加库存尚缺成本依据');}
    value=value===null||cost===null?null:plus(value,cost);
   }else if(m.delta<0){
@@ -68,7 +68,7 @@ export function movingCosts(movements:CostMovement[],month:string){
     if(cost===null&&estimate!==null)estimatedRows++;
    }
    rows.push({id:m.id,day:m.day,postedAt:m.postedAt,kind:m.operation??m.type,quantity:m.quantity,delta:m.delta,documentId:m.documentId,
-    purchaseVersion:m.purchaseVersion,openingVersion:m.openingVersion??null,snapshot:m.snapshot,indicativeAmount:costAmount(indicativeCost),costBasis:cost!==null?'actual':estimate!==null?'reference':'missing',referenceId:cost===null?referenceId:null,costAmount:costAmount(cost),balanceQuantity:quantity,balanceAmount:costAmount(value),
+    exactCost:cost?{n:String(cost.n),d:String(cost.d)}:null,purchaseVersion:m.purchaseVersion,openingVersion:m.openingVersion??null,snapshot:m.snapshot,indicativeAmount:costAmount(indicativeCost),costBasis:cost!==null?'actual':estimate!==null?'reference':'missing',referenceId:cost===null?referenceId:null,costAmount:costAmount(cost),balanceQuantity:quantity,balanceAmount:costAmount(value),
     averageAmount:costAmount(value!==null&&quantity>0?times(value,1,quantity):null),notes});
   }
   for(const note of notes)issues.add(note);

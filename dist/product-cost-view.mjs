@@ -37,7 +37,7 @@ export function createProductCostViews({api,h,showPanel,getUser,notify}){
   if(e.target.closest('[data-cost-close]'))document.querySelector('#cloud-detail').close();
   const list=e.target.closest('[data-cost-catalog]'),sku=e.target.closest('[data-cost-sku]');
   if(list)catalog(Number(list.dataset.costCatalog||0)).catch(e=>notify(e.message));
-  if(sku)review(sku.dataset.costSku).catch(e=>notify(e.message));
+  if(sku)review(sku.dataset.costSku,sku.dataset.costPeriod||undefined).catch(e=>notify(e.message));
  });
  document.addEventListener('change',e=>{if(e.target.matches('[data-cost-month]'))review(e.target.dataset.costMonth,e.target.value).catch(e=>notify(e.message));});
  return {catalog,review};

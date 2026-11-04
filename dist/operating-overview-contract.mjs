@@ -16,6 +16,6 @@ export function overviewRecord(v,month){
  cents(v.publicCents);cents(v.inventoryCents);cents(v.prepaidCents);int(v.publicPendingCount);int(v.summary.storeCount);
  for(const key of ['incomeCents','directCostCents','storeProfitCents','studioProfitCents'])cents(v.summary[key],true);
  for(const s of v.stores){id(s.id);text(s.name,150);if(typeof s.active!=='boolean')fail();}
- const seen=new Set();for(const r of v.rows){id(r.storeId);if(seen.has(r.storeId)||typeof r.active!=='boolean'||!Array.isArray(r.pending)||!Array.isArray(r.sources))fail();seen.add(r.storeId);text(r.name,150);int(r.pendingCount);int(r.sourceCount);for(const key of ['operatingCents','stockCents','dropshipCents','feeCents','directCostCents','profitCents','dailySaleCents','dailyRefundCents'])cents(r[key],true);if(r.income!==null){id(r.income.id);int(r.income.version,1);cents(r.income.amountCents);}}
+ const seen=new Set();for(const r of v.rows){id(r.storeId);if(seen.has(r.storeId)||typeof r.active!=='boolean'||!Array.isArray(r.pending)||!Array.isArray(r.sources))fail();seen.add(r.storeId);text(r.name,150);int(r.pendingCount);int(r.sourceCount);for(const key of ['operatingCents','stockCents','dropshipCents','feeCents','packagingCents','otherInventoryCents','directCostCents','profitCents','dailySaleCents','dailyRefundCents'])cents(r[key],true);if(r.income!==null){id(r.income.id);int(r.income.version,1);cents(r.income.amountCents);}}
  if(v.summary.storeCount!==v.rows.length)fail();return v;
 }

@@ -31,3 +31,23 @@ test('actual stock costs stay exact across SKUs and supplier refunds reverse cos
  const r=operatingOverview(d,month);assert.equal(r.rows[0].stockCents,'67');assert.equal(r.rows[0].profitCents,'933');
  d.refunds=[{storeId:'a',amountCents:123,documentId:'old-drop'}];assert.equal(operatingOverview(d,month).rows[0].dropshipCents,'-123');assert.equal(operatingOverview(d,month).rows[0].profitCents,'1056');
 });
+test('packaging use and explicitly attributed inventory losses charge real destination or public scope once',()=>{
+ const d=data();d.incomes=[income('a',10000)];d.inventoryCosts=[{id:'pack',itemId:'item',mode:'automatic',kind:'packaging',scope:'store',storeId:'a',exact:{n:'100',d:'3'},costCents:'33',sourceChanged:false,expenseId:null},{id:'loss',itemId:'item',mode:'outflow',kind:'packaging',scope:'public',storeId:null,exact:{n:'200',d:'1'},costCents:'200',sourceChanged:false,expenseId:null}];
+ let r=operatingOverview(d,month);assert.equal(r.rows[0].packagingCents,'33');assert.equal(r.rows[0].directCostCents,'33');assert.equal(r.publicCents,'200');assert.equal(r.summary.studioProfitCents,'9767');
+ d.inventoryCosts[1].scope='unclassified';r=operatingOverview(d,month);assert.equal(r.summary.studioProfitCents,null);assert.equal(r.rows[0].profitCents,null);
+});
+test('inventory expense links count original operating expense once and flag amount, timing or competing source conflicts',()=>{
+ const d=data();d.incomes=[income('a',10000)];d.expenses=[expense('a',200,{id:'original',version:2})];d.inventoryCosts=[{id:'loss',mode:'outflow',scope:'store',storeId:'a',exact:{n:'200',d:'1'},costCents:'200',expenseId:'original',expenseSnapshot:{version:2},sourceChanged:false}];
+ let r=operatingOverview(d,month);assert.equal(r.rows[0].directCostCents,'200');assert.equal(r.rows[0].otherInventoryCents,'0');
+ d.inventoryCosts[0].costCents='201';assert.equal(operatingOverview(d,month).rows[0].profitCents,null);
+ d.inventoryCosts[0].costCents='200';d.inventoryCosts[0].expenseLinkedElsewhere=true;assert.equal(operatingOverview(d,month).rows[0].profitCents,null);
+ d.inventoryCosts[0].expenseLinkedElsewhere=false;d.expenses[0].month='2025-12';assert.equal(operatingOverview(d,month).rows[0].profitCents,null);
+});
+test('sample transfers retain asset value without operating expense or blocking otherwise known profits',()=>{
+ const d=data();d.incomes=[income('a',10000)];d.inventoryCosts=[{id:'sample',mode:'asset',scope:'unclassified',storeId:null,exact:{n:'400',d:'1'},costCents:'400',sourceChanged:false}];
+ let r=operatingOverview(d,month);assert.equal(r.sampleAssetTransferCents,'400');assert.equal(r.publicCents,'0');assert.equal(r.summary.studioProfitCents,'10000');
+ d.inventoryCosts[0].exact=null;r=operatingOverview(d,month);assert.equal(r.sampleAssetTransferCents,null);assert.equal(r.sampleAssetPending,1);assert.equal(r.summary.studioProfitCents,'10000');
+});
+test('recorded sample losses remain unresolved costs instead of being silently treated as free asset transfers',()=>{
+ const d=data();d.incomes=[income('a',10000)];d.inventoryCosts=[{id:'loss-event',mode:'sample-loss',scope:'unclassified',storeId:null}];const r=operatingOverview(d,month);assert.equal(r.summary.studioProfitCents,null);assert.equal(r.rows[0].profitCents,null);assert.equal(r.publicPending[0].kind,'sample');
+});

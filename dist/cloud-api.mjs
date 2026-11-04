@@ -1,3 +1,4 @@
+import {inventoryCostPage,inventoryCostState,inventoryCostPayload} from './inventory-cost-contract.mjs';
 import {monthIncomeState,monthIncomePayload,overviewRecord} from './operating-overview-contract.mjs';
 import {attributionPayload} from './expense-attribution-model.mjs';
 import {operatingPage,operatingDetail,operatingQuery,operatingPayload,operatingVoid} from './operating-finance-contract.mjs';
@@ -153,6 +154,10 @@ export function createCloudApi(fetcher=globalThis.fetch,{allowWrites=false}={}){
     async tasks(profile,user,signal){if(!profile)return [];return ownTasks(await get('/api/tasks',signal),profile,user.role);},
     async task(id,signal){return read('/api/tasks/'+endpointId(id),signal,taskModel);},
     async todos(signal){return read('/api/workbench/todos',signal,v=>list(v).map(todoModel));},
+    async inventoryCosts(params,signal){costMonth(params.month);const query=new URLSearchParams({month:params.month,kind:params.kind??'all',mode:params.mode??'all',q:params.q??'',offset:params.offset??0});return read('/api/finance/inventory-costs?'+query,signal,inventoryCostPage);},
+    async inventoryCost(id,offset=0,signal){return read('/api/finance/inventory-costs/'+endpointId(id)+'?offset='+offset,signal,v=>inventoryCostState(v,id));},
+    async saveInventoryCost(id,value){return mutations.send('/api/finance/inventory-costs/'+endpointId(id),'POST',inventoryCostPayload(value));},
+    async inventoryCostReceipt(id,key){const path='/api/finance/inventory-costs/'+endpointId(id);try{const r=await get(path+'/receipts/'+endpointId(key));if(r?.id!==id||!Number.isSafeInteger(r.version)||r.version<1)throw new ContractError();endpointId(r.recordId);mutations.confirmRead(path);return r;}catch(e){if(e.status===404){mutations.confirmRead(path);return null;}throw e;}},
     async financeOverview(month,signal){costMonth(month);return read('/api/finance/overview?month='+month,signal,v=>overviewRecord(v,month));},
     async monthIncome(id,month,offset=0,signal){costMonth(month);return read('/api/finance/month-income/'+endpointId(id)+'?month='+month+'&offset='+offset,signal,v=>monthIncomeState(v,id,month));},
     async saveMonthIncome(id,value){return mutations.send('/api/finance/month-income/'+endpointId(id),'POST',monthIncomePayload(value));},

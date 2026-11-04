@@ -1,3 +1,4 @@
+import {InventoryCostEvidence} from './inventory-cost-evidence';
 import {StoreMonthIncome} from './store-month-income';
 import {OperatingOverview} from './operating-overview';
 import {ExpenseAttribution} from './expense-attribution';
@@ -140,6 +141,7 @@ export async function createStudioApp(
   const templates = new Templates(database);
   const competitors = new Competitors(database);
   const finance = new Finance(database);
+  const inventoryCostEvidence=new InventoryCostEvidence(database);
   const storeMonthIncome=new StoreMonthIncome(database);
   const operatingOverview=new OperatingOverview(database);
   const expenseAttribution=new ExpenseAttribution(database);
@@ -1232,6 +1234,14 @@ export async function createStudioApp(
       return knowledge.clearCover(r.identity!, id, b);
     }
 
+    @Get('finance/inventory-costs')
+    inventoryCostList(@Req() r:AuthRequest){return inventoryCostEvidence.list(r.identity!,r.query);}
+    @Get('finance/inventory-costs/:id')
+    inventoryCostState(@Req() r:AuthRequest,@Param('id') id:string){return inventoryCostEvidence.state(r.identity!,id,r.query);}
+    @Get('finance/inventory-costs/:id/receipts/:key')
+    inventoryCostReceipt(@Req() r:AuthRequest,@Param('id') id:string,@Param('key') key:string){return inventoryCostEvidence.receipt(r.identity!,id,key);}
+    @Post('finance/inventory-costs/:id')
+    inventoryCostSave(@Req() r:AuthRequest,@Param('id') id:string,@Body() b:unknown){return inventoryCostEvidence.save(r.identity!,id,b);}
     @Get('finance/overview')
     financeOverview(@Req() r:AuthRequest){return operatingOverview.read(r.identity!,r.query);}
     @Get('finance/month-income/:id')
