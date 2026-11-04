@@ -12,9 +12,17 @@ export function costCatalog(v){
 export function costReview(v,owner,month){
  if(!v||v.sku?.id!==owner||typeof v.sku.code!=='string'||typeof v.sku.name!=='string'||v.method!=='moving-average'||v.month!==month||!int(v.quantity)||!Array.isArray(v.rows)||!Array.isArray(v.issues)||!v.issues.every(s=>typeof s==='string'))fail();
  for(const key of ['balanceAmount','averageAmount','shipmentAmount','returnAmount','netAmount'])if(!amount(v[key]))fail();
+ if(!int(v.estimatedRows)||v.estimatedRows<0)fail();
+ for(const key of ['indicativeShipmentAmount','indicativeReturnAmount','indicativeNetAmount'])if(!amount(v[key]))fail();
+ const d=v.dropship,cents=v=>v===null||typeof v==='string'&&/^-?\d+$/.test(v);
+ if(!d||!Array.isArray(d.rows)||!Array.isArray(d.refunds)||!int(d.estimatedRows)||d.estimatedRows<0)fail();
+ for(const key of ['actualCents','indicativeCents','refundCents','netCents','indicativeNetCents'])if(!cents(d[key]))fail();
+ for(const r of [...d.rows,...d.refunds])if(!id(r.id)||!id(r.documentId)||typeof r.code!=='string'||typeof r.day!=='string'||!r.day.startsWith(month+'-')||!int(r.quantity)||r.quantity<1||!cents(r.amountCents===null?null:String(r.amountCents))||r.amountCents===null||!r.snapshot)fail();
+ if(d.rows.some(r=>!['actual','reference'].includes(r.basis)))fail();
  for(const key of ['shipmentQuantity','returnQuantity'])if(!int(v[key])||v[key]<0)fail();
  for(const r of v.rows){
   if(!id(r.id)||!(r.documentId===null||id(r.documentId))||typeof r.day!=='string'||!r.day.startsWith(month+'-')||!['opening','inbound','outbound','stocktake','shipment','return'].includes(r.kind)||!int(r.quantity)||!int(r.delta)||!int(r.balanceQuantity)||!r.snapshot||!Array.isArray(r.notes)||!r.notes.every(s=>typeof s==='string'))fail();
+  if(!['actual','reference','missing'].includes(r.costBasis)||!amount(r.indicativeAmount)||!(r.referenceId===null||id(r.referenceId)))fail();
   for(const key of ['costAmount','balanceAmount','averageAmount'])if(!amount(r[key]))fail();
  }
  return v;

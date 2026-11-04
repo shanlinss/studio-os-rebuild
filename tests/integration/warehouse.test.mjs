@@ -703,3 +703,83 @@ test('scoped opening evidence must cover each original nonzero line, while a zer
  assert.equal((await request(sessions[0],path,'POST',{...body,lines:body.lines.map(line=>({...line,amount:''}))})).status,400);
  await api.saveProductOpening(sku.id,body);const review=await api.productCostReview(sku.id,state.lines[0].day.slice(0,7));assert.equal(review.quantity,5);assert.equal(review.balanceAmount,'8.00');assert.equal(review.averageAmount,'1.60');
 });
+
+test('effective reference costs separate unknown stock estimates from actual costs and retain immutable period history',async()=>{
+ const api=clients[0],store=await api.saveDirectory('store',undefined,{name:'参考成本店铺'}),product=await api.createProduct({name:'参考成本商品',storeId:null,notes:'',stages:['测试']});
+ const item=await api.warehouseWrite('register',undefined,{requestKey:randomUUID(),itemCode:'REFERENCE-STOCK',kind:'product',productId:product.id,name:'参考成本商品',specification:'标准',unit:'件',location:'工作室',notes:''});
+ const initial=await api.warehouseWrite('move',item.id,move('opening',3),1);
+ await api.saveCommercialProduct(product.id,'formal',{requestKey:randomUUID(),code:'REFERENCE-PRODUCT',reason:'登记'},0);
+ await api.saveCommercialProduct(product.id,'sku',{requestKey:randomUUID(),id:null,code:'REFERENCE-SKU',specification:'标准',unit:'件',active:true,warehouseItemId:item.id,reason:'绑定'},1);
+ const [sku]=await db.client`SELECT id FROM studio_os.product_skus WHERE warehouse_item_id=${item.id}`;
+ await api.warehouseWrite('allocate-product',item.id,{requestKey:randomUUID(),reason:'分配',allocations:[{storeId:null,quantity:3}]},2);
+ const state=await api.productOpening(sku.id),day=state.lines[0].day,month=day.slice(0,7);
+ const body={requestKey:randomUUID(),expectedVersion:0,effectiveMonth:'1900-01',unitPrice:'1.25',fulfillmentMode:'stocked',sourceReference:'原供应商报价',reason:'参考估算'};
+ const saved=await api.saveReferenceCost(sku.id,body);assert.deepEqual(await api.saveReferenceCost(sku.id,body),saved);assert.deepEqual(await api.referenceCostReceipt(sku.id,body.requestKey),saved);
+ let ref=await api.referenceCost(sku.id,month);assert.equal(ref.current.unitCents,125);assert.equal(ref.version,1);
+ const frozen=ref.history.rows[0],balance=(await api.warehouseItem(item.id)).balances[0];
+ await api.saveProductStockDocument({requestKey:randomUUID(),operation:'shipment',businessDate:day,sourceReference:'估算发货',reason:'实际发货',lines:[{balanceId:balance.id,expectedVersion:balance.version,quantity:1,businessStoreId:store.id}]});
+ let review=await api.productCostReview(sku.id,month);assert.equal(review.shipmentAmount,null);assert.equal(review.indicativeShipmentAmount,'1.25');assert.equal(review.balanceAmount,null);assert.equal(review.estimatedRows,1);
+ const stockBefore=await api.warehouseItem(item.id),ledgerBefore=await api.finance();
+ await api.saveProductOpening(sku.id,{requestKey:randomUUID(),expectedVersion:0,sourceReference:'原成本表',reason:'核实真实成本',lines:[{movementId:initial.movementId,amount:'9.00'}]});
+ review=await api.productCostReview(sku.id,month);assert.equal(review.shipmentAmount,'3.00');assert.equal(review.indicativeShipmentAmount,'3.00');assert.equal(review.estimatedRows,0);
+ await api.saveReferenceCost(sku.id,{...body,requestKey:randomUUID(),expectedVersion:1,effectiveMonth:'2199-01',unitPrice:'5.00',fulfillmentMode:'dropship'});
+ assert.equal((await api.referenceCost(sku.id,month)).current.unitCents,125);assert.equal((await api.referenceCost(sku.id,'2199-01')).current.unitCents,500);
+ const path='/product-reference-costs/'+sku.id,revision={...body,requestKey:randomUUID(),expectedVersion:2,unitPrice:null,reason:'该期停止估算'};
+ const replies=await Promise.all([request(sessions[0],path,'POST',revision),request(sessions[0],path,'POST',{...revision,requestKey:randomUUID()})]);assert.deepEqual(replies.map(r=>r.status).sort(),[201,409]);
+ ref=await api.referenceCost(sku.id,month);assert.equal(ref.current.unitCents,null);assert.deepEqual(ref.history.rows.find(r=>r.version===1),frozen);
+ assert.equal((await request(sessions[1],path+'?month='+month)).status,403);
+ assert.equal((await request(sessions[0],path,'POST',{...revision,requestKey:randomUUID(),expectedVersion:3,fulfillmentMode:['stocked']})).status,400);
+ assert.deepEqual(await api.warehouseItem(item.id),stockBefore);assert.deepEqual(await api.finance(),ledgerBefore);
+ const {ProductReferenceCosts}=await import('../../.build/server/product-reference-costs.js');await assert.rejects(new ProductReferenceCosts(db).state(sessions[2].user,sku.id,{month}),e=>e.status===403);
+ for(const table of ['product_reference_costs','product_reference_receipts'])await assert.rejects(db.client.unsafe('DELETE FROM studio_os.'+table),e=>e.code==='23514');
+});
+
+test('multi-SKU dropship batches preserve estimates, correct actual costs and record supplier refunds without stock or ledger side effects',async()=>{
+ const api=clients[0],store=await api.saveDirectory('store',undefined,{name:'代发业务店铺'}),product=await api.createProduct({name:'代发正式商品',storeId:null,notes:'',stages:['测试']});
+ await api.saveCommercialProduct(product.id,'formal',{requestKey:randomUUID(),code:'DROPSHIP-PRODUCT',reason:'登记'},0);
+ const skus=[];
+ const bound=await api.warehouseWrite('register',undefined,{requestKey:randomUUID(),itemCode:'DROPSHIP-BOUND-STOCK',kind:'product',productId:product.id,name:'已有库存代发商品',specification:'0',unit:'件',location:'工作室',notes:''});
+ await api.warehouseWrite('move',bound.id,move('opening',5),1);
+ for(let i=0;i<2;i++){
+  await api.saveCommercialProduct(product.id,'sku',{requestKey:randomUUID(),id:null,code:'DROPSHIP-SKU-'+i,specification:String(i),unit:'件',active:true,warehouseItemId:i?null:bound.id,reason:'核对原库存关联'},i+1);
+  const [sku]=await db.client`SELECT id FROM studio_os.product_skus WHERE code=${'DROPSHIP-SKU-'+i}`;skus.push(sku);
+ }
+ assert.ok((await api.productCostCatalog()).rows.some(r=>r.id===skus[1].id));assert.equal((await api.productCostReview(skus[1].id,'2020-01')).sku.itemId,null);
+ const refBody={requestKey:randomUUID(),expectedVersion:0,effectiveMonth:'2020-01',unitPrice:'1.25',fulfillmentMode:'dropship',sourceReference:'供应商代发报价',reason:'该期代发'};
+ await api.saveReferenceCost(skus[1].id,refBody);
+ const options=await api.dropshipOptions();assert.ok(options.stores.some(r=>r.id===store.id));assert.ok((await api.dropshipOptions('DROPSHIP-SKU-1')).rows.some(r=>r.id===skus[1].id));
+ const stockBefore=await api.warehouseCatalog(),ledgerBefore=await api.finance();
+ const body={requestKey:randomUUID(),code:'DROPSHIP-BATCH-ONE',businessDate:'2020-01-02',supplier:'代发供应商',sourceReference:'供应商发货清单',reason:'按实际清单核对',lines:[{skuCode:'DROPSHIP-SKU-0',storeId:store.id,quantity:2,basis:'actual',amount:'5.00'},{skuCode:'DROPSHIP-SKU-1',storeId:store.id,quantity:4,basis:'reference',amount:null}]};
+ assert.equal((await request(sessions[1],'/dropship-costs')).status,403);
+ assert.equal((await request(sessions[0],'/dropship-costs','POST',{...body,lines:[{...body.lines[0],basis:['actual']}]})).status,400);
+ assert.equal((await fetch(base+'/api/dropship-costs',{method:'POST',headers:{Origin:base,'Content-Type':'application/json',Cookie:'studio_session='+sessions[0].token},body:JSON.stringify(body)})).status,403);
+ await db.client.unsafe(`CREATE FUNCTION studio_os.fail_dropship_receipt() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN RAISE EXCEPTION 'test dropship rollback'; END; $$;
+ CREATE TRIGGER fail_dropship_receipt BEFORE INSERT ON studio_os.dropship_cost_receipts FOR EACH ROW EXECUTE FUNCTION studio_os.fail_dropship_receipt();`);
+ try{assert.equal((await request(sessions[0],'/dropship-costs','POST',body)).status,500);assert.equal((await api.dropshipList()).total,0);}
+ finally{await db.client.unsafe('DROP TRIGGER fail_dropship_receipt ON studio_os.dropship_cost_receipts; DROP FUNCTION studio_os.fail_dropship_receipt()');}
+ const saved=await api.saveDropship(null,body);assert.deepEqual(await api.saveDropship(null,body),saved);assert.deepEqual(await api.dropshipReceipt(body.requestKey,'create'),saved);
+ let detail=await api.dropshipDetail(saved.id);const frozen=detail.record;assert.equal(detail.lines.length,2);assert.equal(detail.record.lines[1].amountCents,500);assert.equal(detail.record.lines[1].basis,'reference');assert.equal(detail.record.lines[1].reference.version,1);
+ const line=detail.lines[0],other=detail.lines[1],path='/dropship-costs/'+saved.id;
+ await api.saveReferenceCost(skus[1].id,{...refBody,requestKey:randomUUID(),expectedVersion:1,unitPrice:'2.00'});
+ assert.equal((await api.dropshipDetail(saved.id)).record.lines[1].amountCents,500);
+ let review=await api.productCostReview(skus[1].id,'2020-01');assert.equal(review.dropship.actualCents,null);assert.equal(review.dropship.indicativeCents,'500');assert.equal(review.quantity,0);assert.equal(review.dropship.estimatedRows,1);
+ const revise={requestKey:randomUUID(),expectedVersion:1,reason:'收到供应商实际结算',lines:[{lineId:line.id,basis:'actual',amount:'5.00'},{lineId:other.id,basis:'actual',amount:'6.00'}]};
+ const replies=await Promise.all([request(sessions[0],path,'POST',revise),request(sessions[0],path,'POST',{...revise,requestKey:randomUUID()})]);assert.deepEqual(replies.map(r=>r.status).sort(),[201,409]);
+ detail=await api.dropshipDetail(saved.id);assert.deepEqual(detail.history.rows.find(r=>r.version===1),frozen);assert.equal((await api.productCostReview(skus[1].id,'2020-01')).dropship.actualCents,'600');
+ const refund={requestKey:randomUUID(),refundId:null,expectedVersion:0,lineId:line.id,quantity:1,businessDate:'2020-02-01',sourceReference:'供应商实际退款单-1',amount:'1.23',reason:'按到账退款核对'};
+ const returned=await api.saveDropshipRefund(saved.id,refund);assert.deepEqual(await api.saveDropshipRefund(saved.id,refund),returned);assert.deepEqual(await api.dropshipReceipt(refund.requestKey,'refund',saved.id),returned);
+ review=await api.productCostReview(skus[0].id,'2020-02');assert.equal(review.dropship.refundCents,'123');assert.equal(review.dropship.netCents,'-123');
+ assert.equal((await request(sessions[0],path+'/refunds','POST',{...refund,requestKey:randomUUID()})).status,409);
+ assert.equal((await request(sessions[0],path+'/refunds','POST',{...refund,requestKey:randomUUID(),businessDate:'2020-01-01'})).status,400);
+ const concurrent=await Promise.all(['2','3'].map(n=>request(sessions[0],path+'/refunds','POST',{...refund,requestKey:randomUUID(),sourceReference:'供应商实际退款单-'+n,amount:'0.77'})));assert.deepEqual(concurrent.map(r=>r.status).sort(),[201,409]);
+ const adjustment={...refund,requestKey:randomUUID(),refundId:returned.refundId,expectedVersion:1,amount:'1.50',reason:'供应商补退复核'};
+ await api.saveDropshipRefund(saved.id,adjustment);detail=await api.dropshipDetail(saved.id);const history=detail.refunds.find(r=>r.id===returned.refundId).history;assert.equal(history.length,2);assert.equal(history[0].amountCents,150);assert.equal(history[1].amountCents,123);
+ assert.equal((await request(sessions[0],path+'/refunds','POST',{...adjustment,requestKey:randomUUID(),expectedVersion:2,quantity:2})).status,409);
+ assert.equal((await api.productCostReview(skus[0].id,'2020-02')).dropship.refundCents,'227');
+ assert.deepEqual(await api.warehouseCatalog(),stockBefore);assert.deepEqual(await api.finance(),ledgerBefore);
+ const {DropshipCosts}=await import('../../.build/server/dropship-costs.js');await assert.rejects(new DropshipCosts(db).detail(sessions[2].user,saved.id,{}),e=>e.status===403);
+ for(const table of ['dropship_cost_documents','dropship_cost_lines','dropship_cost_versions','dropship_refunds','dropship_refund_versions','dropship_cost_receipts'])await assert.rejects(db.client.unsafe('DELETE FROM studio_os.'+table),e=>e.code==='23514');
+ const username='dropship_finance_'+randomBytes(4).toString('hex'),password=randomBytes(24).toString('hex');
+ await db.client`INSERT INTO studio_os.accounts(username,password_hash,role,admin_permissions) VALUES(${username},${await hashPassword(password)},'admin',ARRAY['finance'])`;
+ const finance=await new Authentication(db).login(username,password,'dropship-finance');assert.equal((await request(finance,path)).status,200);assert.equal((await request(finance,path,'POST',{...revise,expectedVersion:2})).status,403);
+});

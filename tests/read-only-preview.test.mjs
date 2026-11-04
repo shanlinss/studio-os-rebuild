@@ -172,3 +172,13 @@ test('opening-cost preview exposes evidence and history but keeps edits and reco
  for(const p of ['/product-opening-contract.mjs','/product-opening-view.mjs','/product-opening-editors.mjs'])assert.equal((await request(port,p)).status,200);
  }finally{await close(preview);await close(upstream);}
 });
+test('reference and dropship preview supports exact reads while refusing cost writes and private recovery receipts',async()=>{
+ const id='11111111-1111-4111-8111-111111111111',seen=[];
+ const upstream=http.createServer((req,res)=>{seen.push(req.url);res.writeHead(200,{'Content-Type':'application/json'});res.end('{}');});await listen(upstream);
+ const preview=createPreviewServer({upstreamPort:upstream.address().port});await listen(preview);const port=preview.address().port;
+ try{for(const p of ['/api/product-reference-costs/'+id+'?month=2026-11&offset=50','/api/dropship-costs?offset=0','/api/dropship-costs/options?q=sku&offset=50','/api/dropship-costs/'+id+'?offset=50'])assert.equal((await request(port,p)).status,200);
+ assert.equal((await request(port,'/api/dropship-costs/'+id+'?month=2026-11')).status,400);assert.equal((await request(port,'/api/dropship-costs/receipts/'+id)).status,404);assert.equal((await request(port,'/api/product-reference-costs/'+id+'/receipts/'+id)).status,404);
+ assert.equal((await request(port,'/api/dropship-costs/'+id+'/refunds',{method:'POST'})).status,405);assert.equal(seen.length,4);
+ for(const p of ['/cost-sources-contract.mjs','/cost-sources-view.mjs','/cost-sources-editors.mjs'])assert.equal((await request(port,p)).status,200);
+ }finally{await close(preview);await close(upstream);}
+});

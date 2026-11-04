@@ -8,13 +8,14 @@ export function costAmount(a:Fraction|null):string|null{if(a===null)return null;
 export interface CostMovement{
  id:string;type:string;quantity:number;delta:number;day:string;postedAt:string;documentId:string|null;
  operation:string|null;totalCents:number|null;sourceShipmentId:string|null;purchaseVersion:number|null;
- openingVersion?:number|null;sourceChanged:boolean;snapshot:Record<string,unknown>;duplicateOpening:boolean;internalTransfer:boolean;
+ referenceUnitCents?:number|null;referenceId?:string|null;openingVersion?:number|null;sourceChanged:boolean;snapshot:Record<string,unknown>;duplicateOpening:boolean;internalTransfer:boolean;
 }
 export function movingCosts(movements:CostMovement[],month:string){
  let quantity=0,value:Fraction|null=zero();
- const issues=new Set<string>(),shipments=new Map<string,{quantity:number,cost:Fraction|null}>();
+ const issues=new Set<string>(),shipments=new Map<string,{quantity:number,cost:Fraction|null,estimate:Fraction|null,referenceId:string|null}>();
  const totals:{shipment:Fraction|null,returns:Fraction|null}={shipment:zero(),returns:zero()};
  let shipmentQuantity=0,returnQuantity=0;
+ const indicative:{shipment:Fraction|null,returns:Fraction|null}={shipment:zero(),returns:zero()};let estimatedRows=0;
  const rows=[];
  // Backdated business documents are replayed on their business date; no financial posting is changed.
  const ordered=[...movements].filter(m=>!m.duplicateOpening&&!m.internalTransfer)
@@ -48,17 +49,29 @@ export function movingCosts(movements:CostMovement[],month:string){
   // A fully depleted pool permits a new known basis; an unresolved shipment retains its own unknown cost.
   if(quantity===0)value=zero();
   if(m.sourceChanged)notes.push('采购引用的支出已变更，请核对采购成本版本');
-  if(m.operation==='shipment')shipments.set(m.id,{quantity:m.quantity,cost});
+  const original=m.operation==='return'?shipments.get(m.sourceShipmentId??''):null;
+  let estimate:Fraction|null=null,referenceId:string|null=null;
+  if(m.operation==='shipment'&&m.referenceUnitCents!=null){estimate=fraction(BigInt(m.referenceUnitCents)*BigInt(m.quantity));referenceId=m.referenceId??null;}
+  if(m.operation==='return'&&original?.estimate){estimate=times(original.estimate,m.quantity,original.quantity);referenceId=original.referenceId;}
+  if(m.operation==='shipment')shipments.set(m.id,{quantity:m.quantity,cost,estimate,referenceId});
+  const indicativeCost=cost??estimate;
+
   if(m.day.startsWith(month)){
    if(m.operation==='shipment'){shipmentQuantity+=m.quantity;totals.shipment=totals.shipment===null||cost===null?null:plus(totals.shipment,cost);}
    if(m.operation==='return'){returnQuantity+=m.quantity;totals.returns=totals.returns===null||cost===null?null:plus(totals.returns,cost);}
+   if(m.operation==='shipment'||m.operation==='return'){
+    const key=m.operation==='shipment'?'shipment':'returns';
+    indicative[key]=indicative[key]===null||indicativeCost===null?null:plus(indicative[key]!,indicativeCost);
+    if(cost===null&&estimate!==null)estimatedRows++;
+   }
    rows.push({id:m.id,day:m.day,postedAt:m.postedAt,kind:m.operation??m.type,quantity:m.quantity,delta:m.delta,documentId:m.documentId,
-    purchaseVersion:m.purchaseVersion,openingVersion:m.openingVersion??null,snapshot:m.snapshot,costAmount:costAmount(cost),balanceQuantity:quantity,balanceAmount:costAmount(value),
+    purchaseVersion:m.purchaseVersion,openingVersion:m.openingVersion??null,snapshot:m.snapshot,indicativeAmount:costAmount(indicativeCost),costBasis:cost!==null?'actual':estimate!==null?'reference':'missing',referenceId:cost===null?referenceId:null,costAmount:costAmount(cost),balanceQuantity:quantity,balanceAmount:costAmount(value),
     averageAmount:costAmount(value!==null&&quantity>0?times(value,1,quantity):null),notes});
   }
   for(const note of notes)issues.add(note);
  }
  return {month,quantity,balanceAmount:costAmount(value),averageAmount:costAmount(value!==null&&quantity>0?times(value,1,quantity):null),
   shipmentQuantity,returnQuantity,shipmentAmount:costAmount(totals.shipment),returnAmount:costAmount(totals.returns),
+  estimatedRows,indicativeShipmentAmount:costAmount(indicative.shipment),indicativeReturnAmount:costAmount(indicative.returns),indicativeNetAmount:costAmount(indicative.shipment!==null&&indicative.returns!==null?plus(indicative.shipment,times(indicative.returns,-1)):null),
   netAmount:costAmount(totals.shipment!==null&&totals.returns!==null?plus(totals.shipment,times(totals.returns,-1)):null),issues:[...issues],rows};
 }

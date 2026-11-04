@@ -1,3 +1,4 @@
+import {createCostSourcesEditors} from './cost-sources-editors.mjs';
 import {createProductOpeningEditors} from './product-opening-editors.mjs';
 import {createProductPurchaseEditors} from './product-purchase-editors.mjs';
 import {createProductStockEditors} from './product-stock-editors.mjs';
@@ -137,12 +138,13 @@ export function createRecordEditors({api,h,onSaved,notify}){
  const inventoryAccessEditors=createInventoryAccessEditors({api,h,mount,area,select});
  const accountLifecycleEditors=createAccountLifecycleEditors({api,h,mount,input,area,select});
  const warehouseTransferEditors=createWarehouseTransferEditors({api,h,mount,input,area,select});
+ const costSourcesEditors=createCostSourcesEditors({api,h,mount,input,area,select});
  const productOpeningEditors=createProductOpeningEditors({api,h,mount,input,area});
  const productPurchaseEditors=createProductPurchaseEditors({api,h,mount,input,area,select});
  const productStockEditors=createProductStockEditors({api,h,mount,input,area,select});
  const commercialEditors=createCommercialProductEditors({api,h,mount,input,area,select});
  const warehouseEditors=createWarehouseEditors({api,h,mount,input,area,select});
  const shootingEditors=createShootingEditors({api,h,mount,input,area,select});
- return {...productOpeningEditors,...productPurchaseEditors,...productStockEditors,...commercialEditors,material,product,publication,snapshot,todo,experiment,dispatch,review,conclusion,...shootingEditors,...operations,...warehouseEditors,...warehouseTransferEditors,...accountLifecycleEditors,...inventoryAccessEditors,...equipmentPurchaseEditors,...equipmentAssetsEditors,...phoneCardEditors,...phoneCardFinanceEditors,...attendanceEditors,...leaveEditors,...exceptionEditors,...monthlyEditors,...closureEditors,...payrollEditors,...payrollConfirmationEditors,...personnelEditors};
+ return {...costSourcesEditors,...productOpeningEditors,...productPurchaseEditors,...productStockEditors,...commercialEditors,material,product,publication,snapshot,todo,experiment,dispatch,review,conclusion,...shootingEditors,...operations,...warehouseEditors,...warehouseTransferEditors,...accountLifecycleEditors,...inventoryAccessEditors,...equipmentPurchaseEditors,...equipmentAssetsEditors,...phoneCardEditors,...phoneCardFinanceEditors,...attendanceEditors,...leaveEditors,...exceptionEditors,...monthlyEditors,...closureEditors,...payrollEditors,...payrollConfirmationEditors,...personnelEditors};
 
 }

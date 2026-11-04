@@ -1,3 +1,5 @@
+import {DropshipCosts} from './dropship-costs';
+import {ProductReferenceCosts} from './product-reference-costs';
 import {EmploymentDates} from './employment-dates';
 import {AdminPayrollBasis} from './payroll-basis';
 import {PayrollConfirmations} from './payroll-confirmations';
@@ -110,6 +112,8 @@ export async function createStudioApp(
   const productPurchases=new ProductPurchases(database);
   const productCosts=new ProductCosts(database);
   const openingCosts=new ProductOpeningCosts(database);
+  const referenceCosts=new ProductReferenceCosts(database);
+  const dropshipCosts=new DropshipCosts(database);
   const shooting = new Shooting(database);
   const productObservations = new ProductObservations(database);
   const workbench = new Workbench(database);
@@ -360,6 +364,26 @@ export async function createStudioApp(
     packagingConsumptionDetail(@Req() r:AuthRequest,@Param('id') id:string){return warehouse.consumptionDetail(r.identity!,id);}
     @Post('packaging-consumptions')
     packagingConsumption(@Req() r:AuthRequest,@Body() b:unknown){return warehouse.consumePackaging(r.identity!,b);}
+    @Get('product-reference-costs/:id')
+    referenceCostState(@Req() r:AuthRequest,@Param('id') id:string){return referenceCosts.state(r.identity!,id,r.query);}
+    @Get('product-reference-costs/:id/receipts/:key')
+    referenceCostReceipt(@Req() r:AuthRequest,@Param('id') id:string,@Param('key') key:string){return referenceCosts.receipt(r.identity!,id,key);}
+    @Post('product-reference-costs/:id')
+    referenceCostSave(@Req() r:AuthRequest,@Param('id') id:string,@Body() b:unknown){return referenceCosts.save(r.identity!,id,b);}
+    @Get('dropship-costs')
+    dropshipList(@Req() r:AuthRequest){return dropshipCosts.list(r.identity!,r.query);}
+    @Get('dropship-costs/options')
+    dropshipOptions(@Req() r:AuthRequest){return dropshipCosts.options(r.identity!,r.query);}
+    @Get('dropship-costs/receipts/:key')
+    dropshipReceipt(@Req() r:AuthRequest,@Param('key') key:string){const q=objectInput(r.query,['operation','target']);return dropshipCosts.receipt(r.identity!,key,String(q.operation),q.target?String(q.target):null);}
+    @Get('dropship-costs/:id')
+    dropshipDetail(@Req() r:AuthRequest,@Param('id') id:string){return dropshipCosts.detail(r.identity!,id,r.query);}
+    @Post('dropship-costs')
+    dropshipCreate(@Req() r:AuthRequest,@Body() b:unknown){return dropshipCosts.create(r.identity!,b);}
+    @Post('dropship-costs/:id')
+    dropshipRevise(@Req() r:AuthRequest,@Param('id') id:string,@Body() b:unknown){return dropshipCosts.revise(r.identity!,id,b);}
+    @Post('dropship-costs/:id/refunds')
+    dropshipRefund(@Req() r:AuthRequest,@Param('id') id:string,@Body() b:unknown){return dropshipCosts.refund(r.identity!,id,b);}
     @Get('product-opening-costs/:id')
     openingCostState(@Req() r:AuthRequest,@Param('id') id:string){return openingCosts.state(r.identity!,id);}
     @Get('product-opening-costs/:id/history')
@@ -1860,6 +1884,18 @@ export async function createStudioApp(
         requireContributor(req.identity);
         if(req.method==='GET'&&/^\/api\/packaging-consumptions\/[^/]+(?:\/[^/]+)?$/.test(req.path))return true;
         if(req.method==='POST'&&req.path==='/api/packaging-consumptions'){auth.csrf(req);return true;}
+        throw new ForbiddenException();
+      }
+      if(req.path.startsWith('/api/product-reference-costs/')){
+        requirePermission(req.identity,'finance');
+        if(req.method==='GET'&&/^\/api\/product-reference-costs\/[^/]+(?:\/receipts\/[^/]+)?$/.test(req.path))return true;
+        if(req.method==='POST'&&/^\/api\/product-reference-costs\/[^/]+$/.test(req.path)){requirePermission(req.identity,'resources');auth.csrf(req);return true;}
+        throw new ForbiddenException();
+      }
+      if(req.path==='/api/dropship-costs'||req.path.startsWith('/api/dropship-costs/')){
+        requirePermission(req.identity,'finance');
+        if(req.method==='GET'&&/^\/api\/dropship-costs(?:\/[^/]+(?:\/[^/]+)?)?$/.test(req.path))return true;
+        if(req.method==='POST'&&/^\/api\/dropship-costs(?:\/[^/]+(?:\/refunds)?)?$/.test(req.path)){requirePermission(req.identity,'resources');auth.csrf(req);return true;}
         throw new ForbiddenException();
       }
       if(req.path.startsWith('/api/product-opening-costs/')){

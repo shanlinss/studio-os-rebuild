@@ -1,3 +1,4 @@
+import {referenceState,referencePayload,dropshipList,dropshipOptions,dropshipDetail,dropshipPayload,dropshipRefundPayload} from './cost-sources-contract.mjs';
 import {openingState,openingHistory,openingPayload} from './product-opening-contract.mjs';
 import {costMonth,costCatalog,costReview} from './product-cost-contract.mjs';
 import {productPurchaseState,productPurchaseHistory,productPurchasePayload} from './product-purchase-contract.mjs';
@@ -151,6 +152,15 @@ export function createCloudApi(fetcher=globalThis.fetch,{allowWrites=false}={}){
     async todos(signal){return read('/api/workbench/todos',signal,v=>list(v).map(todoModel));},
     async finance(signal){return read('/api/finance',signal,financeRecord);},
     async competitors(signal){return namedList(await get('/api/competitors',signal));},
+    async referenceCost(id,month,offset=0,signal){costMonth(month);return read('/api/product-reference-costs/'+endpointId(id)+'?month='+month+'&offset='+offset,signal,v=>referenceState(v,id,month));},
+    async saveReferenceCost(id,value){return mutations.send('/api/product-reference-costs/'+endpointId(id),'POST',referencePayload(value));},
+    async referenceCostReceipt(id,key){const path='/api/product-reference-costs/'+endpointId(id);try{const r=await get(path+'/receipts/'+endpointId(key));if(r?.id!==id||!Number.isSafeInteger(r.version)||r.version<1)throw new ContractError();endpointId(r.recordId);mutations.confirmRead(path);return r;}catch(e){if(e.status===404){mutations.confirmRead(path);return null;}throw e;}},
+    async dropshipList(offset=0,signal){return read('/api/dropship-costs?offset='+offset,signal,dropshipList);},
+    async dropshipOptions(q='',offset=0,signal){return read('/api/dropship-costs/options?'+new URLSearchParams({q,offset}),signal,dropshipOptions);},
+    async dropshipDetail(id,offset=0,signal){return read('/api/dropship-costs/'+endpointId(id)+'?offset='+offset,signal,v=>dropshipDetail(v,id));},
+    async saveDropship(id,value){return mutations.send('/api/dropship-costs'+(id?'/'+endpointId(id):''),'POST',dropshipPayload(value,!!id));},
+    async saveDropshipRefund(id,value){return mutations.send('/api/dropship-costs/'+endpointId(id)+'/refunds','POST',dropshipRefundPayload(value));},
+    async dropshipReceipt(key,operation,target=null){if(!['create','revise','refund'].includes(operation)||operation==='create'&&target!==null||operation!=='create'&&target===null)throw new ContractError();const path='/api/dropship-costs'+(target?'/'+endpointId(target):'')+(operation==='refund'?'/refunds':'');try{const r=await get('/api/dropship-costs/receipts/'+endpointId(key)+'?'+new URLSearchParams({operation,...(target?{target}:{})}));if(!r||target&&r.id!==target||!Number.isSafeInteger(r.version)||r.version<1)throw new ContractError();endpointId(r.id);endpointId(r.recordId);if(operation==='refund')endpointId(r.refundId);mutations.confirmRead(path);return r;}catch(e){if(e.status===404){mutations.confirmRead(path);return null;}throw e;}},
     async productOpening(id,signal){return read('/api/product-opening-costs/'+endpointId(id),signal,v=>openingState(v,id));},
     async productOpeningHistory(id,offset=0,signal){return read('/api/product-opening-costs/'+endpointId(id)+'/history?offset='+offset,signal,openingHistory);},
     async saveProductOpening(id,value){return mutations.send('/api/product-opening-costs/'+endpointId(id),'POST',openingPayload(value));},

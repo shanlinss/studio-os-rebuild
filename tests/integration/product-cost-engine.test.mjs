@@ -37,3 +37,9 @@ test('explicit original opening cost participates without unit-price rounding an
  const result=movingCosts([opening,copy,sent],'2026-01');assert.equal(result.shipmentAmount,'3.34');assert.equal(result.balanceAmount,'6.67');assert.equal(result.quantity,4);assert.equal(result.rows[0].openingVersion,2);assert.deepEqual(result.issues,[]);
  const free=movingCosts([row(null,2,0,{type:'opening'}),row('shipment',1)],'2026-01');assert.equal(free.shipmentAmount,'0.00');
 });
+test('reference estimates never enter actual inventory and returns use the original shipment reference',()=>{
+ const opening=row(null,6,null,{type:'opening'}),sent=row('shipment',2,null,{referenceUnitCents:125,referenceId:'ref-old'}),returned=row('return',1,null,{sourceShipmentId:sent.id,referenceUnitCents:999,referenceId:'ref-new',day:'2026-02-01'});
+ const jan=movingCosts([opening,sent,returned],'2026-01');assert.equal(jan.shipmentAmount,null);assert.equal(jan.balanceAmount,null);assert.equal(jan.indicativeShipmentAmount,'2.50');assert.equal(jan.rows.at(-1).costBasis,'reference');assert.equal(jan.estimatedRows,1);
+ const feb=movingCosts([opening,sent,returned],'2026-02');assert.equal(feb.returnAmount,null);assert.equal(feb.indicativeReturnAmount,'1.25');assert.equal(feb.rows[0].referenceId,'ref-old');
+ const known=movingCosts([row('inbound',2,400),row('shipment',1,null,{referenceUnitCents:999,referenceId:'ref-new'})],'2026-01');assert.equal(known.shipmentAmount,'2.00');assert.equal(known.indicativeShipmentAmount,'2.00');assert.equal(known.estimatedRows,0);assert.equal(known.rows.at(-1).referenceId,null);
+});
