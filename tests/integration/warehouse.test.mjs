@@ -220,3 +220,48 @@ test('batch packaging use checks every source, preserves destination provenance 
  assert.equal((await request(sessions[1],path+'/receipts/'+value.requestKey)).status,403);
  assert.equal((await admin.consumptionDetail(saved.id)).lines.length,2);
 });
+
+test('packaging transfers preserve total stock, pair both journals and reject partial or unauthorized updates',async()=>{
+ const api=clients[0],item=await api.warehouseWrite('register',undefined,{
+  requestKey:randomUUID(),itemCode:'PACK-TRANSFER',kind:'packaging',productId:null,name:'调拨包材',
+  specification:'',unit:'包',location:'包材架',notes:''
+ });
+ const store=await api.saveDirectory('store',undefined,{name:'调拨目标店铺'});
+ await api.warehouseWrite('allocate-packaging',item.id,{requestKey:randomUUID(),reason:'核对期初',
+  allocations:[{storeId:null,quantity:10},{storeId:store.id,quantity:2}]},1);
+ const row=await api.warehouseItem(item.id),source=row.balances.find(b=>b.storeId===null),target=row.balances.find(b=>b.storeId===store.id);
+ const value={requestKey:randomUUID(),sourceBalanceId:source.id,targetBalanceId:target.id,
+  sourceVersion:source.version,targetVersion:target.version,quantity:4,reason:'补充店铺包材'};
+ const path='/warehouse/items/'+item.id+'/packaging-transfers';
+ assert.equal((await request(sessions[1],path,'POST',value)).status,403);
+ assert.equal((await fetch(base+'/api'+path,{method:'POST',headers:{Origin:base,Cookie:'studio_session='+sessions[0].token,'Content-Type':'application/json'},body:JSON.stringify(value)})).status,403);
+ assert.equal((await request(sessions[0],path,'POST',{...value,targetBalanceId:source.id})).status,400);
+ for(const change of [{targetBalanceId:randomUUID()},{quantity:11},{targetVersion:2}])
+  assert.equal((await request(sessions[0],path,'POST',{...value,...change})).status,409);
+ await db.client`UPDATE studio_os.stores SET active=false WHERE id=${store.id}`;
+ assert.equal((await request(sessions[0],path,'POST',value)).status,409);
+ await db.client`UPDATE studio_os.stores SET active=true WHERE id=${store.id}`;
+ await db.client.unsafe(`CREATE FUNCTION studio_os.fail_packaging_transfer_receipt() RETURNS trigger LANGUAGE plpgsql AS $$
+  BEGIN IF NEW.action LIKE 'transfer-packaging:%' THEN RAISE EXCEPTION 'test rollback'; END IF; RETURN NEW; END; $$;
+  CREATE TRIGGER fail_packaging_transfer_receipt BEFORE INSERT ON studio_os.warehouse_receipts FOR EACH ROW EXECUTE FUNCTION studio_os.fail_packaging_transfer_receipt();`);
+ try{
+  assert.equal((await request(sessions[0],path,'POST',value)).status,500);
+  assert.deepEqual(await api.warehouseItem(item.id),row);
+  assert.equal((await api.warehouseHistory(item.id)).total,2);
+ }finally{await db.client.unsafe('DROP TRIGGER fail_packaging_transfer_receipt ON studio_os.warehouse_receipts; DROP FUNCTION studio_os.fail_packaging_transfer_receipt()');}
+ const saved=await api.savePackagingTransfer(item.id,value);
+ assert.deepEqual(await api.savePackagingTransfer(item.id,value),saved);
+ assert.deepEqual(await api.warehouseReceipt(value.requestKey,'transfer-packaging',item.id),saved);
+ assert.equal((await request(sessions[0],path,'POST',{...value,requestKey:randomUUID()})).status,409);
+ const after=await api.warehouseItem(item.id),doc=await api.packagingTransferDetail(item.id,saved.packagingTransferId);
+ assert.equal(after.quantity,12);
+ assert.deepEqual(after.balances.map(b=>b.quantity),[6,6]);
+ assert.equal(doc.source.snapshot.storeName,null);
+ assert.equal(doc.target.snapshot.storeName,'调拨目标店铺');
+ for(const line of [doc.source,doc.target])assert.equal((await api.warehouseMovement(item.id,line.id)).packagingTransferId,doc.id);
+ assert.equal((await api.warehouseHistory(item.id)).rows.filter(r=>r.packagingTransferId===doc.id).reduce((sum,r)=>sum+r.delta,0),0);
+ assert.equal((await request(sessions[1],path+'/'+doc.id)).status,403);
+ await assert.rejects(api.warehouseWrite('move',item.id,move('stocktake',7,{packagingBalanceId:source.id,correctsMovementId:doc.source.id}),after.version),e=>e.status===409);
+ await db.client`UPDATE studio_os.stores SET name='店铺改名后' WHERE id=${store.id}`;
+ assert.deepEqual(await api.packagingTransferDetail(item.id,doc.id),doc);
+});

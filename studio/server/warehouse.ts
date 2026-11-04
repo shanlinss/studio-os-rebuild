@@ -11,7 +11,8 @@ import {requireAdministrator} from './access';
 import {objectInput,shortText,longText,optionalLongText,uuid,version} from './validation';
 const MAX=2147483647,units=['件','个','套','包','卷','箱'];
 const projection=`w.id,w.item_code AS "itemCode",w.kind,w.product_id AS "productId",p.name AS "productName",w.name,w.specification,w.unit,w.location,w.notes,w.opening_confirmed AS "openingConfirmed",w.quantity,w.active,w.version,w.created_at AS "createdAt",w.updated_at AS "updatedAt",EXISTS(SELECT 1 FROM studio_os.packaging_balances b WHERE b.item_id=w.id) AS "packagingScoped"`;
-const movementProjection=`m.id,m.item_id AS "itemId",m.type,m.quantity,m.delta,m.before_quantity AS "beforeQuantity",m.after_quantity AS "afterQuantity",m.reason,m.source_reference AS "sourceReference",m.corrects_movement_id AS "correctsMovementId",m.item_snapshot AS "itemSnapshot",m.packaging_balance_id AS "packagingBalanceId",m.packaging_consumption_id AS "packagingConsumptionId",m.created_at AS "createdAt",coalesce(n.display_name,a.username) AS actor,t.id AS "transferId",t.sample_id AS "targetSampleId",t.target_snapshot AS "transferTargetSnapshot"`;
+const movementProjection=`m.id,m.item_id AS "itemId",m.type,m.quantity,m.delta,m.before_quantity AS "beforeQuantity",m.after_quantity AS "afterQuantity",m.reason,m.source_reference AS "sourceReference",m.corrects_movement_id AS "correctsMovementId",m.item_snapshot AS "itemSnapshot",m.packaging_balance_id AS "packagingBalanceId",m.packaging_consumption_id AS "packagingConsumptionId",
+ (SELECT pt.id FROM studio_os.packaging_stock_transfers pt WHERE pt.outbound_movement_id=m.id OR pt.inbound_movement_id=m.id) AS "packagingTransferId",m.created_at AS "createdAt",coalesce(n.display_name,a.username) AS actor,t.id AS "transferId",t.sample_id AS "targetSampleId",t.target_snapshot AS "transferTargetSnapshot"`;
 const scopedProjection='b.id,b.store_id AS "storeId",s.name AS "storeName",b.quantity,b.version,g.can_move AS "canMove",w.name,w.item_code AS "itemCode",w.specification,w.unit,w.location';
 function scopedSource(tx:TransactionSql,accountId:string){
  return tx`FROM studio_os.packaging_balances b JOIN studio_os.warehouse_items w ON w.id=b.item_id
@@ -24,7 +25,7 @@ function quantity(v:unknown,zero=false){if(!Number.isSafeInteger(v)||Number(v)<(
 async function item(tx:TransactionSql,id:string){const [r]=await tx`SELECT * FROM studio_os.warehouse_items WHERE id=${id} FOR UPDATE`;if(!r)throw new NotFoundException();return r;}
 export class Warehouse {
  constructor(private readonly db:StudioDatabase){}
- private async write(who:Identity,action:string,b:Record<string,unknown>,fn:(tx:TransactionSql)=>Promise<{id:string,movementId?:string,purchaseId?:string,transferId?:string,sampleId?:string,sampleEventId?:string}>,authorize?:(tx:TransactionSql)=>Promise<void>){
+ private async write(who:Identity,action:string,b:Record<string,unknown>,fn:(tx:TransactionSql)=>Promise<{id:string,movementId?:string,purchaseId?:string,packagingTransferId?:string,transferId?:string,sampleId?:string,sampleEventId?:string}>,authorize?:(tx:TransactionSql)=>Promise<void>){
   if(!authorize)requireAdministrator(who);const key=uuid(b.requestKey),body=canonical(b),hash=createHash('sha256').update(JSON.stringify({action,body})).digest('hex');
   try{return await this.db.client.begin(async tx=>{
    const [actor]=await tx`SELECT active,role FROM studio_os.accounts WHERE id=${who.id} FOR SHARE`;if(!actor?.active)throw new UnauthorizedException();if(authorize)await authorize(tx);else await livePermission(tx,who.id,'resources');
@@ -167,6 +168,59 @@ export class Warehouse {
   const [row]=await this.db.client`SELECT result FROM studio_os.warehouse_receipts WHERE actor_id=${who.id} AND request_key=${key} AND action=${'purchase-packaging:'+id}`;
   if(!row)throw new NotFoundException();
   return row.result;
+ }
+ async transferPackaging(who:Identity,id:string,value:unknown){
+  id=uuid(id);
+  const b=objectInput(value,['requestKey','sourceBalanceId','targetBalanceId','sourceVersion','targetVersion','quantity','reason']);
+  const sourceId=uuid(b.sourceBalanceId),targetId=uuid(b.targetBalanceId);
+  const sourceVersion=version(b.sourceVersion),targetVersion=version(b.targetVersion);
+  const qty=quantity(b.quantity),reason=longText(b.reason,2000);
+  if(sourceId===targetId)throw new BadRequestException('调出和调入归属须不同');
+  return this.write(who,'transfer-packaging:'+id,b,async tx=>{
+   const original=await item(tx,id);
+   if(!original.active||original.kind!=='packaging'||!original.opening_confirmed)
+    throw new ConflictException('仅可调拨已启用且已分账的包材');
+   const balances=await tx`SELECT id,quantity,version,store_id FROM studio_os.packaging_balances
+    WHERE item_id=${id} AND id IN (${sourceId},${targetId})`;
+   const source=balances.find(row=>row.id===sourceId),target=balances.find(row=>row.id===targetId);
+   if(!source||!target||source.version!==sourceVersion||target.version!==targetVersion||
+      source.quantity<qty||target.quantity+qty>MAX)
+    throw new ConflictException('请核对调拨归属、库存数量及版本');
+   const storeIds=[source.store_id,target.store_id].filter(Boolean);
+   const stores=await tx`SELECT id,name FROM studio_os.stores WHERE id=ANY(${tx.array(storeIds)}::uuid[]) AND active ORDER BY id FOR SHARE`;
+   if(stores.length!==storeIds.length)throw new ConflictException('调拨店铺已停用');
+   const names=new Map(stores.map(row=>[row.id,row.name]));
+   const movements=[];
+   for(const [balance,type,delta] of [[source,'outbound',-qty],[target,'inbound',qty]] as const){
+    const after=balance.quantity+delta;
+    const snapshot={itemCode:original.item_code,kind:original.kind,productId:null,productName:null,name:original.name,
+     specification:original.specification,unit:original.unit,location:original.location,storeId:balance.store_id,
+     storeName:names.get(balance.store_id)??null};
+    const [movement]=await tx`INSERT INTO studio_os.warehouse_movements(item_id,packaging_balance_id,type,quantity,delta,
+     before_quantity,after_quantity,reason,item_snapshot,actor_id)
+     VALUES(${id},${balance.id},${type},${qty},${delta},${balance.quantity},${after},'包材调拨',${JSON.stringify(snapshot)}::jsonb,${who.id}) RETURNING id`;
+    movements.push(movement.id);
+    await tx`UPDATE studio_os.packaging_balances SET quantity=${after},version=version+1 WHERE id=${balance.id}`;
+   }
+   const [transfer]=await tx`INSERT INTO studio_os.packaging_stock_transfers(item_id,source_balance_id,target_balance_id,outbound_movement_id,
+    inbound_movement_id,quantity,reason,actor_id)
+    VALUES(${id},${sourceId},${targetId},${movements[0]},${movements[1]},${qty},${reason},${who.id}) RETURNING id`;
+   await tx`UPDATE studio_os.warehouse_items SET version=version+1,updated_at=now() WHERE id=${id}`;
+   return {id,packagingTransferId:transfer.id};
+  });
+ }
+ async packagingTransferDetail(who:Identity,itemId:string,transferId:string){
+  await currentPermission(this.db,who,'resources');
+  const id=uuid(itemId),transfer=uuid(transferId);
+  const [row]=await this.db.client`SELECT t.id,t.item_id AS "itemId",t.quantity,t.reason,t.created_at AS "createdAt",a.username AS actor,
+   jsonb_build_object('id',outbound.id,'snapshot',outbound.item_snapshot,'beforeQuantity',outbound.before_quantity,'afterQuantity',outbound.after_quantity) AS source,
+   jsonb_build_object('id',inbound.id,'snapshot',inbound.item_snapshot,'beforeQuantity',inbound.before_quantity,'afterQuantity',inbound.after_quantity) AS target
+   FROM studio_os.packaging_stock_transfers t JOIN studio_os.accounts a ON a.id=t.actor_id
+   JOIN studio_os.warehouse_movements outbound ON outbound.id=t.outbound_movement_id
+   JOIN studio_os.warehouse_movements inbound ON inbound.id=t.inbound_movement_id
+   WHERE t.id=${transfer} AND t.item_id=${id}`;
+  if(!row)throw new NotFoundException();
+  return row;
  }
  async save(who:Identity,value:unknown,id?:string){
   requireAdministrator(who);if(id)uuid(id);const b=objectInput(value,['requestKey','itemCode','kind','productId','name','specification','unit','location','notes',...(id?['active','expectedVersion']:[])]);
@@ -370,6 +424,8 @@ export class Warehouse {
    if(type==='opening'?old.opening_confirmed:!old.opening_confirmed)throw new ConflictException('请先登记期初数量，且只能登记一次');
    if(corrects&&!(await tx`SELECT id FROM studio_os.warehouse_movements WHERE id=${corrects} AND item_id=${itemId} AND packaging_balance_id IS NOT DISTINCT FROM ${balanceId}::uuid FOR SHARE`).length)throw new BadRequestException('纠错流水不属于此库存项目');
    if(corrects&&(await tx`SELECT id FROM studio_os.warehouse_sample_transfers WHERE movement_id=${corrects}`).length)throw new ConflictException('转样品记录不支持单边引用撤销，请核对双方实际数量');
+   if(corrects&&(await tx`SELECT id FROM studio_os.packaging_stock_transfers WHERE outbound_movement_id=${corrects} OR inbound_movement_id=${corrects}`).length)
+    throw new ConflictException('调拨记录需核对双方数量，不能只引用一侧纠错');
    const before=(balance?.quantity??old.quantity) as number|null,after=type==='opening'||type==='stocktake'?qty:type==='inbound'?before!+qty:before!-qty;
    if(after<0||after>MAX)throw new ConflictException('不能超额出库或超过整数容量');const delta=after-(before??0);
    const total=balance?old.quantity+delta:after;

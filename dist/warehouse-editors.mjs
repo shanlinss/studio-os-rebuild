@@ -52,6 +52,24 @@ export function createWarehouseEditors({api,h,mount,input,area,select}){
    return api.warehouseWrite(operation,id,value,row?.version);
   },{kind:'warehouse',id},async()=>api.warehouseReceipt(key,operation,id),setup);
  }
+ async function transferPackaging(id){
+  const row=await api.warehouseItem(id);
+  const balances=(row.balances||[]).filter(b=>b.storeId===null||b.storeActive);
+  if(row.kind!=='packaging'||!row.active||balances.length<2)throw new ContractError('请先为此包材建立至少两个启用的库存归属。');
+  const key=crypto.randomUUID();
+  const options=rows=>[['','请选择'],...rows.map(b=>[b.id,`${b.storeName||'公共库存'} · ${b.quantity} ${row.unit}`])];
+  const body=`<p>${h(row.name)} · ${h(row.itemCode)} · 当前合计 ${h(row.quantity)} ${h(row.unit)}</p>`+
+   select('sourceBalanceId','调出归属','',options(balances.filter(b=>b.quantity>0)))+
+   select('targetBalanceId','调入归属','',options(balances))+
+   input('quantity','调拨数量','','required type="number" min="1" max="2147483647" step="1"')+
+   area('reason','调拨原因（必填）');
+  mount('包材调拨',body,f=>{
+   const source=balances.find(b=>b.id===f.get('sourceBalanceId')),target=balances.find(b=>b.id===f.get('targetBalanceId'));
+   if(!source||!target)throw new ContractError('请选择调出和调入归属。');
+   return api.savePackagingTransfer(id,{requestKey:key,sourceBalanceId:source.id,targetBalanceId:target.id,
+    sourceVersion:source.version,targetVersion:target.version,quantity:Number(f.get('quantity')),reason:f.get('reason')});
+  },{kind:'warehouse',id},()=>api.warehouseReceipt(key,'transfer-packaging',id));
+ }
  async function consumePackaging(){
   const first=await api.consumptionOptions(),balances=[...first.rows];
   for(let offset=first.limit;offset<first.total;offset+=first.limit)balances.push(...(await api.consumptionOptions(offset)).rows);
@@ -119,5 +137,5 @@ export function createWarehouseEditors({api,h,mount,input,area,select}){
   mount('登记'+movementLabels[type],body,f=>api.scopedWarehouseMove(id,{requestKey:key,type,quantity:Number(f.get('quantity')),reason:f.get('reason')},balance.version),
    {kind:'scoped-warehouse',id},()=>api.scopedWarehouseReceipt(id,key));
  }
- return {warehouse,scopedWarehouse,packagingPurchase,consumePackaging};
+ return {warehouse,scopedWarehouse,packagingPurchase,consumePackaging,transferPackaging};
 }
