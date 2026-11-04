@@ -52,6 +52,45 @@ export function createWarehouseEditors({api,h,mount,input,area,select}){
    return api.warehouseWrite(operation,id,value,row?.version);
   },{kind:'warehouse',id},async()=>api.warehouseReceipt(key,operation,id),setup);
  }
+ async function consumePackaging(){
+  const first=await api.consumptionOptions(),balances=[...first.rows];
+  for(let offset=first.limit;offset<first.total;offset+=first.limit)balances.push(...(await api.consumptionOptions(offset)).rows);
+  if(!balances.length)throw new ContractError('当前范围内没有可扣减的包材库存。');
+  const sources=new Map(balances.map(b=>[b.id,b])),key=crypto.randomUUID();
+  const choices=[['','请选择包材和库存归属'],...balances.map(b=>[b.id,`${b.name} · ${b.itemCode} · ${b.storeName||'公共库存'} · 可用 ${b.quantity} ${b.unit}`])];
+  const stores=[['','请选择实际领用店铺'],...first.stores.map(s=>[s.id,s.name])];
+  const line=()=>`<fieldset class="form-grid" data-consumption-line><legend>领用明细</legend>
+   ${select('balanceId','包材和库存来源','',choices)}
+   ${input('quantity','领用数量','','required type="number" min="1" max="2147483647" step="1"')}
+   ${select('usedStoreId','实际领用店铺','',stores)}
+   <button type="button" class="text-button" data-remove-consumption-line>移除此项</button></fieldset>`;
+  const body='<p class="muted">店铺库存由所属店铺领用。使用公共库存时，请选择实际领用店铺。</p>'+
+   `<div data-consumption-lines>${line()}</div><button type="button" class="secondary" data-add-consumption-line>＋ 添加包材</button>`+area('reason','领用原因（必填）');
+  mount('包材批量消耗',body,f=>{
+   const quantities=f.getAll('quantity'),selectedStores=f.getAll('usedStoreId');
+   const lines=f.getAll('balanceId').map((id,i)=>{
+    const source=sources.get(id);
+    if(!source)throw new ContractError('请为每项选择库存来源。');
+    if(source.storeId===null&&!selectedStores[i])throw new ContractError('公共库存须选择实际领用店铺。');
+    return {balanceId:id,expectedVersion:source.version,quantity:Number(quantities[i]),usedStoreId:source.storeId===null?selectedStores[i]:null};
+   });
+   return api.saveConsumption({requestKey:key,reason:f.get('reason'),lines});
+  },{kind:'packaging-consumption'},()=>api.consumptionReceipt(key),form=>{
+   const list=form.querySelector('[data-consumption-lines]'),add=form.querySelector('[data-add-consumption-line]');
+   const sync=()=>{
+    const rows=[...list.children];add.disabled=rows.length>=100;
+    for(const row of rows){
+     const source=row.querySelector('[name=balanceId]'),store=row.querySelector('[name=usedStoreId]');
+     source.required=true;store.required=sources.get(source.value)?.storeId===null;
+     store.closest('label').hidden=!store.required;
+     row.querySelector('[data-remove-consumption-line]').disabled=rows.length===1;
+    }
+   };
+   add.onclick=()=>{if(list.children.length>=100)return;list.insertAdjacentHTML('beforeend',line());form.dispatchEvent(new Event('change'));list.lastElementChild.querySelector('select').focus();};
+   list.onclick=e=>{const button=e.target.closest('[data-remove-consumption-line]');if(button&&list.children.length>1){button.closest('[data-consumption-line]').remove();form.dispatchEvent(new Event('change'));}};
+   form.addEventListener('change',sync);sync();
+  });
+ }
  async function packagingPurchase(id){
   const [row,{records}]=await Promise.all([api.warehouseItem(id),api.finance()]);
   const balances=(row.balances||[]).filter(b=>b.storeId===null||b.storeActive);
@@ -80,5 +119,5 @@ export function createWarehouseEditors({api,h,mount,input,area,select}){
   mount('登记'+movementLabels[type],body,f=>api.scopedWarehouseMove(id,{requestKey:key,type,quantity:Number(f.get('quantity')),reason:f.get('reason')},balance.version),
    {kind:'scoped-warehouse',id},()=>api.scopedWarehouseReceipt(id,key));
  }
- return {warehouse,scopedWarehouse,packagingPurchase};
+ return {warehouse,scopedWarehouse,packagingPurchase,consumePackaging};
 }

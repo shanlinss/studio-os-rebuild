@@ -14,7 +14,7 @@ import {attendancePage,attendanceDetail,attendanceHistory,attendancePayload,atte
 import {dailyAttendanceState,endWorkPayload,endWorkResult} from './daily-attendance.mjs';
 import {permissionPayload} from './admin-permissions.mjs';
 import {accountLifecyclePayload,accountLifecycleResult} from './account-lifecycle-contract.mjs';
-import {warehouseItem,warehouseCatalog,warehouseMovement,warehouseHistory,warehousePayload,warehousePath,sampleTargetPage,sampleTransferPayload,sampleTransferPage,scopedWarehouseCatalog,scopedWarehouseDetail,scopedWarehousePayload,packagingPurchasePayload,packagingPurchaseHistory} from './warehouse-contract.mjs';
+import {warehouseItem,warehouseCatalog,warehouseMovement,warehouseHistory,warehousePayload,warehousePath,sampleTargetPage,sampleTransferPayload,sampleTransferPage,scopedWarehouseCatalog,scopedWarehouseDetail,scopedWarehousePayload,packagingPurchasePayload,packagingPurchaseHistory,consumptionOptions,consumptionPayload,consumptionDetail} from './warehouse-contract.mjs';
 import {equipmentRecord,equipmentPage,equipmentPayload,equipmentPath} from './equipment-contract.mjs';
 import {sampleState,samplePage,samplePayload,sampleOperationPath} from './sample-contract.mjs';
 import {assetPath,mediaUpload,readMedia,expenseReceiptMaxBytes} from './media-contract.mjs';
@@ -146,6 +146,14 @@ export function createCloudApi(fetcher=globalThis.fetch,{allowWrites=false}={}){
     async todos(signal){return read('/api/workbench/todos',signal,v=>list(v).map(todoModel));},
     async finance(signal){return read('/api/finance',signal,financeRecord);},
     async competitors(signal){return namedList(await get('/api/competitors',signal));},
+    async consumptionOptions(offset=0,signal){return read('/api/packaging-consumptions/options?offset='+offset,signal,consumptionOptions);},
+    async consumptionDetail(id,signal){return read('/api/packaging-consumptions/'+endpointId(id),signal,v=>consumptionDetail(v,id));},
+    async saveConsumption(value){return mutations.send('/api/packaging-consumptions','POST',consumptionPayload(value));},
+    async consumptionReceipt(key){
+      const path='/api/packaging-consumptions';
+      try{const result=await get(path+'/receipts/'+endpointId(key));endpointId(result?.id);mutations.confirmRead(path);return result;}
+      catch(e){if(e.status===404){mutations.confirmRead(path);return null;}throw e;}
+    },
     async packagingPurchaseHistory(id,offset=0,signal){return read('/api/warehouse/items/'+endpointId(id)+'/packaging-purchases?offset='+offset,signal,packagingPurchaseHistory);},
     async savePackagingPurchase(id,value,version){return mutations.send('/api/warehouse/items/'+endpointId(id)+'/packaging-purchases','POST',packagingPurchasePayload(value,version));},
     async packagingPurchaseReceipt(id,key){

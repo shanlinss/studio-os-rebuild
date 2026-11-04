@@ -344,6 +344,14 @@ export async function createStudioApp(
     ) {
       return stores.update(id, body, req.identity!.id);
     }
+    @Get('packaging-consumptions/options')
+    packagingConsumptionOptions(@Req() r:AuthRequest){return warehouse.consumptionOptions(r.identity!,r.query);}
+    @Get('packaging-consumptions/receipts/:key')
+    packagingConsumptionReceipt(@Req() r:AuthRequest,@Param('key') key:string){return warehouse.consumptionReceipt(r.identity!,key);}
+    @Get('packaging-consumptions/:id')
+    packagingConsumptionDetail(@Req() r:AuthRequest,@Param('id') id:string){return warehouse.consumptionDetail(r.identity!,id);}
+    @Post('packaging-consumptions')
+    packagingConsumption(@Req() r:AuthRequest,@Body() b:unknown){return warehouse.consumePackaging(r.identity!,b);}
     @Get('packaging-stock')
     scopedPackaging(@Req() r:AuthRequest){return warehouse.scopedCatalog(r.identity!,r.query);}
     @Get('packaging-stock/:id')
@@ -1771,6 +1779,12 @@ export async function createStudioApp(
         requirePermission(req.identity,'resources');
         const route=req.path.slice('/api/phone-cards'.length),allowed=(req.method==='GET'&&/^(|\/options|\/receipts\/[^/]+|\/[^/]+(?:\/(?:history|identity))?)$/.test(route))||(req.method==='POST'&&/^(|\/[^/]+\/identity)$/.test(route))||(req.method==='PATCH'&&/^\/[^/]+$/.test(route));
         if(!allowed)throw new ForbiddenException();if(route.endsWith('/identity'))requirePermission(req.identity,'resource_identity');if(req.method!=='GET')auth.csrf(req);return true;
+      }
+      if(req.path==='/api/packaging-consumptions'||req.path.startsWith('/api/packaging-consumptions/')){
+        requireContributor(req.identity);
+        if(req.method==='GET'&&/^\/api\/packaging-consumptions\/[^/]+(?:\/[^/]+)?$/.test(req.path))return true;
+        if(req.method==='POST'&&req.path==='/api/packaging-consumptions'){auth.csrf(req);return true;}
+        throw new ForbiddenException();
       }
       if(req.path==='/api/packaging-stock'||req.path.startsWith('/api/packaging-stock/')){
         requireContributor(req.identity);

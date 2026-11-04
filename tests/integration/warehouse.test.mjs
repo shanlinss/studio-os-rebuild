@@ -171,3 +171,52 @@ test('one packaging purchase distributes stock atomically and references the exi
   assert.equal((await api.packagingPurchaseHistory(item.id)).total,1);
  }finally{await db.client.unsafe('DROP TRIGGER fail_packaging_purchase_receipt ON studio_os.warehouse_receipts; DROP FUNCTION studio_os.fail_packaging_purchase_receipt()');}
 });
+
+test('batch packaging use checks every source, preserves destination provenance and commits the whole sheet once',async()=>{
+ const admin=clients[0],employee=clients[1],actor=sessions[1].user.id;
+ const store=await admin.saveDirectory('store',undefined,{name:'实际领用店铺'});
+ const records=[];
+ for(const [index,storeId] of [null,store.id].entries()){
+  const item=await admin.warehouseWrite('register',undefined,{requestKey:randomUUID(),itemCode:'PACK-USE-'+index,
+   kind:'packaging',productId:null,name:'批量领用包材 '+index,specification:'',unit:'包',location:'包材架',notes:''});
+  await admin.warehouseWrite('allocate-packaging',item.id,{requestKey:randomUUID(),reason:'分配期初',allocations:[{storeId,quantity:5}]},1);
+  const row=await admin.warehouseItem(item.id);
+  records.push({id:item.id,balance:row.balances[0]});
+ }
+ const path='/packaging-consumptions';
+ const value={requestKey:randomUUID(),reason:'打包领用',lines:records.map(({balance},i)=>({
+  balanceId:balance.id,expectedVersion:balance.version,quantity:i+1,usedStoreId:balance.storeId===null?store.id:null
+ }))};
+ assert.deepEqual((await employee.consumptionOptions()).rows,[]);
+ await db.client`INSERT INTO studio_os.inventory_access_grants(account_id,store_id,can_move) VALUES(${actor},NULL,true)`;
+ assert.deepEqual((await employee.consumptionOptions()).rows.filter(b=>records.some(r=>r.balance.id===b.id)).map(b=>b.id),[records[0].balance.id]);
+ assert.equal((await request(sessions[1],path,'POST',value)).status,403);
+ assert.deepEqual(await Promise.all(records.map(async r=>(await admin.warehouseItem(r.id)).quantity)),[5,5]);
+ await db.client`INSERT INTO studio_os.inventory_access_grants(account_id,store_id,can_move) VALUES(${actor},${store.id},true)`;
+ assert.equal((await request(sessions[1],path,'POST',{...value,lines:[{...value.lines[0],usedStoreId:null},value.lines[1]]})).status,400);
+ assert.equal((await request(sessions[1],path,'POST',{...value,lines:[value.lines[0],{...value.lines[1],quantity:6}]})).status,409);
+ assert.deepEqual(await Promise.all(records.map(async r=>(await admin.warehouseItem(r.id)).quantity)),[5,5]);
+ await db.client.unsafe(`CREATE FUNCTION studio_os.fail_consumption_receipt() RETURNS trigger LANGUAGE plpgsql AS $$
+  BEGIN IF NEW.action='consume-packaging' THEN RAISE EXCEPTION 'test rollback'; END IF; RETURN NEW; END; $$;
+  CREATE TRIGGER fail_consumption_receipt BEFORE INSERT ON studio_os.warehouse_receipts FOR EACH ROW EXECUTE FUNCTION studio_os.fail_consumption_receipt();`);
+ try{
+  assert.equal((await request(sessions[1],path,'POST',value)).status,500);
+  assert.deepEqual(await Promise.all(records.map(async r=>(await admin.warehouseItem(r.id)).quantity)),[5,5]);
+  assert.deepEqual(await Promise.all(records.map(async r=>(await admin.warehouseHistory(r.id)).total)),[1,1]);
+ }finally{await db.client.unsafe('DROP TRIGGER fail_consumption_receipt ON studio_os.warehouse_receipts; DROP FUNCTION studio_os.fail_consumption_receipt()');}
+ const results=await Promise.all([request(sessions[1],path,'POST',value),request(sessions[1],path,'POST',value)]);
+ assert.ok(results.every(r=>r.status===201));
+ const [saved,replay]=await Promise.all(results.map(r=>r.json()));
+ assert.deepEqual(replay,saved);
+ assert.deepEqual(await employee.consumptionReceipt(value.requestKey),saved);
+ assert.equal(await admin.consumptionReceipt(value.requestKey),null);
+ const sheet=await employee.consumptionDetail(saved.id);
+ assert.equal(sheet.lines.length,2);
+ assert.equal(sheet.lines.find(r=>r.snapshot.storeName===null).snapshot.usedStoreName,'实际领用店铺');
+ assert.deepEqual(await Promise.all(records.map(async r=>(await admin.warehouseItem(r.id)).quantity)),[4,3]);
+ assert.equal((await admin.warehouseHistory(records[0].id)).rows[0].packagingConsumptionId,saved.id);
+ await db.client`DELETE FROM studio_os.inventory_access_grants WHERE account_id=${actor} AND store_id=${store.id}`;
+ assert.equal((await request(sessions[1],path+'/'+saved.id)).status,403);
+ assert.equal((await request(sessions[1],path+'/receipts/'+value.requestKey)).status,403);
+ assert.equal((await admin.consumptionDetail(saved.id)).lines.length,2);
+});

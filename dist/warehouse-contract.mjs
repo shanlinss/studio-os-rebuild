@@ -113,3 +113,28 @@ export function packagingPurchaseHistory(v){
  }
  return v;
 }
+
+export function consumptionOptions(v){
+ scopedWarehouseCatalog(v);
+ if(!Array.isArray(v.stores)||v.stores.some(s=>!s||typeof s.name!=='string'))throw new ContractError();
+ v.stores.forEach(s=>id(s.id));
+ return v;
+}
+export function consumptionPayload(v){
+ if(!v||Object.keys(v).some(k=>!['requestKey','reason','lines'].includes(k))||!Array.isArray(v.lines)||!v.lines.length||v.lines.length>100)
+  throw new ContractError('请填写 1 至 100 项领用。');
+ const lines=v.lines.map(line=>({balanceId:id(line.balanceId),expectedVersion:expectedVersion(line.expectedVersion),
+  quantity:qty(line.quantity,false),usedStoreId:line.usedStoreId===null?null:id(line.usedStoreId)}));
+ if(new Set(lines.map(line=>line.balanceId)).size!==lines.length)throw new ContractError('同一库存来源在一张单据中只能填写一次。');
+ return {requestKey:id(v.requestKey),reason:text(v.reason,2000,true),lines};
+}
+export function consumptionDetail(v,owner){
+ if(!v||v.id!==owner||typeof v.reason!=='string'||typeof v.actor!=='string'||!Number.isFinite(Date.parse(v.createdAt))||
+    !Array.isArray(v.lines)||!v.lines.length||v.lines.length>100)throw new ContractError('包材领用记录不完整。');
+ for(const line of v.lines){
+  id(line.id);id(line.balanceId);qty(line.quantity,false);qty(line.beforeQuantity);qty(line.afterQuantity);
+  if(line.beforeQuantity-line.afterQuantity!==line.quantity||!line.snapshot||typeof line.snapshot.name!=='string'||
+   typeof line.snapshot.itemCode!=='string'||typeof line.snapshot.usedStoreName!=='string'||!warehouseUnits.includes(line.snapshot.unit))throw new ContractError('包材领用明细不完整。');
+ }
+ return v;
+}
