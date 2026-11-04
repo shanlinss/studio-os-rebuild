@@ -2,27 +2,32 @@ import {movingCosts,fraction,plus,costAmount,type Fraction,type CostMovement} fr
 const cents=(v:unknown)=>BigInt(String(v));
 const signed=(n:bigint)=>n.toString();
 function rounded(value:Fraction){const text=costAmount(value)!,negative=text.startsWith('-'),[whole,part]=text.replace('-','').split('.');return (BigInt(whole)*100n+BigInt(part))*(negative?-1n:1n);}
-export function operatingOverview(data:{stores:any[],incomes:any[],expenses:any[],fees:any[],daily:any[],dropship:any[],refunds:any[],movements:(CostMovement&{skuId:string})[],packaging:any[],inventoryCosts?:any[]},month:string){
+export function operatingOverview(data:{stores:any[],incomes:any[],expenses:any[],fees:any[],daily:any[],dropship:any[],refunds:any[],movements:(CostMovement&{skuId:string})[],packaging:any[],inventoryCosts?:any[],feeExpenseLinks?:any[]},month:string){
  const byStore=new Map(data.stores.map(s=>[s.id,s])),rows=new Map<string,any>(),publicIssues:any[]=[],expenseById=new Map(data.expenses.map(e=>[e.id,e]));
  let sampleAssets=fraction(0n),sampleAssetPending=0;const sampleAssetSources:any[]=[];
+ const feeLinks=new Map((data.feeExpenseLinks??data.fees).filter(f=>f.expenseId).map(f=>[f.expenseId,f]));
  let publicInventory=fraction(0n),publicCents=0n,inventoryCents=0n,prepaidCents=0n;
- const get=(id:string)=>{if(!rows.has(id)){const store=byStore.get(id);if(!store)throw Error('Missing store source');rows.set(id,{storeId:id,name:store.name,active:store.active,income:null,operating:0n,stock:fraction(0n),packaging:fraction(0n),otherInventory:fraction(0n),drop:0n,fee:0n,dailySale:0n,dailyRefund:0n,pending:[],sources:[]});}return rows.get(id);};
+ const get=(id:string)=>{if(!rows.has(id)){const store=byStore.get(id);if(!store)throw Error('Missing store source');rows.set(id,{storeId:id,name:store.name,active:store.active,income:null,operating:0n,stock:fraction(0n),packaging:fraction(0n),otherInventory:fraction(0n),drop:0n,fee:0n,platformFeeReference:0n,dailySale:0n,dailyRefund:0n,pending:[],sources:[]});}return rows.get(id);};
  const issue=(row:any|null,kind:string,id:string,label:string)=>{(row?row.pending:publicIssues).push({kind,id,label});};
  const source=(row:any,kind:string,id:string)=>row.sources.push({kind,id});
  for(const income of data.incomes)if(income.status==='confirmed')get(income.storeId).income={id:income.id,version:income.version,amountCents:String(income.amountCents),sourceReference:income.sourceReference};
  for(const e of data.expenses){if(e.month!==month)continue;const row=e.storeId?get(e.storeId):null;
-  const scope=e.expenseScope,use=e.expenseUse;
+  const scope=e.expenseScope,use=e.expenseUse,platformFee=feeLinks.get(e.id);
+  if(platformFee){const feeRow=get(platformFee.storeId);source(feeRow,'operating',platformFee.id);
+   if(platformFee.sourceChanged||scope!=='store'||e.storeId!==platformFee.storeId||use!=='operating'||e.purchaseLinked){issue(feeRow,'operating',platformFee.id,'平台已扣手续费的关联支出版本、用途或店铺归属待核对');if(scope==='public'||row&&row!==feeRow)issue(scope==='public'?null:row,'expense',e.id,'平台扣费引用支出归属或用途不一致，请核对');}
+   continue; // Platform net income already includes this charge, even if the expense was recorded in another month.
+  }
   if(scope==='unclassified'||use==='unclassified'){issue(scope==='public'?null:row,'expense',e.id,'支出用途或归属待核对');continue;}
   if(use==='inventory'){inventoryCents+=cents(e.amountCents);continue;}if(use==='prepaid'){prepaidCents+=cents(e.amountCents);continue;}
   const target=scope==='public'?null:row;
   if(e.purchaseLinked){issue(target,'expense',e.id,'采购来源仍标为运营费用，需核对以避免重复扣成本');continue;}
   if(target){target.operating+=cents(e.amountCents);source(target,'expense',e.id);}else publicCents+=cents(e.amountCents);
  }
- for(const f of data.fees){const row=get(f.storeId);source(row,'operating',f.id);
+ for(const f of data.fees){const row=get(f.storeId);source(row,'operating',f.id);row.platformFeeReference+=cents(f.amountCents);
   if(f.expenseId){const original=expenseById.get(f.expenseId);
    if(!original||f.sourceChanged||original.expenseScope!=='store'||original.storeId!==f.storeId||original.expenseUse!=='operating'||original.purchaseLinked)issue(row,'operating',f.id,'手续费关联支出的版本、用途或店铺归属待核对');
-   // Linked fees use the original expense date and amount exactly once, including cross-month references.
-  }else row.fee+=cents(f.amountCents);
+   // Original evidence remains auditable; valid platform deductions never reduce net income a second time.
+  }
  }
  for(const d of data.daily){const row=get(d.storeId);if(d.kind==='sale')row.dailySale+=cents(d.amountCents);else row.dailyRefund+=cents(d.amountCents);}
  for(const d of data.dropship){const row=get(d.storeId);source(row,'dropship',d.documentId);if(d.basis!=='actual')issue(row,'dropship',d.documentId,'代发仍为参考估算，需核实实际成本');else row.drop+=cents(d.amountCents);}
@@ -50,7 +55,7 @@ export function operatingOverview(data:{stores:any[],incomes:any[],expenses:any[
   if(unallocated)issue(row,'unassigned',row.storeId,'存在未归属支出，本店专属成本待核对');
   const stock=rounded(row.stock),packaging=rounded(row.packaging),otherInventory=rounded(row.otherInventory),pending=row.pending as any[],total=row.operating+stock+row.drop+row.fee+packaging+otherInventory;
   const income=row.income?cents(row.income.amountCents):null;
-  return {storeId:row.storeId,name:row.name,active:row.active,income:row.income,operatingCents:signed(row.operating),stockCents:pending.some(p=>p.kind==='stock')?null:signed(stock),dropshipCents:pending.some(p=>p.kind==='dropship')?null:signed(row.drop),feeCents:signed(row.fee),packagingCents:pending.some(p=>p.kind==='inventory')?null:signed(packaging),otherInventoryCents:pending.some(p=>['inventory','sample-cost'].includes(p.kind))?null:signed(otherInventory),directCostCents:pending.length?null:signed(total),profitCents:income===null||pending.length?null:signed(income-total),dailySaleCents:signed(row.dailySale),dailyRefundCents:signed(row.dailyRefund),pendingCount:pending.length,pending:pending.slice(0,50),sourceCount:row.sources.length,sources:row.sources.slice(0,50)};
+  return {storeId:row.storeId,name:row.name,active:row.active,income:row.income,operatingCents:signed(row.operating),stockCents:pending.some(p=>p.kind==='stock')?null:signed(stock),dropshipCents:pending.some(p=>p.kind==='dropship')?null:signed(row.drop),feeCents:signed(row.fee),platformFeeReferenceCents:signed(row.platformFeeReference),packagingCents:pending.some(p=>p.kind==='inventory')?null:signed(packaging),otherInventoryCents:pending.some(p=>['inventory','sample-cost'].includes(p.kind))?null:signed(otherInventory),directCostCents:pending.length?null:signed(total),profitCents:income===null||pending.length?null:signed(income-total),dailySaleCents:signed(row.dailySale),dailyRefundCents:signed(row.dailyRefund),pendingCount:pending.length,pending:pending.slice(0,50),sourceCount:row.sources.length,sources:row.sources.slice(0,50)};
  }).sort((a,b)=>a.name.localeCompare(b.name,'zh-CN'));
  const sum=(key:string)=>list.reduce((n,r)=>n+cents((r as any)[key]),0n);
  const complete=list.length>0&&list.every(r=>r.profitCents!==null),shopProfit=complete?sum('profitCents'):null;

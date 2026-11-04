@@ -11,7 +11,7 @@ import {OperatingOverview} from '../../.build/server/operating-overview.js';
 import {createCloudApi} from '../../dist/cloud-api.mjs';
 let local,db,app,base,auth;const people=[],sessions=[],clients=[],stores=[];
 const req=(i,path,method='GET',body,csrf=true)=>fetch(base+'/api'+path,{method,headers:{Origin:base,'Content-Type':'application/json',Cookie:'studio_session='+sessions[i].token,...(csrf?{'x-csrf-token':sessions[i].csrf}:{})},...(body===undefined?{}:{body:JSON.stringify(body)})});
-const income=(month,amount,extra={})=>({requestKey:randomUUID(),expectedVersion:0,month,amount,sourceReference:'原店铺月度收入表',reason:'已扣客户退款，未扣各项经营成本',status:'confirmed',...extra});
+const income=(month,amount,extra={})=>({requestKey:randomUUID(),expectedVersion:0,month,amount,sourceReference:'原店铺月度收入表',reason:'平台可提现金额已扣佣金退款，商品及代发成本另算',status:'confirmed',...extra});
 const expense=(storeId,amount,extra={})=>({requestKey:randomUUID(),expenseDate:'2026-01-01',description:'按月核对运营支出',amount,paymentMode:'company',payerId:null,storeId,categoryId:null,note:'',expenseScope:storeId?'store':'public',expenseUse:'operating',...extra});
 before(async()=>{
  local=await startLocalDatabase();db=local.db;await migrate(db);await checkReadiness(db);auth=new Authentication(db);
@@ -48,11 +48,11 @@ test('income corrections and withdrawals preserve history, explicit zero and neg
  for(let version=3;version<53;version++)await api.saveMonthIncome(stores[0],income('2026-02','0.00',{expectedVersion:version}));
  const history=await api.monthIncome(stores[0],'2026-02',50);assert.equal(history.history.total,53);assert.equal(history.history.rows.length,3);assert.deepEqual(history.history.rows.at(-1),frozen);
 });
-test('missing attribution blocks misleading profit and linked fees reuse the original expense exactly once',async()=>{
+test('missing attribution blocks misleading profit and platform deductions and their original expense evidence do not reduce net income again',async()=>{
  const api=clients[0];await api.saveMonthIncome(stores[1],income('2026-03','100.00'));
  const fee=await api.saveExpense(undefined,expense(stores[1],'1.25',{expenseDate:'2026-03-01',description:'原已记平台手续费'}));
  await api.saveOperatingRecord(null,{requestKey:randomUUID(),kind:'fee',storeId:stores[1],parentId:null,expenseId:fee.id,sourceReference:'手续费核对',businessDate:'2026-03-01',amount:'1.25',description:'同一手续费',note:'',reason:'复用原支出',parentVersion:null,expenseVersion:1});
- let r=await api.financeOverview('2026-03');assert.equal(r.rows[0].directCostCents,'125');assert.equal(r.rows[0].feeCents,'0');assert.equal(r.rows[0].profitCents,'9875');
+ let r=await api.financeOverview('2026-03');assert.equal(r.rows[0].directCostCents,'0');assert.equal(r.rows[0].feeCents,'0');assert.equal(r.rows[0].profitCents,'10000');
  await api.saveExpense(undefined,{requestKey:randomUUID(),expenseDate:'2026-03-02',description:'尚未确认归属的支出',amount:'3.00',paymentMode:'company',payerId:null,storeId:null,categoryId:null,note:''});
  r=await api.financeOverview('2026-03');assert.equal(r.summary.studioProfitCents,null);assert.equal(r.rows[0].profitCents,null);assert.ok(r.publicPendingCount>0);
 });
@@ -70,4 +70,11 @@ test('income receipt failure rolls back confirmation, and permissions and immuta
  for(const query of ['?month=2026-13','?month=2026-04&extra=1'])assert.equal((await req(0,'/finance/overview'+query)).status,400);
  const stale=sessions[3].user;await db.client`UPDATE studio_os.accounts SET admin_permissions=ARRAY[]::text[] WHERE id=${people[3].id}`;
  await assert.rejects(new StoreMonthIncome(db).state(stale,stores[2],{month:'2026-04'}),e=>e.status===403);await assert.rejects(new StoreMonthIncome(db).save(stale,stores[2],body),e=>e.status===403);await assert.rejects(new OperatingOverview(db).read(stale,{month:'2026-04'}),e=>e.status===403);
+});
+test('platform deductions linked to an expense in a different month are reference-only in both periods',async()=>{
+ const api=clients[0];for(const month of ['2026-05','2026-06'])await api.saveMonthIncome(stores[1],income(month,'100.00'));
+ const b=expense(stores[1],'2.50',{expenseDate:'2026-05-01',description:'平台已扣佣金原记账记录'}),e=await api.saveExpense(null,b),fee=await api.saveOperatingRecord(null,{requestKey:randomUUID(),kind:'fee',storeId:stores[1],parentId:null,expenseId:e.id,sourceReference:'跨月平台扣费核对',businessDate:'2026-06-01',amount:'2.50',description:'平台已扣费用',note:'',reason:'对应净额中的扣费',parentVersion:null,expenseVersion:1});
+ for(const month of ['2026-05','2026-06'])assert.equal((await api.financeOverview(month)).summary.studioProfitCents,'10000');
+ const {requestKey,...edit}=b;await api.saveExpense(e.id,{...edit,amount:'3.00'},1);for(const month of ['2026-05','2026-06'])assert.equal((await api.financeOverview(month)).summary.studioProfitCents,null);
+ await api.saveOperatingRecord(fee.id,{requestKey:randomUUID(),expectedVersion:1,businessDate:'2026-06-01',amount:'3.00',description:'平台已扣费用复核',note:'',reason:'核对原支出新版本',parentVersion:null,expenseVersion:2});for(const month of ['2026-05','2026-06'])assert.equal((await api.financeOverview(month)).summary.studioProfitCents,'10000');
 });

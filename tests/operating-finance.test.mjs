@@ -26,6 +26,6 @@ test('read-only clients cannot create, revise or void operating financial record
 test('operating view labels independent daily amounts and reuses original expense evidence',async()=>{
  const {createOperatingFinanceViews}=await import('../dist/operating-finance-view.mjs'),original=globalThis.document;let html='';globalThis.document={addEventListener(){}};
  const fee={...record(),kind:'fee',expenseId:id,expenseSnapshot:{description:'原手续费凭证',expenseDate:'2026-01-01',amountCents:1234,version:1}};
- try{const view=createOperatingFinanceViews({api:{operatingRecord:async()=>({record:fee,history:{rows:[fee],total:1,offset:0,limit:50},refundedCents:'0',parent:null,parentChanged:false})},h:String,showPanel:async(_title,render)=>{html=await render();},getUser:()=>({role:'admin',permissions:['finance']}),writable:true,localTime:String,notify(){}});await view.detail(id);assert.match(html,/平台手续费/);assert.match(html,/查看原支出与凭证/);assert.match(html,/作废记录/);assert.doesNotMatch(html,/登记客户退款/);}
+ try{const view=createOperatingFinanceViews({api:{operatingRecord:async()=>({record:fee,history:{rows:[fee],total:1,offset:0,limit:50},refundedCents:'0',parent:null,parentChanged:false})},h:String,showPanel:async(_title,render)=>{html=await render();},getUser:()=>({role:'admin',permissions:['finance']}),writable:true,localTime:String,notify(){}});await view.detail(id);assert.match(html,/平台已扣佣金／手续费/);assert.match(html,/查看原支出与凭证/);assert.match(html,/作废记录/);assert.doesNotMatch(html,/登记客户退款/);}
  finally{globalThis.document=original;}
 });

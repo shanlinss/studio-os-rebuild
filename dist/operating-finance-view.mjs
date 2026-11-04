@@ -3,17 +3,17 @@ import {money} from './management-model.mjs';
 import {hasSensitive} from './admin-permissions.mjs';
 export function createOperatingFinanceViews({api,h,showPanel,getUser,writable,localTime,notify}){
  let current={month:chinaDate().slice(0,7),kind:'all',status:'active',storeId:'',q:'',offset:0};
- const labels={sale:'日常销售',refund:'客户退款',fee:'平台手续费'},maintain=()=>writable&&hasSensitive(getUser(),'finance');
+ const labels={sale:'日常销售',refund:'客户退款',fee:'平台已扣佣金／手续费'},maintain=()=>writable&&hasSensitive(getUser(),'finance');
  const head=title=>`<div class="dialog-header"><h2>${h(title)}</h2><button class="icon-button" data-operating-close aria-label="关闭日常收支">×</button></div>`;
  async function list(params=current){
   current={...params};const query={...current};
   await showPanel('销售、退款与手续费',async signal=>{
    const data=await api.operatingRecords(query,signal),s=data.summary;
-   return head('销售、退款与手续费')+`<p class="muted">这里是日常登记金额。正式结算收入、实际到账和利润将在对应来源核对后分别接入。手续费引用原支出时不新增支出。</p>
-    <section class="summary-strip"><div><b>${h(money(s.saleCents))}</b><span>有效日常销售</span></div><div><b>${h(money(s.refundCents))}</b><span>有效客户退款</span></div><div><b>${h(money(s.feeCents))}</b><span>有效平台手续费</span></div></section>
+   return head('销售、退款与手续费')+`<p class="muted">日常销售、退款和平台已扣佣金／手续费仅供核对。经营收入手工填写平台月度汇总单的可提现金额，已扣项目不再扣利润；另外支付的费用请记日常支出。</p>
+    <section class="summary-strip"><div><b>${h(money(s.saleCents))}</b><span>有效日常销售</span></div><div><b>${h(money(s.refundCents))}</b><span>有效客户退款</span></div><div><b>${h(money(s.feeCents))}</b><span>平台已扣费用（核对）</span></div></section>
     <form data-operating-filter class="module-toolbar"><label>发生月份<input type="month" name="month" value="${h(query.month||'')}" min="1900-01" max="2199-12"></label><label>店铺<select name="storeId"><option value="">全部</option>${data.stores.map(store=>`<option value="${h(store.id)}" ${query.storeId===store.id?'selected':''}>${h(store.name)}${store.active?'':'（已停用）'}</option>`).join('')}</select></label><label>类型<select name="kind">${[['all','全部'],...Object.entries(labels)].map(([v,label])=>`<option value="${v}" ${query.kind===v?'selected':''}>${h(label)}</option>`).join('')}</select></label><label>状态<select name="status">${[['active','有效'],['void','已作废'],['all','全部']].map(([v,label])=>`<option value="${v}" ${query.status===v?'selected':''}>${label}</option>`).join('')}</select></label><label>关键词<input name="q" type="search" maxlength="100" value="${h(query.q||'')}" placeholder="说明、来源编号或店铺"></label><button class="secondary" type="submit">筛选</button></form>
     <p class="muted">合计覆盖当前筛选的全部有效记录，按各自业务日期归月。三类金额分别核对。</p>${s.changedSources?`<p class="save-error">${s.changedSources} 条手续费的关联支出已变化，请核对来源版本。</p>`:''}
-    ${maintain()?'<div class="action-row"><button class="primary" data-operating-create="sale">＋ 登记日常销售</button><button class="secondary" data-operating-create="fee">＋ 登记平台手续费</button></div>':''}
+    ${maintain()?'<div class="action-row"><button class="primary" data-operating-create="sale">＋ 登记日常销售</button><button class="secondary" data-operating-create="fee">＋ 记录平台已扣费用</button></div>':''}
     ${data.rows.map(r=>`<button class="account-row" data-operating-record="${h(r.id)}"><span><b>${h(r.description)}</b><small>${h(r.businessDate)} · ${h(r.storeName)} · ${h(labels[r.kind])} · ${h(r.sourceReference)}${r.status==='void'?' · 已作废':''}${r.sourceChanged?' · 来源待复核':''}</small></span><span>${h(money(r.amountCents))} ›</span></button>`).join('')||'<p class="muted">暂无符合筛选的日常收支记录。</p>'}
     <div class="pager"><button class="secondary" data-operating-page="${Math.max(0,query.offset-50)}" ${query.offset===0?'disabled':''}>上一页</button><span>${data.total} 条记录</span><button class="secondary" data-operating-page="${query.offset+50}" ${query.offset+50>=data.total?'disabled':''}>下一页</button></div>`;
   });

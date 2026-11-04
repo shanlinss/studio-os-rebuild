@@ -10,10 +10,10 @@ test('the user example is ten minus six minus two, with no public cost allocatio
  let r=operatingOverview(d,month);assert.equal(r.summary.incomeCents,'10000000');assert.equal(r.summary.directCostCents,'6000000');assert.equal(r.summary.storeProfitCents,'4000000');assert.equal(r.publicCents,'2000000');assert.equal(r.summary.studioProfitCents,'2000000');
  d.stores=[...stores.map(s=>({...s,active:false})),{id:'new-empty',name:'新增未纳入店铺',active:true}];r=operatingOverview(d,month);assert.equal(r.rows.length,3);assert.equal(r.summary.studioProfitCents,'2000000');assert.equal(r.rows.find(s=>s.storeId==='a').profitCents,'2000000');
 });
-test('daily sales and refunds are reference-only, linked fees count once using the original expense month, and inventory is excluded',()=>{
+test('daily sales, refunds and platform fees remain reference-only after monthly withdrawable income is entered',()=>{
  const d=data();d.incomes=[income('a',10000)];d.expenses=[expense('a',100,{id:'fee-expense'}),expense(null,9000,{id:'inventory',expenseUse:'inventory'})];d.fees=[{id:'fee',storeId:'a',amountCents:100,expenseId:'fee-expense',sourceChanged:false},{id:'standalone',storeId:'a',amountCents:50,expenseId:null}];d.daily=[{storeId:'a',kind:'sale',amountCents:99999},{storeId:'a',kind:'refund',amountCents:100}];
- const r=operatingOverview(d,month);assert.equal(r.rows[0].directCostCents,'150');assert.equal(r.rows[0].profitCents,'9850');assert.equal(r.inventoryCents,'9000');assert.equal(r.summary.incomeCents,'10000');
- d.expenses[0].month='2025-12';assert.equal(operatingOverview(d,month).rows[0].directCostCents,'50');
+ const r=operatingOverview(d,month);assert.equal(r.rows[0].directCostCents,'0');assert.equal(r.rows[0].profitCents,'10000');assert.equal(r.rows[0].platformFeeReferenceCents,'150');assert.equal(r.inventoryCents,'9000');assert.equal(r.summary.incomeCents,'10000');
+ d.expenses[0].month='2025-12';assert.equal(operatingOverview(d,month).rows[0].directCostCents,'0');
  d.fees[0].sourceChanged=true;assert.equal(operatingOverview(d,month).rows[0].profitCents,null);
 });
 test('missing, estimated and contradictory sources block profit while zero and negative confirmed incomes retain meaning',()=>{
@@ -54,4 +54,13 @@ test('recorded sample losses remain unresolved costs instead of being silently t
 test('confirmed sample losses charge explicit public or store scope once and link back to original sample evidence',()=>{
  const d=data();d.incomes=[income('a',10000)];d.inventoryCosts=[{id:'sample-loss-a',mode:'sample-loss',sourceKind:'sample-cost',scope:'store',storeId:'a',exact:{n:'100',d:'3'},costCents:'33',sourceChanged:false},{id:'sample-loss-public',mode:'sample-loss',sourceKind:'sample-cost',scope:'public',storeId:null,exact:{n:'200',d:'1'},costCents:'200',sourceChanged:false}];
  let r=operatingOverview(d,month);assert.equal(r.rows[0].otherInventoryCents,'33');assert.equal(r.publicCents,'200');assert.equal(r.summary.studioProfitCents,'9767');assert.equal(r.rows[0].sources[0].kind,'sample-cost');d.inventoryCosts[0].sourceChanged=true;r=operatingOverview(d,month);assert.equal(r.rows[0].otherInventoryCents,null);assert.equal(r.rows[0].pending[0].kind,'sample-cost');assert.equal(r.summary.studioProfitCents,null);
+});
+test('withdrawable platform income excludes commissions and customer refunds again while goods, dropship and public costs still reduce profit',()=>{
+ const d=data();d.incomes=[income('a',100000)];d.fees=[{id:'commission',storeId:'a',amountCents:17000,expenseId:null}];d.daily=[{storeId:'a',kind:'refund',amountCents:10000}];d.expenses=[expense('a',5000),expense(null,10000)];d.dropship=[{storeId:'a',basis:'actual',amountCents:10000,documentId:'drop'}];d.refunds=[{storeId:'a',amountCents:2000,documentId:'drop'}];
+ const m=(id,operation,quantity,delta,totalCents)=>({id,skuId:'sku',operation,type:delta>0?'inbound':'outbound',quantity,delta,totalCents,day:'2026-01-01',postedAt:id==='in'?'2026-01-01T00:00:00Z':'2026-01-01T00:00:01Z',documentId:id,sourceShipmentId:null,purchaseVersion:1,sourceChanged:false,snapshot:{},duplicateOpening:false,internalTransfer:false,businessStoreId:'a'});d.movements=[m('in','inbound',3,3,30000),m('out','shipment',2,-2,null)];
+ const r=operatingOverview(d,month);assert.equal(r.rows[0].stockCents,'20000');assert.equal(r.rows[0].dropshipCents,'8000');assert.equal(r.rows[0].platformFeeReferenceCents,'17000');assert.equal(r.rows[0].feeCents,'0');assert.equal(r.rows[0].profitCents,'67000');assert.equal(r.summary.studioProfitCents,'57000');
+});
+test('platform fee links exclude duplicate expense deductions across months and source changes still require verification',()=>{
+ const d=data();d.incomes=[income('a',10000)];d.expenses=[expense('a',200,{id:'original-fee'})];d.feeExpenseLinks=[{id:'fee-other-month',storeId:'a',expenseId:'original-fee',sourceChanged:false}];
+ let r=operatingOverview(d,month);assert.equal(r.rows[0].operatingCents,'0');assert.equal(r.rows[0].profitCents,'10000');d.feeExpenseLinks[0].sourceChanged=true;r=operatingOverview(d,month);assert.equal(r.rows[0].profitCents,null);
 });

@@ -9,9 +9,9 @@ export function createOperatingFinanceEditors({api,h,mount,input,area,select}){
   kind=r?.kind||kind;const original=parent?.record;if(kind==='refund'&&(!original||original.kind!=='sale'||original.status!=='active'))throw new Error('请从有效原销售记录登记客户退款。');
   const key=crypto.randomUUID(),expense=r?.expenseId?data.records.find(e=>e.id===r.expenseId):null;
   if(r?.expenseId&&!expense)throw new Error('原支出暂不可见，请重新核对。');
-  const currentExpense=expense?.version!==r?.expenseSnapshot?.version,labels={sale:'日常销售',refund:'客户退款',fee:'平台手续费'};
+  const currentExpense=expense?.version!==r?.expenseSnapshot?.version,labels={sale:'日常销售',refund:'客户退款',fee:'平台已扣佣金／手续费'};
   const fixedStore=r?.storeId||original?.storeId;
-  const body=`<p>${h(labels[kind])}${r?' · '+h(r.sourceReference):''}</p>`+(fixedStore?`<p>业务店铺 ${h(r?.storeName||original.storeName)}</p>`:select('storeId','业务店铺','',[['','请选择'],...data.stores.filter(s=>s.active).map(s=>[s.id,s.name])]))+
+  const body=`<p>${h(labels[kind])}${r?' · '+h(r.sourceReference):''}</p>`+(kind==='fee'?'<p class="muted">记录平台已经从可提现金额中扣除的项目，仅供核对，不再扣利润；另外支付的费用请从记账本记录日常支出。</p>':'')+(fixedStore?`<p>业务店铺 ${h(r?.storeName||original.storeName)}</p>`:select('storeId','业务店铺','',[['','请选择'],...data.stores.filter(s=>s.active).map(s=>[s.id,s.name])]))+
    (original?`<p>原销售 ${h(original.sourceReference)} · ${h(original.businessDate)} · ${h(money(original.amountCents))} · 当前有效退款 ${h(money(parent.refundedCents))}</p>`:'')+
    (!r?input('sourceReference','来源编号（订单、日汇总或平台单号）','','required maxlength="200"'):'')+
    (kind==='fee'&&!r?select('expenseId','引用已登记支出（整笔金额）','',[['','不引用已有支出'],...data.records.map(e=>[e.id,`${e.expenseDate} · ${e.description} · ${money(e.amountCents)}`])]):expense?`<p>原支出 ${h(expense.description)} · ${h(money(expense.amountCents))}${currentExpense?' · 本次按当前支出重新核对':''}</p>`:'')+
