@@ -1,3 +1,4 @@
+import {libraryKind,libraryState,libraryEvent,libraryPayload} from './library-maintenance.mjs';
 import {operationalKind,operationalState,operationalPayload} from './operational-changes.mjs';
 import {createAccessObserver} from './access-session.mjs';
 import {resourceProfileState,resourceProfilePayload,profileKind} from './resource-profiles.mjs';
@@ -165,6 +166,10 @@ export function createCloudApi(fetcher=globalThis.fetch,{allowWrites=false,onAcc
     async tasks(profile,user,signal){if(!profile)return [];return ownTasks(await get('/api/tasks',signal),profile,user.role);},
     async task(id,signal){return read('/api/tasks/'+endpointId(id),signal,taskModel);},
     async todos(signal){return read('/api/workbench/todos',signal,v=>list(v).map(todoModel));},
+    async libraryState(kind,id,offset=0,signal){libraryKind(kind);return read('/api/library-maintenance/'+kind+'/'+endpointId(id)+'?offset='+offset,signal,v=>libraryState(v,kind,id));},
+    async libraryEvent(id,signal){return read('/api/library-maintenance/events/'+endpointId(id),signal,v=>libraryEvent(v,id));},
+    async saveLibrary(kind,id,value){libraryKind(kind);return mutations.send('/api/library-maintenance/'+kind+(id?'/'+endpointId(id):''),'POST',libraryPayload(kind,id,value));},
+    async libraryReceipt(kind,id,key){libraryKind(kind);const path='/api/library-maintenance/'+kind+(id?'/'+endpointId(id):'');try{const r=await get('/api/library-maintenance/receipts/'+endpointId(key)+'?'+new URLSearchParams({kind,...(id?{target:id}:{})}));if(r?.kind!==kind||id&&r.id!==id||!Number.isSafeInteger(r.version)||r.version<1)throw new ContractError();endpointId(r.id);endpointId(r.eventId);mutations.confirmRead(path);return r;}catch(e){if(e.status===404){mutations.confirmRead(path);return null;}throw e;}},
     async operationalState(kind,id,offset=0,signal){operationalKind(kind);return read('/api/operational-changes/'+kind+'/'+endpointId(id)+'?offset='+offset,signal,v=>operationalState(v,kind,id));},
     async saveOperationalChange(kind,id,value){operationalKind(kind);return mutations.send('/api/operational-changes/'+kind+'/'+endpointId(id),'POST',operationalPayload(kind,value));},
     async operationalReceipt(kind,id,key){operationalKind(kind);const path='/api/operational-changes/'+kind+'/'+endpointId(id);try{const r=await get(path+'/receipts/'+endpointId(key));if(r?.id!==id||r.kind!==kind||!Number.isSafeInteger(r.version)||r.version<1)throw new ContractError();endpointId(r.recordId);mutations.confirmRead(path);return r;}catch(e){if(e.status===404){mutations.confirmRead(path);return null;}throw e;}},
@@ -382,7 +387,7 @@ export function createCloudApi(fetcher=globalThis.fetch,{allowWrites=false,onAcc
     async loginAccounts(signal){return read('/api/admin/accounts',signal,value=>{const rows=list(value);if(rows.some(r=>!record(r)||!string(r.id)||!string(r.username)||!['admin','employee'].includes(r.role)||typeof r.active!=='boolean'))throw new ContractError();return rows;});},
     async templates(signal){return list(await get('/api/templates',signal)).map(v=>templateRecord(v));},
     async template(id,signal){return templateRecord(await get('/api/templates/'+endpointId(id),signal),true);},
-    async titleCatalog(params={},signal){const q=new URLSearchParams({page:String(params.page??1),q:params.q??''});return titleCatalog(await get('/api/titles/catalog?'+q,signal));},
+    async titleCatalog(params={},signal){const q=new URLSearchParams({page:String(params.page??1),q:params.q??'',...(params.scope?{scope:params.scope}:{})});try{return titleCatalog(await get('/api/titles/catalog?'+q,signal));}catch(e){if(e.status===400&&params.scope&&params.scope!=='archived'){q.delete('scope');return titleCatalog(await get('/api/titles/catalog?'+q,signal));}throw e;}},
     async titleBatch(id,signal){return titleBatch(await get('/api/titles/'+endpointId(id),signal));},
     async tools(signal){return namedList(await get('/api/toolbox',signal));},
     async knowledge(signal){return read('/api/knowledge',signal,knowledgeList);},

@@ -1,3 +1,4 @@
+import {LibraryMaintenance,ManagedTemplates,ManagedTitles,ManagedToolbox} from './library-maintenance';
 import {ArchivedMaterials,OperationalChanges} from './operational-changes';
 import {OperationalExceptionFilter} from './operational-filter';
 import {ResourceProfiles} from './resource-profiles';
@@ -133,8 +134,8 @@ export async function createStudioApp(
   const productObservations = new ProductObservations(database);
   const workbench = new Workbench(database);
   const announcements = new Announcements(database);
-  const toolbox = new Toolbox(database);
-  const titles = new Titles(database);
+  const toolbox = new ManagedToolbox(database);
+  const titles = new ManagedTitles(database);
   const todos = new PersonalTodos(database);
   const observations = new OperationalObservations(database);
   const knowledge = new Knowledge(database);
@@ -149,9 +150,10 @@ export async function createStudioApp(
   const equipment = new Equipment(database);
   const warehouse = new Warehouse(database);
   const productStockCorrections=new ProductStockCorrections(database);
-  const templates = new Templates(database);
+  const templates = new ManagedTemplates(database);
   const competitors = new Competitors(database);
   const finance = new Finance(database);
+  const libraryMaintenance=new LibraryMaintenance(database);
   const operationalChanges=new OperationalChanges(database);
   const resourceProfiles=new ResourceProfiles(database);
   const financeMonthClosures=new FinanceMonthClosures(database);
@@ -1268,6 +1270,16 @@ export async function createStudioApp(
 
     @Get('finance/cash-sources')
     cashSources(@Req() r:AuthRequest){return cashCorrespondence.sources(r.identity!,r.query);}
+    @Get('library-maintenance/receipts/:key')
+    libraryReceipt(@Req() r:AuthRequest,@Param('key') key:string){return libraryMaintenance.receipt(r.identity!,key,r.query);}
+    @Get('library-maintenance/events/:id')
+    libraryEvent(@Req() r:AuthRequest,@Param('id') id:string){objectInput(r.query,[]);return libraryMaintenance.event(r.identity!,id);}
+    @Get('library-maintenance/:kind/:id')
+    libraryState(@Req() r:AuthRequest,@Param('kind') kind:string,@Param('id') id:string){return libraryMaintenance.state(r.identity!,kind,id,r.query);}
+    @Post('library-maintenance/:kind')
+    libraryCreate(@Req() r:AuthRequest,@Param('kind') kind:string,@Body() b:unknown){return libraryMaintenance.save(r.identity!,kind,null,b);}
+    @Post('library-maintenance/:kind/:id')
+    libraryEdit(@Req() r:AuthRequest,@Param('kind') kind:string,@Param('id') id:string,@Body() b:unknown){return libraryMaintenance.save(r.identity!,kind,id,b);}
     @Get('operational-changes/:kind/:id')
     operationalState(@Req() r:AuthRequest,@Param('kind') kind:string,@Param('id') id:string){return operationalChanges.state(r.identity!,kind,id,r.query);}
     @Post('operational-changes/:kind/:id')
@@ -2527,6 +2539,7 @@ export async function createStudioApp(
         if (req.method !== 'GET') auth.csrf(req);
         return true;
       }
+      if(req.path.startsWith('/api/library-maintenance/')){requireAdministrator(req.identity);if(req.method!=='GET')auth.csrf(req);return true;}
       if(req.path.startsWith('/api/operational-changes/')){requireContributor(req.identity);if(req.method!=='GET'){requireAdministrator(req.identity);auth.csrf(req);}return true;}
       if(req.path.startsWith('/api/resource-profiles/')){requireAdministrator(req.identity);if(req.method!=='GET')auth.csrf(req);return true;}
       if (req.path === '/api/finance' || req.path.startsWith('/api/finance/')) {
@@ -2596,6 +2609,7 @@ export async function createStudioApp(
     express.json({ limit: '128kb', strict: true }),
   );
   app.use('/api/research', express.json({ limit: '128kb', strict: true }));
+  app.use('/api/library-maintenance',express.json({limit:'2mb',strict:true}));
   app.use('/api/titles', express.json({ limit: '2mb', strict: true }));
   app.use('/api/knowledge', express.json({ limit: '128kb', strict: true }));
   app.use('/api/competitors', express.json({ limit: '64kb', strict: true }));
