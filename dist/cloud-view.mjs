@@ -1,3 +1,4 @@
+import {studioBuddy,navigationIcon} from './studio-visuals.mjs';
 import {createBusinessReminders} from './business-reminders.mjs';
 import {createLibraryViews} from './library-maintenance.mjs';
 import {createOperationalViews} from './operational-changes.mjs';
@@ -52,7 +53,7 @@ document.body.insertAdjacentHTML('beforeend','<dialog id="cloud-detail" class="d
 const status = (title,desc,action='重试') => `<section class="work-panel planning-panel"><h2>${h(title)}</h2><p>${h(desc)}</p><div class="action-row"><button class="primary" id="cloud-retry">${h(action)}</button><a class="secondary" href="${sourceOrigin}#workspace" target="_blank" rel="noopener noreferrer">${writable?'返回工作台':'打开原工作台'} ↗</a></div></section>`;
 function errorView(error){for(const key of Object.keys(state))state[key]=[];if(error.status===401){user=null;$('#cloud-identity').textContent='登录待恢复';$('nav[aria-label="主要模块"]').innerHTML='';}if(error.status===401&&writable){loginView();return;}$('#main').innerHTML=status(error.status===401?'请恢复云端登录':'资料暂时无法读取',error.message);$('#cloud-retry').onclick=()=>init();}
 function loginView(){
- $('#main').innerHTML='<section class="work-panel planning-panel login-panel"><div class="eyebrow">STUDIO OS</div><h1>登录工作空间</h1><p class="muted">使用已有登录账号，进入自己的工作清单。</p><form id="workspace-login"><label>登录账号<input name="username" autocomplete="username" required maxlength="64"></label><label>密码<input name="password" type="password" autocomplete="current-password" required maxlength="128"></label><p class="save-error" role="alert"></p><button class="primary" type="submit">登录</button></form></section>';
+ $('#main').innerHTML='<section class="work-panel planning-panel login-panel"><span class="login-brand-logo"><img src="brand-logo.png" alt="幸运发财树" width="76" height="76"></span><div class="eyebrow">STUDIO OS</div><h1>欢迎来到幸运发财树</h1><p class="muted">使用已有登录账号，进入自己的工作清单。</p><form id="workspace-login"><label>登录账号<input name="username" autocomplete="username" required maxlength="64"></label><label>密码<input name="password" type="password" autocomplete="current-password" required maxlength="128"></label><p class="save-error" role="alert"></p><button class="primary" type="submit">登录</button></form></section>';
  const form=$('#workspace-login');form.onsubmit=async e=>{e.preventDefault();const submit=form.querySelector('button');if(submit.disabled)return;submit.disabled=true;const values=new FormData(form);try{await api.login(values.get('username'),values.get('password'));form.reset();await init();}catch(err){form.querySelector('[role=alert]').textContent=err.message;form.elements.password.value='';}finally{submit.disabled=false;}};
 }
 function heading(title,desc){return `<div class="eyebrow">STUDIO OS <span>${writable?'已连接工作空间':'云端只读预览'}</span></div><div class="heading module-heading"><div><h1>${h(title)}</h1><p>${h(desc)}</p></div><button class="secondary" id="cloud-refresh">刷新数据</button></div>`;}
@@ -65,7 +66,7 @@ function navigation(){
   lookupIds.clear();
   $('nav[aria-label="主要模块"]').innerHTML=navigationForRole(user.role,user).map((g,i)=>{
     for(const [id]of g[1])lookupIds.add(id);
-    return `<details class="nav-group" ${i<2?'open':''}><summary>${h(g[0])}</summary>${g[1].map(([id,label])=>`<a href="#${id}" class="nav-item" data-cloud-page="${id}">${h(label)}${sharedGroupIds.has(id)?'':'<small>规划</small>'}</a>`).join('')}</details>`;
+    return `<details class="nav-group" ${i<2?'open':''}><summary>${navigationIcon(groups.findIndex(x=>x[0]===g[0]))}${h(g[0])}</summary>${g[1].map(([id,label])=>`<a href="#${id}" class="nav-item" data-cloud-page="${id}">${h(label)}${sharedGroupIds.has(id)?'':'<small>规划</small>'}</a>`).join('')}</details>`;
   }).join('');
 }
 
@@ -93,7 +94,7 @@ async function init(){
     ]);
     if(run.signal.aborted)return;
     user={...activeUser,productStockAvailable:inventory?.productOperationsAvailable===true,scopedPackaging:inventory?.quantityOperationsAvailable===true&&inventory.grants.length>0,canConsumePackaging:inventory?.quantityOperationsAvailable===true&&inventory.grants.some(g=>g.canMove)};nav=activeNav;profile=activeProfile;lastAccessStamp=accessStamp(activeUser,inventory);
-    $('#cloud-identity').innerHTML=`${h(user.username)}<small>${user.superadmin?'超级管理员':user.role==='admin'?'管理员':'员工'} · 云端会话</small>`;
+    $('#cloud-identity').innerHTML=`${h(user.username)}<small>${user.superadmin?'超级管理员':user.role==='admin'?'管理员':'员工'} · 工作空间</small>`;
     navigation();lookupIds.add('profile');await route();
   }catch(e){if(e.name!=='AbortError'&&!run.signal.aborted)errorView(e);}
 }
@@ -102,7 +103,7 @@ async function route(){
   detailController?.abort();if($('#cloud-detail').open)$('#cloud-detail').close();
   const requested=location.hash.slice(1)||'daily';page=lookupIds.has(requested)?requested:'daily';
   document.querySelectorAll('[data-cloud-page]').forEach(a=>{const active=a.dataset.cloudPage===page;a.classList.toggle('active',active);if(active){a.setAttribute('aria-current','page');a.closest('details').open=true;}else a.removeAttribute('aria-current');});
-  $('.topbar strong').textContent=names[page];document.title=names[page]+' · Studio OS 云端';
+  $('.topbar strong').textContent=names[page];document.title=names[page]+' · 幸运发财树';
   $('#main').innerHTML=heading(names[page],'正在读取云端资料…');
   try{
     if(planningPages.has(page)){await planning.render(page,signal,user);}
@@ -164,11 +165,12 @@ function dailyPage(){
     const query=$('#search').value.trim().toLowerCase(),type=$('#type-filter').value;
     const visible=rows.filter(r=>(selectedStatus==='all'||r.status===selectedStatus)&&(type==='all'||r.type===type)&&r.title.toLowerCase().includes(query)).sort((a,b)=>(a.status==='done')-(b.status==='done'));
     const labels={todo:'待处理',doing:'进行中',done:'已完成'};
-    $('#task-list').innerHTML=visible.map(r=>`<article class="task ${r.status}"><button class="check" ${writable&&r.kind==='todo'?`data-toggle-todo="${h(r.id)}" data-next-status="${r.status==='done'?'待开始':'已完成'}"`:'disabled'} aria-label="${h(r.title)}：${writable&&r.kind==='todo'?(r.status==='done'?'重新开始':'标记完成'):labels[r.status]}" title="${writable?'个人事项可标记完成；业务任务从详情记录交付':'当前只读'}">${r.status==='done'?'✓':''}</button><button class="task-body" ${r.kind==='task'?'data-live-task':'data-live-todo'}="${h(r.id)}" aria-label="查看事项：${h(r.title)}"><span class="task-title">${h(r.title)}</span><span class="task-meta"><span class="type-tag" data-type="${h(r.type)}">${h(r.type)}</span><span>${h(r.dateLabel)}</span><i class="meta-dot"></i><span>${h(r.context)}</span></span></button><span class="state-tag ${r.status}">${labels[r.status]}</span><span class="task-arrow" aria-hidden="true">›</span></article>`).join('')||empty('这一天暂无符合条件的事项','可以切换日期或调整筛选条件。');
+    $('#task-list').innerHTML=visible.map(r=>`<article class="task ${r.status}"><button class="check" ${writable&&r.kind==='todo'?`data-toggle-todo="${h(r.id)}" data-next-status="${r.status==='done'?'待开始':'已完成'}"`:'disabled'} aria-label="${h(r.title)}：${writable&&r.kind==='todo'?(r.status==='done'?'重新开始':'标记完成'):labels[r.status]}" title="${writable?'个人事项可标记完成；业务任务从详情记录交付':'当前只读'}">${r.status==='done'?'✓':''}</button><button class="task-body" ${r.kind==='task'?'data-live-task':'data-live-todo'}="${h(r.id)}" aria-label="查看事项：${h(r.title)}"><span class="task-title">${h(r.title)}</span><span class="task-meta"><span class="type-tag" data-type="${h(r.type)}">${h(r.type)}</span><span>${h(r.dateLabel)}</span><i class="meta-dot"></i><span>${h(r.context)}</span></span></button><span class="state-tag ${r.status}">${labels[r.status]}</span><span class="task-arrow" aria-hidden="true">›</span></article>`).join('')||`<div class="empty daily-empty">${studioBuddy(rows.length?'quiet':'ready',92)}<h3>${rows.length?'暂时没有匹配的事项':'今天，从一件小事开始'}</h3><p>${rows.length?'换个关键词，或清除筛选再看看。':'添加自己的事项，或切换日期查看已有安排。'}</p>${rows.length?'<button data-clear-daily-filters>清除筛选</button>':writable?'<button class="primary" data-add-daily-empty>＋ 添加事项</button>':''}</div>`;
     $('.list-foot').innerHTML='<span class="tiny-dot"></span> 未排期事项与持续待办一并列出 <span>每一步，都是积累。</span>';
   };
   const updateTypes=()=>{const previous=$('#type-filter').value;const values=[...new Set(allRows().map(r=>r.type))];$('#type-filter').innerHTML='<option value="all">所有类型</option>'+values.map(v=>`<option>${h(v)}</option>`).join('');$('#type-filter').value=values.includes(previous)?previous:'all';};
   const moveDate=delta=>{const d=new Date(selectedDate+'T12:00:00Z');d.setUTCDate(d.getUTCDate()+delta);selectedDate=d.toISOString().slice(0,10);updateTypes();renderList();};
+  $('#task-list').onclick=e=>{if(e.target.closest('[data-add-daily-empty]'))$('#add-task').click();if(e.target.closest('[data-clear-daily-filters]')){selectedStatus='all';$('#search').value='';$('#type-filter').value='all';renderList();}};
   $('#prev-date').onclick=()=>moveDate(-1);$('#next-date').onclick=()=>moveDate(1);
   $('#work-date').onchange=e=>{if(validDate(e.target.value)){selectedDate=e.target.value;updateTypes();renderList();}};
   $('#today').onclick=()=>{selectedDate=chinaDate();updateTypes();renderList();};

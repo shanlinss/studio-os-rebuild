@@ -23,7 +23,7 @@ try{
   if(role==='admin')await new Materials(db).save({id:u.id,username,role},{title:'隔离参考素材：封面表达',sourceUrl:'https://example.com/reference',metadata:{notes:'仅供本机验证，不是真实业务资料。',tags:['隔离验证']},storeIds:[]});
  }
  webRoot=await mkdtemp(path.join(tmpdir(),'studio-os-integrated-web-'));
- for(const file of (await readdir('dist')).filter(f=>/\.(mjs|js|html|css|svg)$/.test(f)))await copyFile(path.join('dist',file),path.join(webRoot,file));
+ for(const file of (await readdir('dist')).filter(f=>/\.(mjs|js|html|css|svg|png)$/.test(f)))await copyFile(path.join('dist',file),path.join(webRoot,file));
  const index=path.join(webRoot,'index.html');await writeFile(index,(await readFile(index,'utf8')).replace('name="studio-data-mode" content="prototype"','name="studio-data-mode" content="cloud-connected"'));
  app=await createStudioApp(db,webRoot,{diagnosticSink:()=>{}});await app.listen(4178,'127.0.0.1');
  console.log('Disposable integrated preview: http://127.0.0.1:4178/');
