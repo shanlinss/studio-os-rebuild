@@ -230,6 +230,7 @@ export async function checkReadiness(
     await tx`SELECT material_id,version,material_version,archived FROM material_archive_versions LIMIT 0`;
     await tx`SELECT task_id,version,planned_publish_on,task_snapshot FROM task_schedule_versions LIMIT 0`;
     await tx`SELECT actor_id,request_key,kind,target_id,request_hash,result FROM operational_change_receipts LIMIT 0`;
+    await tx`SELECT sort_order FROM knowledge_assets LIMIT 0`;
     await tx`SELECT archived FROM title_batches LIMIT 0`;
     await tx`SELECT archived FROM toolbox_links LIMIT 0`;
     await tx`SELECT kind,target_id,action,before_value,after_value FROM library_maintenance_events LIMIT 0`;

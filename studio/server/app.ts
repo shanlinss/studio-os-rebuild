@@ -1200,6 +1200,8 @@ export async function createStudioApp(
     ) {
       return toolbox.remove(r.identity!, id, b);
     }
+    @Get('knowledge/navigation')
+    knowledgeNavigationCatalog(@Req() r:AuthRequest){return knowledge.navigationCatalog(r.identity!,r.query);}
     @Get('knowledge')
     knowledgeList(@Req() r: AuthRequest) {
       return knowledge.list(r.identity!);
@@ -2442,6 +2444,7 @@ export async function createStudioApp(
         req.method === 'GET' &&
         (req.path === '/api/toolbox' ||
           req.path === '/api/knowledge' ||
+          req.path === '/api/knowledge/navigation' ||
           /^\/api\/knowledge\/[^/]+\/cover$/.test(req.path))
       ) {
         requireContributor(req.identity);

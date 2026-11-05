@@ -66,7 +66,8 @@ export function createResourceViews({api,h,onSignedOut,heading,showPanel,source,
   if(page==='templates'){const rows=await api.templates(signal);if(!signal.aborted)templates(rows);}
   if(page==='titles')await titles(signal);
   if(page==='tools'){const rows=await api.tools(signal);if(!signal.aborted)tools(rows);}
-  if(page==='knowledge'||page==='learning'){const rows=await api.knowledge(signal);if(!signal.aborted){if(page==='knowledge')renderKnowledgeNavigation({rows,user,signal,api,h,heading,notify,writable});else knowledge(rows,page);}}
+  if(page==='knowledge'){const catalog=await api.knowledgeNavigation(signal);if(!signal.aborted)renderKnowledgeNavigation({rows:catalog.items,supportsOrder:catalog.navigationVersion===1,user,signal,api,h,heading,notify,writable});}
+  if(page==='learning'){const rows=await api.knowledge(signal);if(!signal.aborted)knowledge(rows,page);}
   if(page==='members'){const rows=await api.members(signal);if(!signal.aborted)members(rows,user);}
   if(page==='accounts'){const rows=await api.businessAccounts(signal);if(!signal.aborted)accounts(rows,user);}
   if(page==='shops'){const rows=await api.stores(signal);if(!signal.aborted)shops(rows);}

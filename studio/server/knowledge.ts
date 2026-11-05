@@ -1,3 +1,6 @@
+import {databaseIdentity,freshIdentity} from './permissions';
+import type {TransactionSql} from 'postgres';
+import {UnauthorizedException} from '@nestjs/common';
 import {
   BadRequestException,
   ConflictException,
@@ -22,42 +25,52 @@ function articleBody(value: unknown) {
   longText(value, 20000);
   return value as string;
 }
+const onboarding=(category:string)=>['onboarding','新人培训'].includes(category);
+function navigationOrder(input:unknown,category:string,prior:number|null=null){if(input===undefined)return onboarding(category)?prior:null;if(input===null||input==='')return null;if(!onboarding(category)||!Number.isSafeInteger(input)||Number(input)<1||Number(input)>2147483647)throw new BadRequestException();return Number(input);}
 export class Knowledge {
   constructor(private readonly db: StudioDatabase) {}
+  private async administrator(tx:TransactionSql,identity:Identity){const [row]=await tx`SELECT id,username,role,active,superadmin,admin_permissions FROM studio_os.accounts WHERE id=${identity.id} FOR SHARE`;if(!row?.active)throw new UnauthorizedException();requireAdministrator(databaseIdentity(row));}
+  async navigationCatalog(identity:Identity,query:unknown){objectInput(query,[]);identity=await freshIdentity(this.db,identity);requireContributor(identity);const items=await this.db.client`SELECT id,title,entry_type AS "entryType",kind,category,summary,source_url AS "sourceUrl",tags,sort_order AS "sortOrder",version,created_at AS "createdAt",updated_at AS "updatedAt" FROM studio_os.knowledge_assets WHERE entry_type='knowledge' ORDER BY updated_at DESC,id`;return {items,navigationVersion:1,access:{read:'team',manage:'administrators'}};}
   async navigation(identity: Identity, value: unknown, id?: string) {
+    identity=await freshIdentity(this.db,identity);
     requireAdministrator(identity);
     if (id) uuid(id);
-    const b = objectInput(value, ['title', 'category', 'summary', 'tags', 'sourceUrl', ...(id ? ['expectedVersion'] : [])]);
+    const b = objectInput(value, ['title', 'category', 'summary', 'tags', 'sourceUrl', 'sortOrder', ...(id ? ['expectedVersion'] : [])]);
     const title = shortText(b.title, 200), category = optional(b.category, 100), summary = optional(b.summary, 2000);
     const sourceUrl = webLink(b.sourceUrl), url = new URL(sourceUrl);
     if (url.protocol !== 'https:' || url.username || url.password || url.port || !(url.hostname === 'feishu.cn' || url.hostname.endsWith('.feishu.cn')))
       throw new BadRequestException('请填写 HTTPS 飞书文档链接');
     if (!Array.isArray(b.tags) || b.tags.length > 30) throw new BadRequestException();
     const tags = [...new Set(b.tags.map((tag) => shortText(tag, 40)))];
-    if (!id) return this.save(identity, { title, category, summary, tags, sourceUrl, entryType: 'knowledge', kind: 'link' });
+    if (!id) return this.save(identity, { title, category, summary, tags, sourceUrl, sortOrder:navigationOrder(b.sortOrder,category), entryType: 'knowledge', kind: 'link' });
     const expected = version(b.expectedVersion);
     return this.db.client.begin(async (tx) => {
+      await this.administrator(tx,identity);
       const [before] = await tx`SELECT * FROM studio_os.knowledge_assets WHERE id=${id} AND entry_type='knowledge' FOR UPDATE`;
       if (!before) throw new NotFoundException();
       if (before.version !== expected) throw new ConflictException();
       if (before.kind === 'conclusion') throw new BadRequestException('请保留原结论引用，另建飞书文档导航');
+      const sortOrder=navigationOrder(b.sortOrder,category,before.sort_order);
       // Navigation updates preserve legacy bodies, source relations and cover assets.
-      const [row] = await tx`UPDATE studio_os.knowledge_assets SET title=${title},category=${category},summary=${summary},tags=${JSON.stringify(tags)}::jsonb,source_url=${sourceUrl},version=version+1,updated_at=now() WHERE id=${id} RETURNING id,version`;
-      await tx`INSERT INTO studio_os.knowledge_events(asset_id,actor_id,action,before_value,after_value) VALUES(${id},${identity.id},'updated',${JSON.stringify(before)}::jsonb,${JSON.stringify({title,category,summary,tags,sourceUrl})}::jsonb)`;
+      const [row] = await tx`UPDATE studio_os.knowledge_assets SET title=${title},category=${category},summary=${summary},tags=${JSON.stringify(tags)}::jsonb,source_url=${sourceUrl},sort_order=${sortOrder},version=version+1,updated_at=now() WHERE id=${id} RETURNING id,version`;
+      await tx`INSERT INTO studio_os.knowledge_events(asset_id,actor_id,action,before_value,after_value) VALUES(${id},${identity.id},'updated',${JSON.stringify(before)}::jsonb,${JSON.stringify({title,category,summary,tags,sourceUrl,sortOrder})}::jsonb)`;
       return row;
     });
   }
-  list(identity: Identity) {
+  async list(identity: Identity) {
+    identity=await freshIdentity(this.db,identity);
     requireContributor(identity);
     return this.db
       .client`SELECT k.id,k.title,k.entry_type AS "entryType",k.kind,k.category,k.summary,k.body,k.source_url AS "sourceUrl",k.experiment_id AS "experimentId",k.product_review_id AS "productReviewId",k.tags,k.version,k.created_at AS "createdAt",k.updated_at AS "updatedAt",EXISTS(SELECT 1 FROM studio_os.knowledge_covers c WHERE c.asset_id=k.id) AS "hasCover",coalesce(e.finding,r.reason) AS "sourceFinding",e.recommendation AS "sourceRecommendation",coalesce(e.title,p.name) AS "sourceTitle",CASE WHEN e.id IS NOT NULL THEN 'experiment' WHEN r.id IS NOT NULL THEN 'product' ELSE NULL END AS "sourceKind",coalesce(e.id,p.id) AS "sourceParentId" FROM studio_os.knowledge_assets k LEFT JOIN studio_os.lab_experiments e ON e.id=k.experiment_id LEFT JOIN studio_os.product_reviews r ON r.id=k.product_review_id LEFT JOIN studio_os.products p ON p.id=r.product_id ORDER BY k.updated_at DESC,k.id`;
   }
-  sources(identity: Identity) {
+  async sources(identity: Identity) {
+    identity=await freshIdentity(this.db,identity);
     requireAdministrator(identity);
     return this.db
       .client`SELECT 'experiment' AS kind,e.id,e.id AS "parentId",e.title,e.finding AS summary,e.recommendation,e.ended_at AS "createdAt" FROM studio_os.lab_experiments e WHERE e.status='concluded' AND length(coalesce(e.finding,''))>0 UNION ALL SELECT 'product' AS kind,r.id,p.id AS "parentId",p.name AS title,r.reason AS summary,'' AS recommendation,r.created_at AS "createdAt" FROM studio_os.product_reviews r JOIN studio_os.products p ON p.id=r.product_id ORDER BY "createdAt" DESC,id`;
   }
   async save(identity: Identity, value: unknown, id?: string) {
+    identity=await freshIdentity(this.db,identity);
     requireAdministrator(identity);
     if (id) uuid(id);
     const keys = [
@@ -71,6 +84,7 @@ export class Knowledge {
       'experimentId',
       'productReviewId',
       'tags',
+      'sortOrder',
     ];
     const b = objectInput(value, id ? [...keys, 'expectedVersion'] : keys);
     const title = shortText(b.title, 200),
@@ -112,6 +126,7 @@ export class Knowledge {
     )
       throw new BadRequestException();
     return this.db.client.begin(async (tx) => {
+      await this.administrator(tx,identity);
       if (
         experiment &&
         !(
@@ -129,27 +144,29 @@ export class Knowledge {
       let before, row;
       if (id) {
         [before] =
-          await tx`SELECT id,title,entry_type,kind,category,summary,body,source_url,experiment_id,product_review_id,tags,version FROM studio_os.knowledge_assets WHERE id=${id} FOR UPDATE`;
+          await tx`SELECT id,title,entry_type,kind,category,summary,body,source_url,experiment_id,product_review_id,tags,sort_order,version FROM studio_os.knowledge_assets WHERE id=${id} FOR UPDATE`;
         if (!before) throw new NotFoundException();
         if (before.version !== version(b.expectedVersion))
           throw new ConflictException();
         [row] =
-          await tx`UPDATE studio_os.knowledge_assets SET title=${title},entry_type=${entryType},kind=${kind},category=${category},summary=${summary},body=${body},source_url=${url},experiment_id=${experiment},product_review_id=${review},tags=${JSON.stringify(normalizedTags)}::jsonb,version=version+1,updated_at=now() WHERE id=${id} RETURNING id,version`;
+          await tx`UPDATE studio_os.knowledge_assets SET title=${title},entry_type=${entryType},kind=${kind},category=${category},summary=${summary},body=${body},source_url=${url},experiment_id=${experiment},product_review_id=${review},tags=${JSON.stringify(normalizedTags)}::jsonb,sort_order=${navigationOrder(b.sortOrder,category,before.sort_order)},version=version+1,updated_at=now() WHERE id=${id} RETURNING id,version`;
       } else
         [row] =
-          await tx`INSERT INTO studio_os.knowledge_assets(title,entry_type,kind,category,summary,body,source_url,experiment_id,product_review_id,tags) VALUES(${title},${entryType},${kind},${category},${summary},${body},${url},${experiment},${review},${JSON.stringify(normalizedTags)}::jsonb) RETURNING id,version`;
-      await tx`INSERT INTO studio_os.knowledge_events(asset_id,actor_id,action,before_value,after_value) VALUES(${row.id},${identity.id},${id ? 'updated' : 'created'},${before ? JSON.stringify(before) : null}::jsonb,${JSON.stringify({ title, entryType, kind, category, summary, body, sourceUrl: url, experimentId: experiment, productReviewId: review, tags: normalizedTags })}::jsonb)`;
+          await tx`INSERT INTO studio_os.knowledge_assets(title,entry_type,kind,category,summary,body,source_url,experiment_id,product_review_id,tags,sort_order) VALUES(${title},${entryType},${kind},${category},${summary},${body},${url},${experiment},${review},${JSON.stringify(normalizedTags)}::jsonb,${navigationOrder(b.sortOrder,category)}) RETURNING id,version`;
+      await tx`INSERT INTO studio_os.knowledge_events(asset_id,actor_id,action,before_value,after_value) VALUES(${row.id},${identity.id},${id ? 'updated' : 'created'},${before ? JSON.stringify(before) : null}::jsonb,${JSON.stringify({ title, entryType, kind, category, summary, body, sourceUrl: url, experimentId: experiment, productReviewId: review, tags: normalizedTags, sortOrder:navigationOrder(b.sortOrder,category,before?.sort_order??null) })}::jsonb)`;
       return row;
     });
   }
   async remove(identity: Identity, id: string, value: unknown) {
+    identity=await freshIdentity(this.db,identity);
     requireAdministrator(identity);
     uuid(id);
     const b = objectInput(value, ['expectedVersion']),
       v = version(b.expectedVersion);
     return this.db.client.begin(async (tx) => {
+      await this.administrator(tx,identity);
       const [before] =
-        await tx`SELECT id,title,entry_type,kind,category,summary,body,source_url,experiment_id,product_review_id,tags,version FROM studio_os.knowledge_assets WHERE id=${id} FOR UPDATE`;
+        await tx`SELECT id,title,entry_type,kind,category,summary,body,source_url,experiment_id,product_review_id,tags,sort_order,version FROM studio_os.knowledge_assets WHERE id=${id} FOR UPDATE`;
       if (!before) throw new NotFoundException();
       if (before.version !== v) throw new ConflictException();
       await tx`DELETE FROM studio_os.knowledge_assets WHERE id=${id}`;
@@ -158,6 +175,7 @@ export class Knowledge {
     });
   }
   async cover(identity: Identity, id: string) {
+    identity=await freshIdentity(this.db,identity);
     requireContributor(identity);
     uuid(id);
     const [file] = await this.db.client<
@@ -174,12 +192,14 @@ export class Knowledge {
     mime: unknown,
     expectedVersion: unknown,
   ) {
+    identity=await freshIdentity(this.db,identity);
     requireAdministrator(identity);
     uuid(id);
     const file = mediaFile(bytes, name, mime);
     if (file.mime === 'video/mp4') throw new BadRequestException();
     const v = version(Number(expectedVersion));
     return this.db.client.begin(async (tx) => {
+      await this.administrator(tx,identity);
       const [row] =
         await tx`SELECT version FROM studio_os.knowledge_assets WHERE id=${id} FOR UPDATE`;
       if (!row) throw new NotFoundException();
@@ -192,11 +212,13 @@ export class Knowledge {
     });
   }
   async clearCover(identity: Identity, id: string, value: unknown) {
+    identity=await freshIdentity(this.db,identity);
     requireAdministrator(identity);
     uuid(id);
     const b = objectInput(value, ['expectedVersion']),
       v = version(b.expectedVersion);
     return this.db.client.begin(async (tx) => {
+      await this.administrator(tx,identity);
       const [row] =
         await tx`SELECT version FROM studio_os.knowledge_assets WHERE id=${id} FOR UPDATE`;
       if (!row) throw new NotFoundException();

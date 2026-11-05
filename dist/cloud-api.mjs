@@ -1,3 +1,4 @@
+import {navigationCatalog} from './knowledge-navigation-model.mjs';
 import {personalSettingsState,personalPasswordPayload,personalPasswordResult} from './personal-settings.mjs';
 import {libraryKind,libraryState,libraryEvent,libraryPayload} from './library-maintenance.mjs';
 import {operationalKind,operationalState,operationalPayload} from './operational-changes.mjs';
@@ -393,6 +394,7 @@ export function createCloudApi(fetcher=globalThis.fetch,{allowWrites=false,onAcc
     async titleCatalog(params={},signal){const q=new URLSearchParams({page:String(params.page??1),q:params.q??'',...(params.scope?{scope:params.scope}:{})});try{return titleCatalog(await get('/api/titles/catalog?'+q,signal));}catch(e){if(e.status===400&&params.scope&&params.scope!=='archived'){q.delete('scope');return titleCatalog(await get('/api/titles/catalog?'+q,signal));}throw e;}},
     async titleBatch(id,signal){return titleBatch(await get('/api/titles/'+endpointId(id),signal));},
     async tools(signal){return namedList(await get('/api/toolbox',signal));},
+    async knowledgeNavigation(signal){try{return navigationCatalog(await get('/api/knowledge/navigation',signal));}catch(e){if(e.status!==404)throw e;const rows=(await this.knowledge(signal)).filter(r=>r.entryType==='knowledge');return {items:rows.map(({id,title,entryType,kind,category,summary,sourceUrl,tags,version,createdAt,updatedAt})=>({id,title,entryType,kind,category,summary,sourceUrl,tags,version,createdAt,updatedAt,sortOrder:null})),navigationVersion:0,access:{read:'team',manage:'administrators'}};}},
     async knowledge(signal){return read('/api/knowledge',signal,knowledgeList);},
     async createKnowledgeNavigation(value){return mutations.send('/api/knowledge/navigation','POST',knowledgeNavigationPayload(value));},
     async updateKnowledgeNavigation(id,value,version){return mutations.send('/api/knowledge/'+endpointId(id)+'/navigation','PATCH',knowledgeNavigationPayload(value,version));},
