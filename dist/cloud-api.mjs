@@ -1,3 +1,4 @@
+import {personalSettingsState,personalPasswordPayload,personalPasswordResult} from './personal-settings.mjs';
 import {libraryKind,libraryState,libraryEvent,libraryPayload} from './library-maintenance.mjs';
 import {operationalKind,operationalState,operationalPayload} from './operational-changes.mjs';
 import {createAccessObserver} from './access-session.mjs';
@@ -157,6 +158,8 @@ export function createCloudApi(fetcher=globalThis.fetch,{allowWrites=false,onAcc
     async recordSnapshot(id,publicationId,value){return mutations.send('/api/tasks/'+endpointId(id)+'/publications/'+endpointId(publicationId)+'/snapshots','POST',snapshotPayload(value));},
     async session(signal){const d=await get('/api/session',signal);const user=identity(d.user);mutations.acceptSession(d);return user;},
     async navigation(signal){const d=list(await get('/api/navigation',signal));if(!d.every(v=>record(v)&&string(v.id)&&string(v.title)))throw new ContractError();return d;},
+    async personalSettings(signal){const state=await read('/api/workbench/personal-settings',signal,personalSettingsState);mutations.confirmRead('/api/workbench/password',{exact:true});return state;},
+    async changeOwnPassword(value){const body=personalPasswordPayload(value);try{const result=await mutations.send('/api/workbench/password','POST',body);try{personalPasswordResult(result);}catch(e){e.uncertain=true;throw e;}mutations.clear();access.invalidate();return result;}catch(e){if(e.uncertain||e.status===401){mutations.clear();access.invalidate();}throw e;}},
     async profile(signal){const d=await get('/api/workbench/profile',signal);if(d.profile===null)return null;if(!record(d.profile)||!string(d.profile.id))throw new ContractError();return d.profile;},
     async materials(signal){return read('/api/materials',signal,v=>list(v).map(materialModel));},
     async activeMaterials(signal){return (await this.materials(signal)).filter(m=>!m.archived);},

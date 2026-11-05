@@ -1,3 +1,4 @@
+import {PersonalSettings} from './personal-settings';
 import {LibraryMaintenance,ManagedTemplates,ManagedTitles,ManagedToolbox} from './library-maintenance';
 import {ArchivedMaterials,OperationalChanges} from './operational-changes';
 import {OperationalExceptionFilter} from './operational-filter';
@@ -102,6 +103,7 @@ export async function createStudioApp(
   options: { diagnosticSink?: DiagnosticSink } = {},
 ) {
   const auth = new Authentication(database);
+  const personalSettings = new PersonalSettings(database);
   const stores = new Stores(database);
   const members = new Members(database);
   const employmentDates = new EmploymentDates(database);
@@ -632,6 +634,10 @@ export async function createStudioApp(
     @Post('attendance/corrections') attendanceCorrection(@Req() r: AuthRequest, @Body() b: unknown) { return attendance.correction(r.identity!, b); }
     @Patch('attendance/corrections/:id') attendanceCorrectionEdit(@Req() r: AuthRequest, @Param('id') id: string, @Body() b: unknown) { return attendance.correction(r.identity!, b, id); }
     @Post('attendance/corrections/:id/decision') attendanceCorrectionDecision(@Req() r: AuthRequest, @Param('id') id: string, @Body() b: unknown) { return attendance.decideCorrection(r.identity!, id, b); }
+    @Get('workbench/personal-settings')
+    personalSettingsState(@Req() r:AuthRequest){return personalSettings.state(r.identity!,r.query);}
+    @Post('workbench/password')
+    async ownPassword(@Req() r:AuthRequest,@Body() b:unknown,@Res({passthrough:true}) res:express.Response){const result=await personalSettings.change(r,b);res.clearCookie(cookie,{secure:r.secure,path:'/api',httpOnly:true,sameSite:'strict'});return result;}
     @Get('workbench/profile')
     ownMemberProfile(@Req() req: AuthRequest) {
       return members.ownProfile(req.identity!.id, req.query);
@@ -2397,10 +2403,12 @@ export async function createStudioApp(
         if (req.method !== 'GET') auth.csrf(req);
         return true;
       }
+      if(req.method==='POST'&&req.path==='/api/workbench/password'){auth.csrf(req);return true;}
       if (
         req.method === 'GET' &&
         [
           '/api/workbench/profile',
+          '/api/workbench/personal-settings',
           '/api/workbench/capabilities',
           '/api/workbench/material-refills',
           '/api/workbench/refills',
