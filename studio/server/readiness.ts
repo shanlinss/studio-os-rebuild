@@ -225,6 +225,11 @@ export async function checkReadiness(
     await tx`SELECT handover_id,account_id,decision,before_value,after_value FROM equipment_handover_account_reviews LIMIT 0`;
     await tx`SELECT card_id,version,plan_name,fixed_cents,cycle,billing_day,effective_on FROM phone_card_plan_versions LIMIT 0`;
     await tx`SELECT actor_id,request_key,kind,target_id,request_hash,result FROM resource_profile_receipts LIMIT 0`;
+    await tx`SELECT archived FROM materials LIMIT 0`;
+    await tx`SELECT schedule_version,schedule_overridden,planned_publish_on FROM tasks LIMIT 0`;
+    await tx`SELECT material_id,version,material_version,archived FROM material_archive_versions LIMIT 0`;
+    await tx`SELECT task_id,version,planned_publish_on,task_snapshot FROM task_schedule_versions LIMIT 0`;
+    await tx`SELECT actor_id,request_key,kind,target_id,request_hash,result FROM operational_change_receipts LIMIT 0`;
     const layout =
       await tx`SELECT singleton,version FROM material_folder_layout WHERE singleton`;
     if (layout.length !== 1)

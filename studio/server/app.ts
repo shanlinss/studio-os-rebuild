@@ -1,3 +1,5 @@
+import {ArchivedMaterials,OperationalChanges} from './operational-changes';
+import {OperationalExceptionFilter} from './operational-filter';
 import {ResourceProfiles} from './resource-profiles';
 import {FinanceClosingExceptionFilter} from './finance-closing-filter';
 import {FinanceMonthClosures} from './finance-month-closures';
@@ -115,7 +117,7 @@ export async function createStudioApp(
   const samples = new ShootingSamples(database);
   const businessAccounts = new BusinessAccounts(database);
   const workflow = new Workflow(database);
-  const materialInbox = new Materials(database);
+  const materialInbox = new ArchivedMaterials(database);
   const lab = new MaterialLab(database);
   const research = new Research(database);
   const publicationAssets = new PublicationAssets(database);
@@ -150,6 +152,7 @@ export async function createStudioApp(
   const templates = new Templates(database);
   const competitors = new Competitors(database);
   const finance = new Finance(database);
+  const operationalChanges=new OperationalChanges(database);
   const resourceProfiles=new ResourceProfiles(database);
   const financeMonthClosures=new FinanceMonthClosures(database);
   const financeMonthScope=new FinanceMonthScope(database);
@@ -1265,6 +1268,12 @@ export async function createStudioApp(
 
     @Get('finance/cash-sources')
     cashSources(@Req() r:AuthRequest){return cashCorrespondence.sources(r.identity!,r.query);}
+    @Get('operational-changes/:kind/:id')
+    operationalState(@Req() r:AuthRequest,@Param('kind') kind:string,@Param('id') id:string){return operationalChanges.state(r.identity!,kind,id,r.query);}
+    @Post('operational-changes/:kind/:id')
+    operationalSave(@Req() r:AuthRequest,@Param('kind') kind:string,@Param('id') id:string,@Body() b:unknown){return operationalChanges.save(r.identity!,kind,id,b);}
+    @Get('operational-changes/:kind/:id/receipts/:key')
+    operationalReceipt(@Req() r:AuthRequest,@Param('kind') kind:string,@Param('id') id:string,@Param('key') key:string){objectInput(r.query,[]);return operationalChanges.receipt(r.identity!,kind,id,key);}
     @Get('resource-profiles/:kind/:id')
     resourceProfile(@Req() r:AuthRequest,@Param('kind') kind:string,@Param('id') id:string){return resourceProfiles.state(r.identity!,kind,id,r.query);}
     @Post('resource-profiles/:kind/:id')
@@ -1925,7 +1934,7 @@ export async function createStudioApp(
     bodyParser: false,
   });
   app.use(requestIdentity);
-  app.useGlobalFilters(new FinanceClosingExceptionFilter(options.diagnosticSink));
+  app.useGlobalFilters(new OperationalExceptionFilter(options.diagnosticSink));
   // Explicit route policy: newly introduced controllers are denied by default.
   app.useGlobalGuards({
     async canActivate(context) {
@@ -2518,6 +2527,7 @@ export async function createStudioApp(
         if (req.method !== 'GET') auth.csrf(req);
         return true;
       }
+      if(req.path.startsWith('/api/operational-changes/')){requireContributor(req.identity);if(req.method!=='GET'){requireAdministrator(req.identity);auth.csrf(req);}return true;}
       if(req.path.startsWith('/api/resource-profiles/')){requireAdministrator(req.identity);if(req.method!=='GET')auth.csrf(req);return true;}
       if (req.path === '/api/finance' || req.path.startsWith('/api/finance/')) {
         requireAdministrator(req.identity);

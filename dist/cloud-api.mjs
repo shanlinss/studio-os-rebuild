@@ -1,3 +1,4 @@
+import {operationalKind,operationalState,operationalPayload} from './operational-changes.mjs';
 import {createAccessObserver} from './access-session.mjs';
 import {resourceProfileState,resourceProfilePayload,profileKind} from './resource-profiles.mjs';
 import {closingState,closingRecord,closingPayload,closingResult} from './finance-month-closures-contract.mjs';
@@ -54,11 +55,11 @@ function identity(v){if(!record(v)||!string(v.id)||!string(v.username)||!['admin
 function base(v){if(!record(v)||!string(v.id)||!string(v.title))throw new ContractError();return v;}
 function endpointId(id){if(!/^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/.test(id))throw new ContractError('记录标识格式无效。');return id;}
 export function materialModel(raw){
-  base(raw);if(!record(raw.metadata)||!number(raw.version)||(raw.metadata.tags!==undefined&&(!Array.isArray(raw.metadata.tags)||!raw.metadata.tags.every(string))))throw new ContractError();
+  base(raw);if(Object.hasOwn(raw,'archived')&&typeof raw.archived!=='boolean'||Object.hasOwn(raw,'archiveSupported')&&typeof raw.archiveSupported!=='boolean')throw new ContractError();if(!record(raw.metadata)||!number(raw.version)||(raw.metadata.tags!==undefined&&(!Array.isArray(raw.metadata.tags)||!raw.metadata.tags.every(string))))throw new ContractError();
   const meta=raw.metadata;
   return {...raw,tags:[...(meta.tags??[])],note:string(meta.notes)?meta.notes:'',kind:meta.mediaType==='视频'?'视频':meta.category==='标题'?'标题':meta.category==='图片'?'图片':meta.mediaType?'参考笔记':'未分类',
     // Preserve original independent dimensions; never write a guessed inverse mapping.
-    sourceMetadata:{...meta},archiveSupported:false,assetCount:Array.isArray(raw.assets)?raw.assets.length:null};
+    sourceMetadata:{...meta},archived:raw.archived===true,archiveSupported:raw.archiveSupported===true,assetCount:Array.isArray(raw.assets)?raw.assets.length:null};
 }
 export function experimentModel(raw){
   base(raw);if(!string(raw.status)||!number(raw.version)||!Array.isArray(raw.rounds))throw new ContractError();
@@ -157,12 +158,16 @@ export function createCloudApi(fetcher=globalThis.fetch,{allowWrites=false,onAcc
     async navigation(signal){const d=list(await get('/api/navigation',signal));if(!d.every(v=>record(v)&&string(v.id)&&string(v.title)))throw new ContractError();return d;},
     async profile(signal){const d=await get('/api/workbench/profile',signal);if(d.profile===null)return null;if(!record(d.profile)||!string(d.profile.id))throw new ContractError();return d.profile;},
     async materials(signal){return read('/api/materials',signal,v=>list(v).map(materialModel));},
+    async activeMaterials(signal){return (await this.materials(signal)).filter(m=>!m.archived);},
     async material(id,signal){return read('/api/materials/'+endpointId(id),signal,materialModel);},
     async experiments(signal){return read('/api/lab/experiments',signal,v=>list(v).map(experimentModel));},
     async experiment(id,signal){return read('/api/lab/experiments/'+endpointId(id),signal,experimentModel);},
     async tasks(profile,user,signal){if(!profile)return [];return ownTasks(await get('/api/tasks',signal),profile,user.role);},
     async task(id,signal){return read('/api/tasks/'+endpointId(id),signal,taskModel);},
     async todos(signal){return read('/api/workbench/todos',signal,v=>list(v).map(todoModel));},
+    async operationalState(kind,id,offset=0,signal){operationalKind(kind);return read('/api/operational-changes/'+kind+'/'+endpointId(id)+'?offset='+offset,signal,v=>operationalState(v,kind,id));},
+    async saveOperationalChange(kind,id,value){operationalKind(kind);return mutations.send('/api/operational-changes/'+kind+'/'+endpointId(id),'POST',operationalPayload(kind,value));},
+    async operationalReceipt(kind,id,key){operationalKind(kind);const path='/api/operational-changes/'+kind+'/'+endpointId(id);try{const r=await get(path+'/receipts/'+endpointId(key));if(r?.id!==id||r.kind!==kind||!Number.isSafeInteger(r.version)||r.version<1)throw new ContractError();endpointId(r.recordId);mutations.confirmRead(path);return r;}catch(e){if(e.status===404){mutations.confirmRead(path);return null;}throw e;}},
     async resourceProfile(kind,id,offset=0,signal){profileKind(kind);return read('/api/resource-profiles/'+kind+'/'+endpointId(id)+'?offset='+offset,signal,v=>resourceProfileState(v,kind,id));},
     async saveResourceProfile(kind,id,value){profileKind(kind);return mutations.send('/api/resource-profiles/'+kind+'/'+endpointId(id),'POST',resourceProfilePayload(kind,value));},
     async resourceProfileReceipt(kind,id,key){profileKind(kind);const path='/api/resource-profiles/'+kind+'/'+endpointId(id);try{const r=await get(path+'/receipts/'+endpointId(key));if(r?.id!==id||r.kind!==kind||!Number.isSafeInteger(r.version)||r.version<1)throw new ContractError();endpointId(r.recordId);mutations.confirmRead(path);return r;}catch(e){if(e.status===404){mutations.confirmRead(path);return null;}throw e;}},

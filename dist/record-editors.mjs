@@ -1,3 +1,4 @@
+import {createOperationalEditors} from './operational-changes.mjs';
 import {createResourceProfileEditors} from './resource-profiles.mjs';
 import {createFinanceClosingEditors} from './finance-month-closures-editors.mjs';
 import {createFinanceMonthEditors} from './finance-month-review-editors.mjs';
@@ -74,7 +75,7 @@ export function createRecordEditors({api,h,onSaved,notify}){
   if(!dialog.open)dialog.showModal();form.querySelector('input,textarea,select')?.focus();
  }
  async function material(id){
-  const m=id?await api.material(id):null,meta=m?.sourceMetadata||{};
+  const m=id?await api.material(id):null;if(m?.archived)throw new Error('请先恢复归档素材，再编辑。');const meta=m?.sourceMetadata||{};
   if(m&&!Array.isArray(m.storeIds))throw new ContractError('原店铺关联资料不完整，暂不能编辑。');
   mount(m?'编辑素材':'收集新素材',input('title','素材名称',m?.title,'required maxlength="200"')+input('sourceUrl','来源链接',m?.sourceUrl,'type="url" placeholder="https://…"')+`<div class="form-grid">${select('mediaType','内容形式',meta.mediaType||'图文',[['图文','图文'],['视频','视频']])}${select('category','主要参考',meta.category||'',[['','未分类'],...['标题','图片','场景','文案','内页'].map(v=>[v,v])])}</div>`+input('tags','标签（用逗号分开）',(meta.tags||[]).join('，'),'maxlength="1200"')+area('notes','观察与用法',meta.notes,4000)+`<p class="muted">${m?'保留现有店铺关联、附件、来源分类和测试信息。':'先保存名称、来源和观察，随后在详情添加附件。'}</p>`,async f=>{
    const value={title:f.get('title'),sourceUrl:f.get('sourceUrl'),storeIds:m?.storeIds||[],metadata:{...meta,mediaType:f.get('mediaType'),category:f.get('category'),tags:[...new Set(f.get('tags').split(/[,，\n]/).map(v=>v.trim()).filter(Boolean))],notes:f.get('notes')}};
@@ -113,7 +114,7 @@ export function createRecordEditors({api,h,onSaved,notify}){
  }
 
  async function experiment(){
-  const [cap,materials]=await Promise.all([api.capabilities(),api.materials()]);if(cap.materialLabDrafts!==1)throw new ContractError('实验草稿接入尚未完成。');
+  const [cap,materials]=await Promise.all([api.capabilities(),api.activeMaterials()]);if(cap.materialLabDrafts!==1)throw new ContractError('实验草稿接入尚未完成。');
   const requestKey=crypto.randomUUID();
   mount('创建素材实验',input('title','实验名称','','required maxlength="200"')+area('hypothesis','想验证什么')+input('direction','测试方向','','maxlength="100"')+input('testVariable','本轮改变什么','','maxlength="200"')+area('executionConditions','保持哪些执行条件')+input('plannedPublishOn','计划日期（可留空）','','type="date"')+`<fieldset class="material-picker"><legend>参考素材</legend>${materials.map(m=>`<label><input type="checkbox" name="materialIds" value="${h(m.id)}">${h(m.title)}</label>`).join('')||'<p class="muted">请先收集至少一条参考素材。</p>'}</fieldset><p class="muted">先保存想法和参考资料，再进入实验安排执行。</p>`,async f=>{const result=await api.createExperiment({title:f.get('title'),requestKey,materialIds:f.getAll('materialIds'),lab:{hypothesis:f.get('hypothesis'),direction:f.get('direction'),testVariable:f.get('testVariable'),executionConditions:f.get('executionConditions'),plannedPublishOn:f.get('plannedPublishOn')||null}});return {id:result.experimentId};},{kind:'test'},async()=>{const roots=await api.experiments();return roots.find(e=>e.rounds.some(r=>r.requestKey===requestKey))||null;});
  }
@@ -152,6 +153,7 @@ export function createRecordEditors({api,h,onSaved,notify}){
  const cashEditors=createCashEditors({api,h,mount,input,area});
  const sampleCostEditors=createSampleCostEditors({api,h,mount,input,area,select});
  const inventoryCostEditors=createInventoryCostEditors({api,h,mount,input,area,select});
+ const operationalEditors=createOperationalEditors({api,h,mount,input,area});
  const resourceProfileEditors=createResourceProfileEditors({api,h,mount,input,select,area});
  const financeClosingEditors=createFinanceClosingEditors({api,h,mount,area});
  const financeMonthEditors=createFinanceMonthEditors({api,h,mount,area});
@@ -165,6 +167,6 @@ export function createRecordEditors({api,h,onSaved,notify}){
  const commercialEditors=createCommercialProductEditors({api,h,mount,input,area,select});
  const warehouseEditors=createWarehouseEditors({api,h,mount,input,area,select});
  const shootingEditors=createShootingEditors({api,h,mount,input,area,select});
- return {...resourceProfileEditors,...financeClosingEditors,...financeMonthEditors,...stockCorrectionEditors,...cashEditors,...sampleCostEditors,...inventoryCostEditors,...overviewEditors,...expenseAttributionEditors,...operatingFinanceEditors,...costSourcesEditors,...productOpeningEditors,...productPurchaseEditors,...productStockEditors,...commercialEditors,material,product,publication,snapshot,todo,experiment,dispatch,review,conclusion,...shootingEditors,...operations,...warehouseEditors,...warehouseTransferEditors,...accountLifecycleEditors,...inventoryAccessEditors,...equipmentPurchaseEditors,...equipmentAssetsEditors,...phoneCardEditors,...phoneCardFinanceEditors,...attendanceEditors,...leaveEditors,...exceptionEditors,...monthlyEditors,...closureEditors,...payrollEditors,...payrollConfirmationEditors,...personnelEditors};
+ return {...operationalEditors,...resourceProfileEditors,...financeClosingEditors,...financeMonthEditors,...stockCorrectionEditors,...cashEditors,...sampleCostEditors,...inventoryCostEditors,...overviewEditors,...expenseAttributionEditors,...operatingFinanceEditors,...costSourcesEditors,...productOpeningEditors,...productPurchaseEditors,...productStockEditors,...commercialEditors,material,product,publication,snapshot,todo,experiment,dispatch,review,conclusion,...shootingEditors,...operations,...warehouseEditors,...warehouseTransferEditors,...accountLifecycleEditors,...inventoryAccessEditors,...equipmentPurchaseEditors,...equipmentAssetsEditors,...phoneCardEditors,...phoneCardFinanceEditors,...attendanceEditors,...leaveEditors,...exceptionEditors,...monthlyEditors,...closureEditors,...payrollEditors,...payrollConfirmationEditors,...personnelEditors};
 
 }
