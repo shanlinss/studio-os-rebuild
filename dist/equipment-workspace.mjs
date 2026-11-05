@@ -6,6 +6,7 @@ export function createEquipmentWorkspace({api,h,writable,getUser,notify,localTim
  const dialog=document.createElement('dialog');dialog.className='editor wide-editor';dialog.setAttribute('aria-label','设备档案与借还');document.body.append(dialog);
  const $=s=>dialog.querySelector(s),admin=()=>hasSensitive(getUser(),'resources');let controller,request,tab='catalog',offset=0,historyId=null,serial=0,state,timer;
  function close(){controller?.abort();request?.abort();clearTimeout(timer);dialog.close();}
+ window.addEventListener('studio-access-cleared',()=>{controller?.abort();request?.abort();});
  dialog.addEventListener('cancel',e=>{e.preventDefault();close();});
  function controls(){
   $('#equipment-filter').hidden=tab!=='catalog';$('#equipment-loan-filter').hidden=!['own','team'].includes(tab);

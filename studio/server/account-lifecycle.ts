@@ -1,4 +1,4 @@
-import {requirePermission,databaseIdentity} from './permissions';
+import {requirePermission,currentPermission,databaseIdentity} from './permissions';
 import {BadRequestException,ConflictException,ForbiddenException,NotFoundException,UnauthorizedException} from '@nestjs/common';
 import {createHash} from 'node:crypto';
 import type {Identity} from './auth';
@@ -9,9 +9,9 @@ import {objectInput,uuid,version,longText} from './validation';
 const fields='id,username,role,active,version';
 export class AccountLifecycle {
  constructor(private readonly db:StudioDatabase){}
- async receipt(who:Identity,key:string){requirePermission(who,'account_security');uuid(key);const [r]=await this.db.client`SELECT result FROM studio_os.account_lifecycle_events WHERE actor_id=${who.id} AND request_key=${key}`;if(!r)throw new NotFoundException();return r.result;}
+ async receipt(who:Identity,key:string){who=await currentPermission(this.db,who,'account_security');uuid(key);const [r]=await this.db.client`SELECT result FROM studio_os.account_lifecycle_events WHERE actor_id=${who.id} AND request_key=${key}`;if(!r)throw new NotFoundException();return r.result;}
  async save(who:Identity,value:unknown,id?:string){
-  requirePermission(who,'account_security');if(id)uuid(id);
+  who=await currentPermission(this.db,who,'account_security');if(id)uuid(id);
   const keys=id?['requestKey','expectedVersion','password','reason']:['requestKey','username','role','password','memberId','memberVersion','reason'];
   const b=objectInput(value,keys);if(keys.some(k=>!Object.hasOwn(b,k)))throw new BadRequestException('请保留完整账号信息');
   const key=uuid(b.requestKey),reason=longText(b.reason,2000).trim();

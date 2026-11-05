@@ -7,6 +7,7 @@ export function createSampleWorkspace({api,h,writable,getUser,notify,localTime})
  const select=(name,label,value,options)=>`<label>${h(label)}<select name="${name}">${options.map(([id,title])=>`<option value="${h(id)}" ${id===value?'selected':''}>${h(title)}</option>`).join('')}</select></label>`;
  const note=()=>'<label>备注<textarea name="note" maxlength="2000" rows="2"></textarea></label>';
  function close(){if(saving)return;if(dirty){$('[data-discard]').hidden=false;return;}controller?.abort();request?.abort();clearTimeout(timer);dialog.close();}
+ window.addEventListener('studio-access-cleared',()=>{controller?.abort();request?.abort();});
  dialog.addEventListener('cancel',e=>{e.preventDefault();close();});
  function lockToolbar(value){dialog.querySelectorAll('[data-sample-toolbar] input,[data-sample-toolbar] select,[data-sample-toolbar] button').forEach(el=>el.disabled=value);}
  function hideForm(){editing=false;dirty=false;$('#sample-form').hidden=true;lockToolbar(false);}

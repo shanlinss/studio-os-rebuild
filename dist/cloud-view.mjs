@@ -1,3 +1,4 @@
+import {accessStamp,clearAccessSurfaces} from './access-session.mjs';
 import {createResourceProfileViews} from './resource-profiles.mjs';
 import {createFinanceClosingViews} from './finance-month-closures-view.mjs';
 import {createFinanceMonthViews} from './finance-month-review-view.mjs';
@@ -31,8 +32,8 @@ import {planningPages,createPlanningViews} from './planning-view.mjs';
 import {createCloudApi,chinaDate,validDate,taskProgress,metricValue,ApiError} from './cloud-api.mjs';
 const $=s=>document.querySelector(s),h=v=>String(v??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const writable=document.querySelector('meta[name="studio-data-mode"]')?.content==='cloud-connected';
-const api=createCloudApi(globalThis.fetch,{allowWrites:writable}),names=Object.fromEntries(groups.flatMap(g=>g[1]));
-let user=null,profile=null,nav=[],page='daily',controller,detailController,selectedDate=chinaDate();
+const api=createCloudApi(globalThis.fetch,{allowWrites:writable,onAccessDenied:accessDenied}),names=Object.fromEntries(groups.flatMap(g=>g[1]));
+let user=null,profile=null,nav=[],page='daily',controller,detailController,selectedDate=chinaDate(),lastAccessStamp=null,reconciling=null;
 const sourceOrigin=writable?location.origin+'/':'http://[::1]:13102/';
 const state={materials:[],experiments:[],tasks:[],todos:[]};
 const centerIds=['workspace','business','resources','knowledge','people','finance','settings'];
@@ -65,6 +66,20 @@ function navigation(){
   }).join('');
 }
 
+function forgetAccess(login){
+ controller?.abort();detailController?.abort();api.invalidateAccess();
+ clearAccessSurfaces(document,()=>window.dispatchEvent(new Event('studio-access-cleared')));
+ for(const key of Object.keys(state))state[key]=[];user=null;profile=null;nav=[];lastAccessStamp=null;lookupIds.clear();
+ $('nav[aria-label="主要模块"]').innerHTML='';$('#cloud-identity').textContent='登录待恢复';
+ if(login)errorView(new ApiError(401,'登录或授权已变化，请重新登录核对当前范围。'));
+}
+function accessDenied(event){if(!user)return;if(event.status===401){forgetAccess(true);return;}return reconcileAccess();}
+async function reconcileAccess(){
+ if(!user||reconciling)return reconciling;
+ reconciling=(async()=>{try{const current=await api.session();if(!user)return;const inventory=await api.myInventoryAccess().catch(e=>{if([403,404].includes(e.status))return null;throw e;});if(!user)return;if(accessStamp(current,inventory)!==lastAccessStamp){forgetAccess(false);await init();notify('授权范围已更新，已重新读取当前可见资料。');}}catch(e){if(e.status===401&&user)forgetAccess(true);}finally{reconciling=null;}})();return reconciling;
+}
+window.addEventListener('focus',()=>reconcileAccess());
+document.addEventListener('visibilitychange',()=>{if(document.visibilityState==='visible')reconcileAccess();});
 async function init(){
   controller?.abort();const run=new AbortController();controller=run;user=null;$('#main').innerHTML='<p class="muted">正在核对云端登录状态…</p>';
   try{
@@ -74,7 +89,7 @@ async function init(){
       api.myInventoryAccess(run.signal).catch(e=>{if([403,404].includes(e.status))return null;throw e;})
     ]);
     if(run.signal.aborted)return;
-    user={...activeUser,productStockAvailable:inventory?.productOperationsAvailable===true,scopedPackaging:inventory?.quantityOperationsAvailable===true&&inventory.grants.length>0,canConsumePackaging:inventory?.quantityOperationsAvailable===true&&inventory.grants.some(g=>g.canMove)};nav=activeNav;profile=activeProfile;
+    user={...activeUser,productStockAvailable:inventory?.productOperationsAvailable===true,scopedPackaging:inventory?.quantityOperationsAvailable===true&&inventory.grants.length>0,canConsumePackaging:inventory?.quantityOperationsAvailable===true&&inventory.grants.some(g=>g.canMove)};nav=activeNav;profile=activeProfile;lastAccessStamp=accessStamp(activeUser,inventory);
     $('#cloud-identity').innerHTML=`${h(user.username)}<small>${user.superadmin?'超级管理员':user.role==='admin'?'管理员':'员工'} · 云端会话</small>`;
     navigation();lookupIds.add('profile');await route();
   }catch(e){if(e.name!=='AbortError'&&!run.signal.aborted)errorView(e);}

@@ -3,6 +3,7 @@ import {cardMoney,reminderLabels} from './phone-card-finance-contract.mjs';
 export function createPhoneCardFinanceWorkspace({api,h,writable,getUser,notify,localTime}){
  const dialog=document.createElement('dialog');dialog.className='editor wide-editor';dialog.setAttribute('aria-label','手机卡充值与余额');document.body.append(dialog);const $=s=>dialog.querySelector(s);let controller,request,timer,serial=0,cardId,tab='recharges',offset=0,root;
  const close=()=>{controller?.abort();request?.abort();clearTimeout(timer);dialog.close();};dialog.addEventListener('cancel',e=>{e.preventDefault();close();});
+ window.addEventListener('studio-access-cleared',()=>{controller?.abort();request?.abort();});
  async function load(){
   if(!dialog.open)return;request?.abort();request=new AbortController();const signal=AbortSignal.any([controller.signal,request.signal]),current=++serial;$('#card-money-results').textContent='正在读取记录…';$('#card-money-prev').disabled=true;$('#card-money-next').disabled=true;$('#card-money-filters').hidden=tab!=='recharges';
   try{

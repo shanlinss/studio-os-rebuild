@@ -1,3 +1,4 @@
+import {createAccessObserver} from './access-session.mjs';
 import {resourceProfileState,resourceProfilePayload,profileKind} from './resource-profiles.mjs';
 import {closingState,closingRecord,closingPayload,closingResult} from './finance-month-closures-contract.mjs';
 import {scopeState,scopePayload,scopeResult,monthReview} from './finance-month-review-contract.mjs';
@@ -86,18 +87,20 @@ export function taskProgress(t){
   const n=number(t.publishedCount)?t.publishedCount:null,filled=number(t.filledCount)?t.filledCount:null;
   return n===null?'执行进度未提供':`已发布 ${n}${number(t.targetCount)?' / '+t.targetCount:''} 篇${filled===null?'':' · '+filled+' 篇已回填'}`;
 }
-export function createCloudApi(fetcher=globalThis.fetch,{allowWrites=false}={}){
-  const mutations=createMutationGateway(fetcher,{enabled:allowWrites});
+export function createCloudApi(fetcher=globalThis.fetch,{allowWrites=false,onAccessDenied}={}){
+  let mutations;const access=createAccessObserver(fetcher,{onAccessDenied:event=>{if(event.status===401)mutations.clear();return onAccessDenied?.(event);}});fetcher=access.fetch;
+  mutations=createMutationGateway(fetcher,{enabled:allowWrites});
   async function get(path,signal){
     let r;try{r=await fetcher(path,{method:'GET',credentials:'same-origin',cache:'no-store',redirect:'error',signal,headers:{Accept:'application/json'}});}catch(e){if(e.name==='AbortError')throw e;throw new ApiError(0,allowWrites?'工作空间连接暂时中断，请稍后重新读取资料。':'云端连接中断，请检查 SSH 窗口是否仍然开启。');}
     if(r.status===401)mutations.clear();
     if(!r.ok)throw new ApiError(r.status,r.status===401?'登录已失效，请回原工作台登录后重试。':r.status===403?'当前账号没有读取这项资料的权限。':'云端读取失败，请重试。');
-    try{return await r.json();}catch{throw new ContractError();}
+    try{return await r.json();}catch(e){if(e.name==='AbortError')throw e;throw new ContractError();}
   }
   async function read(path,signal,adapt){const value=adapt(await get(path,signal));mutations.confirmRead(path);return value;}
   async function labCapability(){if(!allowWrites)throw new ApiError(405,'当前为只读预览，未发送保存请求。');const c=await get('/api/workbench/capabilities');if(!record(c)||c.materialLabDrafts!==1)throw new ContractError('实验草稿与执行安排兼容尚未接入。');}
   return {
-    async asset(kind,owner,asset,context={},signal){let r;try{r=await fetcher(assetPath(kind,owner,asset,context),{method:'GET',credentials:'same-origin',cache:'no-store',redirect:'error',signal});}catch(e){if(e.name==='AbortError')throw e;throw new ApiError(0,'附件读取中断，请重试。');}if(!r.ok){if(r.status===401)mutations.clear();throw new ApiError(r.status,r.status===401?'登录已失效，请重新登录。':r.status===403?'当前账号无权读取这个附件。':'附件暂不可读取，请刷新资料核对。');}return readMedia(r,kind==='expense'?{maxBytes:expenseReceiptMaxBytes,imagesOnly:true}:{});},
+    invalidateAccess(){access.invalidate();mutations.clear();},
+    async asset(kind,owner,asset,context={},signal){let r;try{r=await fetcher(assetPath(kind,owner,asset,context),{method:'GET',credentials:'same-origin',cache:'no-store',redirect:'error',signal});}catch(e){if(e.name==='AbortError')throw e;throw new ApiError(0,'附件读取中断，请重试。');}if(!r.ok){if(r.status===401)mutations.clear();throw new ApiError(r.status,r.status===401?'登录已失效，请重新登录。':r.status===403?'当前账号无权读取这个附件。':'附件暂不可读取，请刷新资料核对。');}return access.protect(readMedia(r,kind==='expense'?{maxBytes:expenseReceiptMaxBytes,imagesOnly:true}:{}));},
     async uploadExpenseReceipt(id,file,version){const f=mediaUpload(file,{imagesOnly:true,maxBytes:expenseReceiptMaxBytes});return mutations.send('/api/finance/expenses/'+endpointId(id)+'/receipts','POST',f.file,{binary:true,headers:{'Content-Type':f.mime,'x-file-name':encodeURIComponent(f.name),'x-expected-version':String(expectedVersion(version))}});},
     async removeExpenseReceipt(id,receipt,version){return mutations.send(assetPath('expense',id,receipt),'DELETE',{expectedVersion:expectedVersion(version)});},
     async financeEvents(id,signal){return read('/api/finance/events/'+endpointId(id),signal,v=>{if(!Array.isArray(v)||v.some(e=>!record(e)||typeof e.action!=='string'||typeof e.actor!=='string'||!Number.isFinite(Date.parse(e.createdAt))))throw new ContractError();return v;});},
@@ -141,9 +144,9 @@ export function createCloudApi(fetcher=globalThis.fetch,{allowWrites=false}={}){
     async createTodo(value){if(!allowWrites)throw new ApiError(405,'当前为只读预览，未发送保存请求。');const body=todoPayload(value);await this.capabilities();return mutations.send('/api/workbench/todos','POST',body);},
     async updateTodo(id,value,version){if(!allowWrites)throw new ApiError(405,'当前为只读预览，未发送保存请求。');const path='/api/workbench/todos/'+endpointId(id),body=todoPayload(value,version);await this.capabilities();return mutations.send(path,'PATCH',body);},
     async dailyAttendance(signal){const v=await read('/api/attendance/daily',signal,dailyAttendanceState);mutations.confirmRead('/api/attendance/end-work');return v;},
-    async endWork(key,id,version){const v=await mutations.send('/api/attendance/end-work','POST',endWorkPayload(key,id,version));try{endWorkResult(v,id);}catch(e){e.uncertain=true;throw e;}mutations.clear();return v;},
-    async logout(){const result=await mutations.send('/api/logout','POST',{});mutations.clear();return result;},
-    async login(username,password){const d=await mutations.send('/api/login','POST',{username,password},{login:true});return identity(d.user);},
+    async endWork(key,id,version){const v=await mutations.send('/api/attendance/end-work','POST',endWorkPayload(key,id,version));try{endWorkResult(v,id);}catch(e){e.uncertain=true;throw e;}mutations.clear();access.invalidate();return v;},
+    async logout(){const result=await mutations.send('/api/logout','POST',{});mutations.clear();access.invalidate();return result;},
+    async login(username,password){if(allowWrites)access.invalidate();const d=await mutations.send('/api/login','POST',{username,password},{login:true});return identity(d.user);},
     async createMaterial(value){return mutations.send('/api/materials','POST',materialPayload(value));},
     async updateMaterial(id,value,version){return mutations.send('/api/materials/'+endpointId(id),'PATCH',materialPayload(value,version));},
     async createProduct(value){return mutations.send('/api/products','POST',productPayload(value));},
@@ -340,7 +343,7 @@ export function createCloudApi(fetcher=globalThis.fetch,{allowWrites=false}={}){
     async payrollExportHistory(month,offset=0,signal){const q=new URLSearchParams({month:validMonth(month),offset:String(offset)});return read('/api/payroll/exports?'+q,signal,v=>{pagedRows(v);for(const r of v.rows){endpointId(r.id);if(!Array.isArray(r.names)||r.names.some(n=>typeof n!=='string'))throw new ContractError();}return v;});},
     async payrollExport(value){return mutations.send('/api/payroll/exports','POST',exportPayload(value),{responseType:'workbook'});},
     async payrollExportReceipt(key){try{const r=await get('/api/payroll/export-receipts/'+endpointId(key));endpointId(r?.id);validMonth(r.month);mutations.confirmRead('/api/payroll/exports');return r;}catch(e){if(e.status===404){mutations.confirmRead('/api/payroll/exports');return null;}throw e;}},
-    async payrollExportFile(id,signal){if(!allowWrites)throw new ApiError(405,'只读预览不提供私人导出文件。');return readWorkbook(await fetcher('/api/payroll/exports/'+endpointId(id),{credentials:'same-origin',cache:'no-store',redirect:'error',signal}));},
+    async payrollExportFile(id,signal){if(!allowWrites)throw new ApiError(405,'只读预览不提供私人导出文件。');return access.protect(readWorkbook(await fetcher('/api/payroll/exports/'+endpointId(id),{credentials:'same-origin',cache:'no-store',redirect:'error',signal})));},
     async payrollState(month,memberId,signal){const q=new URLSearchParams({month:validMonth(month)});if(memberId)q.set('memberId',endpointId(memberId));return read('/api/payroll/state?'+q,signal,payrollState);},
     async payrollHistory(month,memberId,offset=0,salaries=false,signal){const q=new URLSearchParams({memberId:endpointId(memberId),offset:String(offset)});if(!salaries)q.set('month',validMonth(month));return read('/api/payroll/'+(salaries?'salaries':'drafts')+'?'+q,signal,v=>payrollHistory(v,salaries));},
     async payrollSave(value,salaries=false){return mutations.send('/api/payroll/'+(salaries?'salaries':'drafts'),'POST',payrollPayload(value,salaries));},

@@ -7,6 +7,7 @@ export function createPhoneCardWorkspace({api,h,writable,getUser,notify,localTim
  const close=()=>{controller?.abort();request?.abort();clearTimeout(timer);dialog.close();};dialog.addEventListener('cancel',e=>{e.preventDefault();close();});
  const facts=pairs=>`<dl class="record-facts">${pairs.map(([name,value])=>`<div><dt>${h(name)}</dt><dd>${h(value??'未关联')}</dd></div>`).join('')}</dl>`;
  function identityAllowed(){return hasSensitive(getUser(),'resource_identity');}
+ window.addEventListener('studio-access-cleared',()=>{controller?.abort();request?.abort();});
  async function load(){
   if(!dialog.open)return;request?.abort();request=new AbortController();const signal=AbortSignal.any([controller.signal,request.signal]),current=++serial;
   $('#card-filters').hidden=mode!=='list';$('#card-reminder-filter').hidden=mode!=='reminders';$('#card-back').hidden=mode==='list';$('#card-results').textContent='正在读取手机卡…';$('#card-prev').disabled=true;$('#card-next').disabled=true;
