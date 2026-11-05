@@ -44,7 +44,7 @@ function detail() {
 function openDetail(id) { activeId = id; detail(); $('#detail').showModal(); }
 function changeDate(delta) { const date = new Date(selectedDate + 'T12:00:00Z'); date.setUTCDate(date.getUTCDate() + delta); selectedDate = date.toISOString().slice(0,10); render(); }
 $('#add-task').addEventListener('click', () => openEditor());
-$('#add-review').addEventListener('click', () => openEditor('测试复盘'));
+$('#add-review')?.addEventListener('click', () => openEditor('测试复盘'));
 $('#today').addEventListener('click', () => { selectedDate = localToday(); render(); });
 $('#prev-date').addEventListener('click', () => changeDate(-1)); $('#next-date').addEventListener('click', () => changeDate(1));
 $('#work-date').addEventListener('change', e => { if (e.target.value && !e.target.validity.badInput) { selectedDate = e.target.value; render(); } });

@@ -25,7 +25,7 @@ test('local preview allows only known GETs and never forwards a write or credent
   assert.equal((await request(port,'/api/materials',{headers:{Host:'attacker.invalid'}})).status,403);
   for(const path of ['/.env','/../docs/requirements.md','/%2e%2e/docs/requirements.md','/app.js'])assert.equal((await request(port,path)).status,404);
   assert.equal(seen.length,before,'blocked traffic must not reach the upstream');
-  for(const module of ['/account-lifecycle-contract.mjs','/account-lifecycle-editors.mjs','/admin-permissions.mjs','/daily-attendance.mjs'])assert.equal((await request(port,module)).status,200);
+  for(const module of ['/business-reminders.mjs','/account-lifecycle-contract.mjs','/account-lifecycle-editors.mjs','/admin-permissions.mjs','/daily-attendance.mjs'])assert.equal((await request(port,module)).status,200);
   assert.equal((await request(port,'/api/attendance/end-work',{method:'POST'})).status,405);assert.equal((await request(port,'/api/attendance/daily?owner=other')).status,400);assert.equal(seen.length,before);
   assert.equal((await request(port,'/api/attendance/daily')).status,200);
   const read=await request(port,'/api/materials',{headers:{Cookie:cookie,'Sec-Fetch-Site':'same-origin'}});assert.equal(read.status,200);assert.equal(read.headers['cache-control'],'no-store');assert.equal(seen.at(-1).method,'GET');

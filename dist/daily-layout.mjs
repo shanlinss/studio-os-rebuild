@@ -11,7 +11,7 @@ export const dailyLayout = `
 <div class="list-foot"><span class="tiny-dot"></span> 点击事项查看详情与相关资料 <span>每一步，都是积累。</span></div>
 </section>
 <aside class="right-column">
-<section class="focus-card"><span class="section-kicker">TODAY’S FOCUS</span><div class="focus-art" aria-hidden="true"><div class="art-sheet"><i></i><i></i><i></i><b>✓</b></div><span class="art-star">✳</span><span class="art-circle"></span></div><h2>留一点时间，<br>给今天的复盘。</h2><p>今天验证了什么？<br>哪些素材值得下次再试？</p><button id="add-review">安排一次复盘 <span>↗</span></button></section>
+<section class="focus-card business-reminders-card" id="business-reminders" aria-label="经营提醒"><span class="section-kicker">BUSINESS REMINDERS</span><h2>经营提醒</h2><p class="muted">连接工作空间后核对当前业务提醒，示例页面不展示虚构数量。</p></section>
 <section class="flow-card"><h2>让工作连起来</h2><ol><li><span>01</span><div><b>看清今天的安排</b><p>先处理有明确时间的事项</p></div></li><li><span>02</span><div><b>带着资料开始做</b><p>从事项详情查看素材与测试</p></div></li><li><span>03</span><div><b>完成后留下结果</b><p>写下完成情况，方便再回看</p></div></li></ol></section>
 <div class="preview-note">这是供你确认方向的交互原型。<br>修改仅保存在当前浏览器，尚未接入团队真实数据。</div>
 </aside>
